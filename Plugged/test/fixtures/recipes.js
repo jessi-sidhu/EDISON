@@ -56,6 +56,32 @@ const SERIES_2 = [
   { tool: 'add_wire', from: 'a10', to: 'tn_10', color: 'black' },
 ];
 
+// One push button switching two separate LED branches (issue #52), the
+// layout pinned on the issue at C=2. One lead per hole; rail wires in row a.
+//   col 2:  a2 wire from tp_3, b2 button
+//   col 5:  b5 button, a5 wire to a8, c5 wire to a16 (the button's output column)
+//   branch 1 (red):   a8 -> b8 resistor b8-b12, LED anode c12 / cathode c14, a14 -> tn_14
+//   branch 2 (green): a16 -> b16 resistor b16-b20, LED anode c20 / cathode c22, a22 -> tn_22
+// Known answer: released, the circuit is open (no LED lit). Pressed: red
+// (9 - 2.0) / 470 = 14.9 mA, green (9 - 2.2) / 470 = 14.5 mA (the 1 mOhm
+// switch is negligible).
+const BUTTON_BRANCHES = [
+  { tool: 'delete_all' },
+  { tool: 'place_battery' },
+  { tool: 'add_wire', from: 'BAT1.0', to: `tp_${HIGHEST_COL}`, color: 'red' },
+  { tool: 'add_wire', from: 'BAT1.1', to: `tn_${HIGHEST_COL}`, color: 'black' },
+  { tool: 'place_button', holeA: 'b2', holeB: 'b5' },
+  { tool: 'add_wire', from: 'tp_3', to: 'a2', color: 'red' },
+  { tool: 'add_wire', from: 'a5', to: 'a8', color: 'green' },
+  { tool: 'place_resistor', holeA: 'b8', holeB: 'b12' },
+  { tool: 'place_led', holeA: 'c14', holeB: 'c12', color: 'red' },
+  { tool: 'add_wire', from: 'a14', to: 'tn_14', color: 'black' },
+  { tool: 'add_wire', from: 'c5', to: 'a16', color: 'green' },
+  { tool: 'place_resistor', holeA: 'b16', holeB: 'b20' },
+  { tool: 'place_led', holeA: 'c22', holeB: 'c20', color: 'green' },
+  { tool: 'add_wire', from: 'a22', to: 'tn_22', color: 'black' },
+];
+
 // ── Actions -> the simulator's input ──────────────────────────
 // What Chat.acceptBuild does to the board, reduced to what analyze() reads:
 // type, pins (for arity) and holeRefs for parts; startHole/endHole or
@@ -115,4 +141,4 @@ function holesUsed(actions) {
   return out.map(s => String(s).toLowerCase()).filter(s => HOLE.test(s));
 }
 
-module.exports = { HIGHEST_COL, ONE_LED, PARALLEL_2, SERIES_2, toCircuit, holesUsed };
+module.exports = { HIGHEST_COL, ONE_LED, PARALLEL_2, SERIES_2, BUTTON_BRANCHES, toCircuit, holesUsed };

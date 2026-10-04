@@ -310,6 +310,61 @@ test('the prompt carries that buzzer layout on one line', () => {
     `no prompt line has all of: ${BUZZER_LAYOUT.join(' | ')}`);
 });
 
+// ── #52: a hand-written recipe for one button switching separate branches ──
+// Real DeepSeek runs of "a red LED and a green LED in parallel, each with its
+// own resistor, both switched on and off by one push button" improvised the
+// layout and got it wrong about half the time. The prompt gets a worked
+// recipe next to SEPARATE BRANCHES, at C=2, with every hole named (the issue's
+// pinned layout, test/fixtures/recipes.js → BUTTON_BRANCHES):
+//   button b2–b5 fed by tp_3 -> a2; a5 -> a8 feeds branch 1 (resistor b8–b12,
+//   LED cathode c14 / anode c12, a14 -> tn_14); c5 -> a16 feeds branch 2
+//   (resistor b16–b20, LED cathode c22 / anode c20, a22 -> tn_22).
+// Its heading matches /RECIPE.*BUTTON.*BRANCH/i; the section runs to the next
+// blank line. Steps use the recipes' own forms: "place_x: holeA=.., holeB=.."
+// and "from -> to". The button's ai.guide points to the recipe.
+
+function buttonBranchesRecipe() {
+  const lines = prompt().split('\n');
+  const at = lines.findIndex(l => /RECIPE.*BUTTON.*BRANCH/i.test(l));
+  assert.ok(at >= 0, 'the prompt has no recipe heading for one button switching separate branches (/RECIPE.*BUTTON.*BRANCH/i)');
+  const end = lines.findIndex((l, i) => i > at && l.trim() === '');
+  return lines.slice(at, end < 0 ? undefined : end);
+}
+
+const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const BRANCH_PLACES = [
+  ['place_button',   'b2',  'b5'],
+  ['place_resistor', 'b8',  'b12'],
+  ['place_led',      'c14', 'c12'],   // holeA = cathode, holeB = anode
+  ['place_resistor', 'b16', 'b20'],
+  ['place_led',      'c22', 'c20'],
+];
+const BRANCH_WIRES = [['tp_3', 'a2'], ['a5', 'a8'], ['a14', 'tn_14'], ['c5', 'a16'], ['a22', 'tn_22']];
+
+test('the prompt has a recipe for one button switching separate branches, placing every part at its pinned holes (#52)', () => {
+  const section = buttonBranchesRecipe();
+  const missing = BRANCH_PLACES.filter(([tool, a, b]) => !section.some(l =>
+    new RegExp(`\\b${tool}\\b`).test(l) && new RegExp(`holeA=${a}\\b`).test(l) && new RegExp(`holeB=${b}\\b`).test(l)));
+  assert.deepEqual(missing.map(([t, a, b]) => `${t}: holeA=${a}, holeB=${b}`), [], `missing steps in:\n${section.join('\n')}`);
+});
+
+test('the button-branches recipe names every wire, including a5 -> a8 and c5 -> a16 from the button\'s output column (#52)', () => {
+  const text = buttonBranchesRecipe().join('\n');
+  const missing = BRANCH_WIRES.filter(([f, t]) => !new RegExp(`\\b${esc(f)}\\s*->\\s*${esc(t)}\\b`).test(text));
+  assert.deepEqual(missing.map(([f, t]) => `${f} -> ${t}`), [], `missing wires in:\n${text}`);
+  assert.match(text, /BAT1\.0\s*->\s*tp_(\{N\}|\d+)/, 'the recipe wires BAT1.0 to the + rail');
+  assert.match(text, /BAT1\.1\s*->\s*tn_(\{N\}|\d+)/, 'the recipe wires BAT1.1 to the - rail');
+});
+
+test("the button's ai.guide points to the one-button branches recipe (#52)", () => {
+  const guide = Parts.get('button').ai.guide;
+  assert.equal(typeof guide, 'string', 'the button needs an ai.guide');
+  assert.match(guide, /one button/i, `the guide should mention one button: ${guide}`);
+  assert.match(guide, /branch/i, `the guide should mention branches: ${guide}`);
+  assert.match(guide, /recipe/i, `the guide should point to the recipe: ${guide}`);
+  assert.ok(prompt().includes(`- place_button: ${guide}`), 'the full prompt carries the button guide');
+});
+
 // ── Source check ────────────────────────────────────────────────────────────
 
 test('server.js builds its tools from the registry, with no per-type tables left', () => {

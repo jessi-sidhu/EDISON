@@ -221,8 +221,10 @@
   // One linear solve with every mode block in a fixed mode.
   // grounds: Set of nodes held at 0 V, one per connected circuit.
   // modeOf:  Map(element entry -> 'off' | 'on' | 'breakdown').
+  // skip:    Set of V element entries left out (the later sources of a
+  //          parallel group, parallelSources); optional.
   // Returns { v(node), vCurrent: Map(V element entry -> amps) } or null.
-  function solveMNA(graph, grounds, modeOf) {
+  function solveMNA(graph, grounds, modeOf, skip) {
     const index = new Map();
     const add = n => { if (n != null && !grounds.has(n) && !index.has(n)) index.set(n, index.size); };
     graph.forEach(g => {
@@ -230,7 +232,7 @@
       if (g.part) g.part.els.forEach(e => e.nodes.forEach(add));
     });
     const els = allElements(graph);
-    const vs  = els.filter(e => e.el.kind === 'V');
+    const vs  = els.filter(e => e.el.kind === 'V' && !(skip && skip.has(e)));
     const N = index.size, size = N + vs.length;
     const A = Array.from({ length: size }, () => new Array(size).fill(0));
     const b = new Array(size).fill(0);
@@ -419,6 +421,52 @@
     return { label, values, controls, pins, current: {}, modes: {}, open: {} };
   }
 
+  // ── Parallel sources (issue #50) ────────────────────────────
+  //  V elements whose + and − land on the same two nodes are one group,
+  //  in board order. Same polarity and voltages within 1 mV: only the
+  //  first is stamped (the rest go in skip) and the group's current is
+  //  split evenly after the solve. Otherwise the group would fight, and
+  //  `fight` is the one line that says so.
+  //  Returns { groups: [[V element entry]], skip: Set, info: [text], fight }.
+  const SAME_VOLTS = 1e-3;
+  const listNames = ns => (ns.length < 3 ? ns.join(' and ') : ns.slice(0, -1).join(', ') + ' and ' + ns[ns.length - 1]);
+
+  function parallelSources(graph) {
+    const byPair = new Map();
+    graph.forEach((g, i) => {
+      if (!g.part) return;
+      g.part.els.forEach(e => {
+        if (e.el.kind !== 'V') return;
+        const key = e.nodes.slice(0, 2).sort().join('|');
+        if (!byPair.has(key)) byPair.set(key, []);
+        byPair.get(key).push({ e, i });
+      });
+    });
+    const out = { groups: [], skip: new Set(), info: [], fight: null };
+    const name = i => bareResult(graph, i).label;
+    const volts = e => e.el.volts || 0;
+    for (const members of byPair.values()) {
+      if (members.length < 2) continue;
+      const [first, ...rest] = members;
+      const flipped = rest.find(x => x.e.nodes[0] !== first.e.nodes[0]);
+      if (flipped) {
+        out.fight = out.fight || `  ⚠ ${name(first.i)} and ${name(flipped.i)} are wired straight across each other, + to −. ` +
+          'Batteries facing opposite ways would fight. Give each its own rails or remove one.';
+        continue;
+      }
+      const other = rest.find(x => Math.abs(volts(x.e) - volts(first.e)) > SAME_VOLTS);
+      if (other) {
+        out.fight = out.fight || `  ⚠ ${name(first.i)} (${volts(first.e)} V) and ${name(other.i)} (${volts(other.e)} V) are wired straight across each other. ` +
+          'Different voltages in parallel would fight. Give each its own rails or remove one.';
+        continue;
+      }
+      out.groups.push(members.map(x => x.e));
+      rest.forEach(x => out.skip.add(x.e));
+      out.info.push(`  ${listNames(members.map(x => name(x.i)))} are in parallel (${volts(first.e)} V each), so they share the load.`);
+    }
+    return out;
+  }
+
   // ── Pure: analyze ────────────────────────────────────────────
   //
   //  components + wires in, numbers and report lines out. Returns:
@@ -496,12 +544,19 @@
       return done({ status: 'ok', lines: withHeads(null), shorted: true });
     }
 
+    // Sources straight across each other: one stamped, or a fight.
+    const parallel = parallelSources(graph);
+    if (parallel.fight) {
+      lines.push({ text: parallel.fight, cls: 'sim-err' });
+      return done({ status: 'unsolvable', lines: withHeads(null) });
+    }
+
     // Every mode block (D element) in board order, and the loop that settles them.
     const { grounds, live } = groundCircuits(graph);
     const blockEls = els.filter(e => e.el.kind === 'D');
     const blocks   = blockEls.map(e => ({ initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
     const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]));
-    const solveFor = modes => solveMNA(graph, grounds, modesOf(modes));
+    const solveFor = modes => solveMNA(graph, grounds, modesOf(modes), parallel.skip);
 
     const solved = settleModes(blocks, solveFor);
     if (!solved) {
@@ -514,6 +569,14 @@
     }
     const { sol } = solved;
     const modeOf  = modesOf(solved.modes);
+    // Amps through each stamped source, read before the split below, so a
+    // parallel group counts its total (a short is a short however shared).
+    const sourceAmps = [...sol.vCurrent.values()].map(Math.abs);
+    // Each source of a parallel group carries an even share of its current.
+    parallel.groups.forEach(group => {
+      const share = sol.vCurrent.get(group[0]) / group.length;
+      group.forEach(e => sol.vCurrent.set(e, share));
+    });
     // What each mode block would see on its own: every block off. Leaving
     // the others on would let a parallel LED pin the shared node near Vf.
     const openSol = blockEls.length ? solveFor(blockEls.map(() => 'off')) : sol;
@@ -534,7 +597,6 @@
 
     // A source shorted through a part's mode block: that part's warnings
     // say why, the first as the error and the rest as advice.
-    const sourceAmps = els.filter(e => e.el.kind === 'V').map(e => Math.abs(sol.vCurrent.get(e)));
     if (sourceAmps.some(a => a > SHORT_AMPS)) {
       const k = graph.findIndex(g => g.part &&
         g.part.els.some(e => modeOf.has(e) && Math.abs(elementAmps(e, sol, modeOf.get(e))) > SHORT_AMPS));
@@ -543,6 +605,8 @@
       else lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
       return done({ status: 'ok', lines: withHeads(results), nodeVoltages, currents, shorted: true, voltageAt, parts }, extra);
     }
+
+    parallel.info.forEach(text => lines.push({ text, cls: 'sim-info' }));
 
     // One rule for every part: its own line(r, m) if it has one, else an
     // ON line when measure() says on; then each warning (an error while on,

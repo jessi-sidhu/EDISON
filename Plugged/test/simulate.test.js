@@ -224,7 +224,9 @@ test('batteries wired straight together are unsolvable, not a crash', () => {
   const r = Sim.analyze([a, b], []);
 
   assert.equal(r.status, 'unsolvable');
-  assert.ok(hasLine(r, 'cannot be solved'), texts(r).join(' | '));
+  // #50: 9 V and 6 V on the same rails now get their own line naming both,
+  // in place of the generic "cannot be solved" one.
+  assert.ok(hasLine(r, 'are wired straight across each other. Different voltages in parallel would fight.'), texts(r).join(' | '));
 });
 
 // ── Linear solver ─────────────────────────────────────────────
@@ -1482,4 +1484,206 @@ test('summary: the buzzer reads "buzzer ON (sounding), 17.6 mA", its pins lead1 
   assertLine(onBoard, /^ {2}- BAT1 pin 0 \(tp_2\): 9\.00 V$/, 'battery + on the rail, no role');
   assertLine(onBoard, /^ {2}- BAT1 pin 1 \(tn_2\): 0\.00 V$/, 'battery − on the rail, no role');
   assertLine(onBoard, /^ {2}- R1 pin 0 \(a6, lead1\): 9\.00 V$/, 'resistor pin role');
+});
+
+// ── Batteries in parallel, issue #50 ─────────────────────────────────────
+//  Decision (last comment on #50): detect parallel sources, don't add an
+//  internal resistance, so every existing number stays exact.
+//  - Sources whose + and − land on the same two nodes form a group
+//    (opposite polarity is the same pair, with a sign).
+//  - Equal voltages (within 1 mV): only the earliest-placed source is
+//    stamped; the group's current is split evenly, so each battery's
+//    parts[label].m.current (and currents[i]) is its share, and its summary
+//    line says "supplying x mA". Status 'ok', plus ONE sim-info line:
+//      `BAT1 and BAT2 are in parallel (9 V each), so they share the load.`
+//  - Unequal voltages: status 'unsolvable', parts {}, and one sim-err line:
+//      `⚠ BAT1 (9 V) and BAT2 (6 V) are wired straight across each other. Different voltages in parallel would fight. Give each its own rails or remove one.`
+//  - Opposite polarity (the same fight, text chosen by the test-writer):
+//      `⚠ BAT1 and BAT2 are wired straight across each other, + to −. Batteries facing opposite ways would fight. Give each its own rails or remove one.`
+//  - Any other singular case keeps "Two batteries may be wired straight into each other."
+//  Lines are compared trimmed, so the usual two-space indent is up to the builder.
+
+const PARALLEL_9V = 'BAT1 and BAT2 are in parallel (9 V each), so they share the load.';
+const FIGHT_9_6   = '⚠ BAT1 (9 V) and BAT2 (6 V) are wired straight across each other. Different voltages in parallel would fight. Give each its own rails or remove one.';
+const FIGHT_FLIP  = '⚠ BAT1 and BAT2 are wired straight across each other, + to −. Batteries facing opposite ways would fight. Give each its own rails or remove one.';
+const GENERIC_SINGULAR = 'Two batteries may be wired straight into each other';
+
+// The labelled series circuit (BAT1 on tp/tn at column 2, R1 470 Ω, red LED1),
+// plus more batteries on the same tp/tn rails at columns 4, 6, … Each extra
+// is { voltage, flip }: flip wires its + to tn and its − to tp.
+function parallelSeries(...extras) {
+  const { components, wires } = labelledSeries();
+  extras.forEach((x, k) => {
+    const bat = offBoardBattery(`BAT${k + 2}`, x.voltage ? { voltage: x.voltage } : undefined);
+    const col = 3 + 2 * k;
+    components.push(bat);
+    wires.push(batWire(bat, 0, h(col, x.flip ? 'tn' : 'tp')), batWire(bat, 1, h(col, x.flip ? 'tp' : 'tn')));
+  });
+  return { components, wires };
+}
+
+const trimmed = r => texts(r).map(t => t.trim());
+function exactlyOne(r, text) {
+  const hits = r.lines.filter(l => l.text.trim() === text);
+  assert.equal(hits.length, 1, `expected exactly one line "${text}"; got:\n${texts(r).join('\n')}`);
+  return hits[0];
+}
+
+// One battery alone: the numbers the parallel groups must reproduce exactly.
+function oneBattery() {
+  const r = Sim.analyze(...Object.values(labelledSeries()));
+  assert.equal(r.status, 'ok');
+  return r;
+}
+
+test('two 9 V batteries on the same rails share the load: ok, LED1 at the one-battery 14.8904 mA, each battery 7.4452 mA (#50)', () => {
+  const one = oneBattery();
+  const r = Sim.analyze(...Object.values(parallelSeries({})));
+
+  assert.equal(r.status, 'ok', trimmed(r).join(' | '));
+  assert.ok(!hasLine(r, GENERIC_SINGULAR), texts(r).join(' | '));
+  const LED1 = part(r, 'LED1');
+  assert.equal(LED1.m.on, true);
+  assert.ok(Math.abs(LED1.m.current - part(one, 'LED1').m.current) < 1e-3,
+    `LED1 the same as with one battery within 1e-6 A: ${LED1.m.current} vs ${part(one, 'LED1').m.current} mA`);
+  assert.ok(Math.abs(LED1.m.current - 14.8904) < 1e-3, `LED1 (9 − Vf) / 470: ${LED1.m.current}`);
+  assert.ok(Math.abs(ledI(r, 2) - ledI(one, 2)) < 1e-6, `currents[2] unchanged: ${ledI(r, 2)} vs ${ledI(one, 2)}`);
+  assert.ok(hasLine(r, 'LED ON  (14.9 mA)'), texts(r).join(' | '));
+
+  const half = part(one, 'BAT1').m.current / 2;
+  for (const [label, i] of [['BAT1', 0], ['BAT2', 3]]) {
+    const B = part(r, label);
+    assert.ok(Math.abs(B.m.current - 7.4452) < 1e-3, `${label}.m.current is half the load, 7.4452 mA: ${B.m.current}`);
+    assert.ok(Math.abs(B.m.current - half) < 1e-3, `${label}.m.current = one battery's / 2 (${half}): ${B.m.current}`);
+    assert.ok(Math.abs(r.currents[i] - one.currents[0] / 2) < 1e-6, `currents[${i}] (${label}) is half of ${one.currents[0]}: ${r.currents[i]}`);
+  }
+  assert.ok(Math.abs(part(r, 'BAT1').m.current + part(r, 'BAT2').m.current - LED1.m.current) < 1e-3, 'the shares add up to the load');
+
+  nearV(vAt(r, h(40, 'tp')), 9, 'the + rail, from BAT1.1');
+  nearV(vAt(r, h(40, 'tn')), 0, 'the − rail is ground');
+
+  const info = exactlyOne(r, PARALLEL_9V);
+  assert.equal(info.cls, 'sim-info');
+  assert.deepStrictEqual(plainLines(r).slice(0, 2), [
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: 'Battery 2: 9V', cls: 'sim-info' },
+  ], 'the headlines are unchanged');
+});
+
+test('summary of two 9 V batteries in parallel: each is "supplying 7.4 mA", LED1 14.9 mA, and the share line (#50)', () => {
+  const lines = summary(...Object.values(parallelSeries({})));
+  assert.match(lines[0], /^Status: solved\. Voltages are measured from BAT1\.1\b/, show(lines));
+  assertLine(lines, /^- BAT1: 9\.00 V battery, supplying 7\.4 mA$/, 'BAT1 supplies half');
+  assertLine(lines, /^- BAT2: 9\.00 V battery, supplying 7\.4 mA$/, 'BAT2 supplies half');
+  assertLine(lines, /^- LED1: LED ON \(lit\), 14\.9 mA$/, 'LED1 unchanged');
+  assertLine(lines, /^- R1: 470 ohm resistor, 14\.9 mA$/, 'R1 unchanged');
+  assert.ok(lines.includes('- ' + PARALLEL_9V), `the share line in the messages${show(lines)}`);
+});
+
+test('three 9 V batteries in parallel: each supplies a third, the LED is unchanged (#50)', () => {
+  const one = oneBattery();
+  const r = Sim.analyze(...Object.values(parallelSeries({}, {})));
+
+  assert.equal(r.status, 'ok', trimmed(r).join(' | '));
+  assert.ok(Math.abs(part(r, 'LED1').m.current - part(one, 'LED1').m.current) < 1e-3,
+    `LED1 the same as with one battery: ${part(r, 'LED1').m.current}`);
+  const third = part(one, 'BAT1').m.current / 3;
+  for (const label of ['BAT1', 'BAT2', 'BAT3']) {
+    const I = part(r, label).m.current;
+    assert.ok(Math.abs(I - 4.9635) < 1e-3 && Math.abs(I - third) < 1e-3, `${label} supplies a third (${third} mA): ${I}`);
+  }
+  assert.ok(!hasLine(r, GENERIC_SINGULAR), texts(r).join(' | '));
+});
+
+test('9 V and 6 V on the same rails: unsolvable, one line naming both, no readings (#50)', () => {
+  const { components, wires } = parallelSeries({ voltage: 6 });
+  const r = Sim.analyze(components, wires);
+
+  assert.equal(r.status, 'unsolvable', trimmed(r).join(' | '));
+  const warn = exactlyOne(r, FIGHT_9_6);
+  assert.equal(warn.cls, 'sim-err');
+  assert.ok(!hasLine(r, GENERIC_SINGULAR), `the specific line replaces the generic one: ${texts(r).join(' | ')}`);
+  assert.deepStrictEqual(r.parts, {});
+
+  const lines = summary(components, wires);
+  assert.match(lines[0], /^Status: unsolvable\./, show(lines));
+  assert.ok(lines.includes('- ' + FIGHT_9_6.replace(/^⚠ /, '')), `the AI reads the same line${show(lines)}`);
+});
+
+test('two 9 V batteries on the same rails facing opposite ways: unsolvable, one line naming both, no readings (#50)', () => {
+  const r = Sim.analyze(...Object.values(parallelSeries({ flip: true })));
+
+  assert.equal(r.status, 'unsolvable', trimmed(r).join(' | '));
+  const warn = exactlyOne(r, FIGHT_FLIP);
+  assert.equal(warn.cls, 'sim-err');
+  assert.ok(!hasLine(r, GENERIC_SINGULAR), texts(r).join(' | '));
+  assert.ok(!hasLine(r, 'share the load'), texts(r).join(' | '));
+  assert.deepStrictEqual(r.parts, {});
+});
+
+// Guard: batteries on different rail pairs are two circuits, not a group.
+// BAT1 on tp/tn with R1 + LED1 (as twoCircuits); BAT2 on bp/bn with R2 470 Ω
+// and BZ1 (as buzzerSeries): 14.8904 mA and 9 / 512 = 17.578 mA.
+test('a battery on tp/tn and one on bp/bn are not in parallel: both circuits keep their #26 numbers (#50 guard)', () => {
+  const bat1 = offBoardBattery('BAT1');
+  const bat2 = offBoardBattery('BAT2');
+  const components = [
+    bat1,
+    comp('resistor', [h(4, 'a'),  h(8, 'a')],  { label: 'R1' }),
+    comp('led',      [h(10, 'a'), h(8, 'b')],  { label: 'LED1' }),   // cathode a11, anode b9
+    bat2,
+    comp('resistor', [h(30, 'f'), h(34, 'f')], { label: 'R2' }),
+    comp('buzzer',   [h(34, 'g'), h(36, 'g')], { label: 'BZ1' }),
+  ];
+  const wires = [
+    batWire(bat1, 0, h(0, 'tp')),  batWire(bat1, 1, h(0, 'tn')),
+    wire(h(1, 'tp'), h(4, 'b')),   wire(h(10, 'b'), h(1, 'tn')),
+    batWire(bat2, 0, h(62, 'bp')), batWire(bat2, 1, h(62, 'bn')),
+    wire(h(29, 'bp'), h(30, 'g')), wire(h(36, 'h'), h(29, 'bn')),
+  ];
+  const r = Sim.analyze(components, wires);
+
+  assert.equal(r.status, 'ok', trimmed(r).join(' | '));
+  assert.ok(Math.abs(part(r, 'LED1').m.current - 14.8904) < 0.01, `LED1: ${part(r, 'LED1').m.current}`);
+  assert.ok(Math.abs(part(r, 'BZ1').m.current - 17.578) < 0.01, `BZ1: ${part(r, 'BZ1').m.current}`);
+  assert.ok(Math.abs(part(r, 'BAT1').m.current - 14.8904) < 0.01, `BAT1 carries all of circuit A: ${part(r, 'BAT1').m.current}`);
+  assert.ok(Math.abs(part(r, 'BAT2').m.current - 17.578) < 0.01, `BAT2 carries all of circuit B: ${part(r, 'BAT2').m.current}`);
+  assert.ok(!hasLine(r, 'in parallel'), texts(r).join(' | '));
+  assert.ok(!hasLine(r, 'wired straight across'), texts(r).join(' | '));
+});
+
+// #50 review: the short check (SHORT_AMPS, 1 A) must read the parallel
+// group's total current, not each battery's share. 9 V across 6 Ω is 1.5 A:
+// a short with one battery, and still a short with two sharing 0.75 A each.
+function across6Ohms(batteries) {
+  const bats = [];
+  const components = [];
+  const wires = [];
+  for (let k = 0; k < batteries; k++) {
+    const bat = offBoardBattery(`BAT${k + 1}`);
+    bats.push(bat);
+    components.push(bat);
+    wires.push(batWire(bat, 0, h(1 + 2 * k, 'tp')), batWire(bat, 1, h(1 + 2 * k, 'tn')));
+  }
+  components.splice(1, 0, comp('resistor', [h(5, 'a'), h(10, 'a')], { label: 'R1', values: { resistance: 6 } }));
+  wires.push(wire(h(2, 'tp'), h(5, 'b')), wire(h(10, 'b'), h(2, 'tn')));
+  return { components, wires };
+}
+const SHORT_LINE = { text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' };
+// Everything but the battery headlines and the #50 share line.
+const shortLines = r => plainLines(r).filter(l => !/^Battery \d+: /.test(l.text) && !/share the load/.test(l.text));
+
+test('one 9 V battery across 6 Ω (1.5 A) is flagged as a short (#50 guard)', () => {
+  const r = Sim.analyze(...Object.values(across6Ohms(1)));
+  assert.equal(r.status, 'ok');
+  assert.equal(r.shorted, true, texts(r).join(' | '));
+  assert.deepStrictEqual(shortLines(r), [SHORT_LINE]);
+});
+
+test('two 9 V batteries in parallel across 6 Ω: the group total (1.5 A) is a short, as with one battery, though each share is 0.75 A (#50)', () => {
+  const one = Sim.analyze(...Object.values(across6Ohms(1)));
+  const r   = Sim.analyze(...Object.values(across6Ohms(2)));
+  assert.equal(r.status, one.status, texts(r).join(' | '));
+  assert.equal(r.shorted, one.shorted, `shorted like the one-battery run: ${texts(r).join(' | ')}`);
+  assert.deepStrictEqual(shortLines(r), shortLines(one), 'the same short line(s) as one battery across 6 Ω');
 });

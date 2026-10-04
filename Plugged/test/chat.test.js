@@ -660,6 +660,30 @@ test('set_control SW1 pressed:true closes the button circuit: LED1 goes from off
   near(m.current, 14.9, 'LED1 through the pressed button');
 });
 
+// #52: the BUTTON_BRANCHES recipe build (test/fixtures/recipes.js), one
+// button switching a red and a green branch. Labels in placing order: BAT1,
+// SW1, R1, LED1 (red, c12/c14), R2, LED2 (green, c20/c22).
+// Released: open, no LED lit. Pressed: (9 − 2.0) / 470 = 14.9 mA red and
+// (9 − 2.2) / 470 = 14.5 mA green; the 1 mΩ switch is negligible.
+test('the BUTTON_BRANCHES recipe: released, both LEDs dark; set_control SW1 pressed → red 14.9 mA, green 14.5 mA (#52)', () => {
+  const board = simBoard();
+  const n = Recipes.BUTTON_BRANCHES.length;
+  assert.deepEqual(Chat.acceptBuild(Recipes.BUTTON_BRANCHES, board), { applied: n, failed: 0 }, JSON.stringify(board.notes));
+  assert.deepEqual(board.components().map(c => c.label), ['BAT1', 'SW1', 'R1', 'LED1', 'R2', 'LED2']);
+  assert.equal(Ids.findByLabel(board.components(), 'LED1').values.color, 'red');
+  assert.equal(Ids.findByLabel(board.components(), 'LED2').values.color, 'green');
+  assert.equal(measured(board, 'LED1').on, false, 'released: the red LED is dark (circuit open)');
+  assert.equal(measured(board, 'LED2').on, false, 'released: the green LED is dark (circuit open)');
+
+  const out = Chat.acceptBuild([{ tool: 'set_control', part: 'SW1', pressed: true }], board);
+  assert.deepEqual(out, { applied: 1, failed: 0 }, JSON.stringify(board.notes));
+  const red = measured(board, 'LED1'), green = measured(board, 'LED2');
+  assert.equal(red.on, true, 'pressed: the red LED lights');
+  assert.equal(green.on, true, 'pressed: the green LED lights');
+  near(red.current, 14.9, 'red LED1 through the pressed button');
+  near(green.current, 14.5, 'green LED2 through the pressed button');
+});
+
 test('delete_part R1, the middle of the series circuit, opens it: LED1 goes dark', () => {
   const board = simBoard();
   Chat.acceptBuild(Recipes.ONE_LED, board);

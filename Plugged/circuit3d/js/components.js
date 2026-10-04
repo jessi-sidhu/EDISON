@@ -5,7 +5,8 @@
 //
 //  Registry parts (parts/*.js) draw themselves in view.build(ctx, ...):
 //    App.partCtx({ ghost })  → ctx: { THREE, lead, mat, holeWorld, boardGeometry }
-//    App.buildPart(type, legs, values, { ghost }) → { group, pinPositions }
+//    App.buildPart(type, legs, values, { ghost, controls }) → { group, pinPositions }
+//      controls: the record's own settings, over the defaults (a knob's position)
 //
 //  Preview builder (buildPreview):
 //    Returns a transparent ghost Group centred at (0,0,0).
@@ -162,9 +163,11 @@
     return drawPart(def, partCtx(opts), legs, values, opts);
   }
 
+  // Drawn with the record's controls (opts.controls) over the defaults.
   function drawPart(def, ctx, legs, values, opts) {
+    const own = (opts && opts.controls) || {};
     const controls = {};
-    for (const [key, c] of Object.entries(def.controls || {})) controls[key] = c.default;
+    for (const [key, c] of Object.entries(def.controls || {})) controls[key] = Object.hasOwn(own, key) ? own[key] : c.default;
     const out = def.view.build(ctx, componentValues(def.type, values), controls, legs);
     if (opts && opts.ghost) out.group.traverse(o => { o.castShadow = false; });
     return out;

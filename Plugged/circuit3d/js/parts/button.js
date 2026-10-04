@@ -135,6 +135,8 @@
     ai: {
       about:    'A push button: two leads on one row, exactly 3 columns apart. Open until pressed; ' +
                 'the user clicks it while the simulation runs.',
+      guide:    'For one button switching several LED branches, follow the ONE BUTTON SWITCHING SEPARATE BRANCHES ' +
+                'recipe: each branch gets its own feed wire from a different hole in the button\'s output column.',
       keywords: ['button', 'switch', 'push', 'press', 'pushbutton'],
       everyday: true,
     },

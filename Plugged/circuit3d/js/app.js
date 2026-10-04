@@ -216,26 +216,38 @@
       type, label: partLabel(type, opts), group: built.group, pins: built.pinPositions, pinMeshes: [], values, holeRefs,
     };
     const controls = controlDefaults(type);
-    if (controls) record.controls = controls;
+    if (controls) record.controls = Object.assign(controls, opts && opts.controls);
     addPinMarkers(record);
     state.components.push(record);
     refreshCounts();
     return record;
   }
 
+  // A part's own controls picked from `controls`: only the keys it has.
+  function ownControls(type, controls) {
+    const specs = Parts.get(type).controls || {};
+    const out = {};
+    for (const key of Object.keys(controls || {})) if (Object.hasOwn(specs, key)) out[key] = controls[key];
+    return out;
+  }
+
   // One placement for every registry part; rebuilding a board (load, undo)
   // uses it. where: the board holes, one per pin, or { x, z } off the board.
+  // opts.controls: settings over the defaults (a loaded knob's position),
+  // drawn that way from the start.
   App.placePart = function (type, where, values, opts) {
     const def = Parts.get(type);
     if (!def) return null;
     pushHistory();
     const vals = checkedValues(type, values);
+    const ctl  = ownControls(type, opts && opts.controls);
+    const o    = Object.assign({}, opts, { controls: ctl });
     if (def.place.kind === 'offboard') {
-      const built = App.buildPart(type, Parts.legsOf({ type, holeRefs: null }), vals);
-      return addPart(type, atSpot(built, offboardX(where.x), where.z), vals, null, opts);
+      const built = App.buildPart(type, Parts.legsOf({ type, holeRefs: null }), vals, { controls: ctl });
+      return addPart(type, atSpot(built, offboardX(where.x), where.z), vals, null, o);
     }
     const holeRefs = where.map(h => ({ col: h.col, row: h.row }));
-    return addPart(type, App.buildPart(type, Parts.legsOf({ type, holeRefs }), vals), vals, holeRefs, opts);
+    return addPart(type, App.buildPart(type, Parts.legsOf({ type, holeRefs }), vals, { controls: ctl }), vals, holeRefs, o);
   };
 
   // Flips a part's `pressed` control (the button's). Kept for the tests and
@@ -265,9 +277,10 @@
     let built;
     if (def.place.kind === 'offboard') {
       const at = comp.group ? comp.group.position : { x: 0, z: 0 };
-      built = atSpot(App.buildPart(comp.type, Parts.legsOf({ type: comp.type, holeRefs: null }), comp.values), at.x, at.z);
+      built = atSpot(App.buildPart(comp.type, Parts.legsOf({ type: comp.type, holeRefs: null }), comp.values,
+                                   { controls: comp.controls }), at.x, at.z);
     } else {
-      built = App.buildPart(comp.type, Parts.legsOf(comp), comp.values);
+      built = App.buildPart(comp.type, Parts.legsOf(comp), comp.values, { controls: comp.controls });
     }
     App.scene.add(built.group);
     comp.group = built.group;
@@ -286,11 +299,20 @@
     if (App.simRunning) App.runSimulation();
   };
 
+  // With no simulation running, a part's picture follows its controls at
+  // once: its view.update with no result draws from comp.controls.
+  function showControls(comp) {
+    if (App.simRunning) return;
+    const def = Parts.get(comp.type);
+    if (def && def.view && typeof def.view.update === 'function') def.view.update(comp, {}, null);
+  }
+
   // controls: e.g. { pressed: true }, each one the part has.
   App.setControls = function (comp, controls) {
     pushHistory();
     comp.controls = Object.assign({}, comp.controls, controls);
     if (App.simRunning) App.runSimulation();
+    else showControls(comp);
   };
 
   // Removes the part and the wires on its pins.
@@ -325,6 +347,7 @@
       comp.controls = comp.controls || {};
       const now = Object.hasOwn(comp.controls, key) ? comp.controls[key] : spec.default;
       comp.controls[key] = next(now, spec);
+      showControls(comp);
     });
   }
 
@@ -664,9 +687,14 @@
     const knows = t => !!Parts.get(t);
     const rebuilt = App.rebuildComponents(data.components, c => {
       const before = state.components.length;
-      const opts   = { label: c.label };
       const def    = Parts.get(c.type);
       if (!def) return null;               // kept as a placeholder
+      // Saved controls come back as saved; the rest start at their defaults.
+      const saved  = {};
+      for (const [key, spec] of Object.entries(def.controls || {})) {
+        if (spec.saved && c.controls && Object.hasOwn(c.controls, key)) saved[key] = c.controls[key];
+      }
+      const opts   = { label: c.label, controls: saved };
       if (def.place.kind === 'offboard') {
         if (c.position) App.placePart(c.type, c.position, c.values, opts);
       } else if (c.holeRefs?.length === def.pins.length) {
@@ -674,14 +702,7 @@
         const holes = refs.map(r => r && bb.getHole(r.col, r.row));
         if (holes.every(Boolean)) App.placePart(c.type, holes, c.values, opts);
       }
-      const placed = state.components.length > before ? state.components[state.components.length - 1] : null;
-      // Saved controls come back as saved; the rest start at their defaults.
-      if (placed && placed.controls && c.controls) {
-        for (const [key, spec] of Object.entries(def.controls || {})) {
-          if (spec.saved && Object.hasOwn(c.controls, key)) placed.controls[key] = c.controls[key];
-        }
-      }
-      return placed;
+      return state.components.length > before ? state.components[state.components.length - 1] : null;
     }, knows);
     state.components = rebuilt.filter(Boolean);   // placeholders included, in saved order
 

@@ -272,3 +272,22 @@ test('two LEDs in series, both flipped: each LED gets a "no forward path, cannot
 test('the SERIES_2 recipe, LEDs the right way round, still has no problems', () => {
   assert.deepEqual(problems(Recipes.SERIES_2), []);
 });
+
+// ── One button switching two separate LED branches (issue #52) ──────────────
+// The recipe build pinned on the issue at C=2 (test/fixtures/recipes.js →
+// BUTTON_BRANCHES). A real DeepSeek run without a recipe left the button
+// unwired, doubled up a hole, or stacked both branches on the same columns.
+// These are regression guards for the recipe's layout: it must be a clean
+// build as written.
+
+test('the BUTTON_BRANCHES recipe build: no problems, every action kept, no Heads up (#52)', () => {
+  assert.deepEqual(problems(Recipes.BUTTON_BRANCHES), []);
+  clean(Recipes.BUTTON_BRANCHES);
+  const out = Server.finishAIReply({ reply: 'Built it.', actions: Recipes.BUTTON_BRANCHES.map(a => ({ ...a })) });
+  assert.doesNotMatch(out.reply, /Heads up/);
+});
+
+test('the BUTTON_BRANCHES recipe build puts at most one lead or wire end in each hole (#52)', () => {
+  const used = Recipes.holesUsed(Recipes.BUTTON_BRANCHES);
+  assert.deepEqual(used.filter((h, i) => used.indexOf(h) !== i), [], `a hole is used twice: ${used.join(' ')}`);
+});
