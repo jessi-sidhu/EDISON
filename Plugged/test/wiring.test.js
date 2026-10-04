@@ -37,6 +37,8 @@ test('the dashboard signs users in and out through storage.js and never deletes 
   const html = read('dashboard.html');
   assert.ok(scriptOrder(html).includes('circuit3d/js/storage.js'), 'dashboard must load storage.js');
   assert.match(html, /SparkyStorage\.signIn\(localStorage, user\.uid\)/);
+  // Same key the editor uses, even when storage was too full to record the uid.
+  assert.match(html, /LS_KEY\s*= SparkyStorage\.projectsKey\(SparkyStorage\.currentUid\(localStorage\)\)/);
   assert.match(html, /SparkyStorage\.signOut\(localStorage\)/);
   assert.doesNotMatch(html, /removeItem\(LS_KEY\)|\[LS_KEY, STARRED_KEY/, 'sign-out must not remove saved circuits');
 });

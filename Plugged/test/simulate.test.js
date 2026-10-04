@@ -149,6 +149,19 @@ test('two 9V batteries in series add up (#11)', () => {
 
 // ── Mixed LEDs, floating parts, buttons ───────────────────────
 
+// 150R shared by two red LEDs: ~23 mA each, over the 20 mA rating. Each LED
+// on its own would need (9 - 2) / 20 mA = 350 ohm, so the advice must point
+// above the 150R already there, never below it.
+test('over-current advice for parallel LEDs never suggests a smaller resistor', () => {
+  const bat  = battery();
+  const res  = comp('resistor', [h(5, 'a'), h(10, 'a')], { values: { resistance: 150 } });
+  const led1 = comp('led', [h(1, 'tn'), h(10, 'a')]);
+  const led2 = comp('led', [h(3, 'tn'), h(10, 'a')]);
+  const r = Sim.analyze([bat, res, led1, led2], [wire(h(2, 'tp'), h(5, 'a'))]);
+
+  assert.ok(hasLine(r, 'Needs at least 350 ohm in series, so use 470 ohm'), texts(r).join(' | '));
+});
+
 test('red and green LEDs in parallel: only the lower-Vf red one lights', () => {
   const bat   = battery();
   const res   = comp('resistor', [h(5, 'a'), h(10, 'a')]);

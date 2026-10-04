@@ -123,11 +123,13 @@ Everything is vanilla JS. No build tools, no frameworks, no bundler. The 3D comp
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Yes | Your Google Gemini API key ([get one here](https://aistudio.google.com/apikey)) |
 | `GEMINI_MODEL` | No | Gemini model id (default: `gemini-flash-latest`) |
-| `AI_PROVIDER` | No | `gemini`, `claude` for the local Claude Code CLI, or `fixture` to replay recorded responses with no key |
+| `AI_PROVIDER` | No | `gemini` (default), `deepseek`, `claude` for the local Claude Code CLI, or `fixture` to replay recorded responses with no key |
+| `DEEPSEEK_API_KEY` | With `deepseek` | Your DeepSeek key ([platform.deepseek.com](https://platform.deepseek.com)). Paid: top up the account first |
+| `DEEPSEEK_MODEL` | No | DeepSeek model id (default: `deepseek-flash`) |
 | `PORT` | No | Server port (default: 5001) |
-| `TRUST_PROXY` | No | Set to `1` behind a proxy such as Render, so the AI rate limit (20 requests a minute) applies per visitor instead of to everyone at once |
+| `TRUST_PROXY` | No | Set to `1` when exactly one proxy (such as Render) sits in front of the server, so the AI rate limit (20 requests a minute) applies per visitor instead of to everyone at once. It trusts only the address that proxy adds to `X-Forwarded-For`. |
 
-`GEMINI_API_KEY` is required for the AI tutor unless you set `AI_PROVIDER` to `claude` or `fixture`, which need no key at all.
+`GEMINI_API_KEY` is required for the AI tutor with the default provider. With `AI_PROVIDER=deepseek` you need `DEEPSEEK_API_KEY` instead; `claude` and `fixture` need no key at all.
 
 ## Tests
 

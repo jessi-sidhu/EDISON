@@ -281,9 +281,11 @@
     return sol ? { sol, ledOn, settled: false } : null;
   }
 
-  // Open-circuit voltage across an LED, i.e. with only that LED switched off.
+  // Open-circuit voltage across an LED with every LED switched off: what it
+  // would see on its own. Leaving the others on would let a parallel LED
+  // pin the shared node near Vf, and the advice would shrink toward 0 ohm.
   function openVoltage(graph, bats, ledOn, led) {
-    const off = new Map(ledOn); off.set(led.comp, false);
+    const off = new Map([...ledOn.keys()].map(c => [c, false]));
     const sol = solveMNA(graph, bats, off);
     return sol ? sol.v(led.nodes[LED_ANODE_PIN]) - sol.v(led.nodes[1 - LED_ANODE_PIN]) : 0;
   }

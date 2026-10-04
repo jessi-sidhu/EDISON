@@ -38,6 +38,14 @@ const AI_PROVIDER = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
 if (AI_PROVIDER === 'gemini' && !GEMINI_KEY) {
   console.warn('Warning: GEMINI_API_KEY not set — /api/ask will fail');
 }
+if (AI_PROVIDER === 'deepseek' && !process.env.DEEPSEEK_API_KEY) {
+  console.warn('Warning: DEEPSEEK_API_KEY not set — /api/ask will fail');
+}
+
+// The model name shown by /api/health and at startup.
+const MODEL_NAME = AI_PROVIDER === 'deepseek' ? (process.env.DEEPSEEK_MODEL || 'deepseek-flash')
+                 : AI_PROVIDER === 'gemini'   ? GEMINI_MODEL
+                 : AI_PROVIDER;
 
 // ── Gemini system prompt ─────────────────────────────────────
 const SYSTEM_PROMPT = [
@@ -256,7 +264,7 @@ function findCircuitProblems(actions) {
 // ── Call Gemini ──────────────────────────────────────────────
 const ask = makeAsk(
   (markdown, userMsg, history) => askGemini(markdown, userMsg, history),
-  { SYSTEM_PROMPT, CIRCUIT_TOOLS }
+  { SYSTEM_PROMPT, CIRCUIT_TOOLS, finish: finishAIReply }
 );
 
 async function askGemini(markdown, userMsg, history) {
@@ -317,7 +325,16 @@ async function askGemini(markdown, userMsg, history) {
     }
   }
 
-  reply = reply.trim();
+  return finishAIReply({ reply, actions });
+}
+
+// ── Shared reply clean-up ────────────────────────────────────
+// Every model's { reply, actions } goes through this before the browser
+// sees it: a default reply, JSON-in-text fallback, malformed actions
+// dropped, and circuit problems reported.
+function finishAIReply({ reply, actions }) {
+  reply = String(reply || '').trim();
+  actions = Array.isArray(actions) ? actions : [];
 
   // If model returned only function calls with no text, provide a default
   if (!reply && actions.length > 0) {
@@ -379,10 +396,11 @@ const askHits = new Map();
 
 // Behind a proxy (Render and similar) every request arrives from the proxy,
 // so the limit would be shared by every visitor. Only trust the header when
-// told to: anyone can send an X-Forwarded-For.
+// told to, and only its last entry: the proxy appends the address it saw,
+// and anything to the left of that is whatever the client chose to send.
 function clientKey(req) {
   if (process.env.TRUST_PROXY === '1') {
-    const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const fwd = String(req.headers['x-forwarded-for'] || '').split(',').pop().trim();
     if (fwd) return fwd;
   }
   return req.socket.remoteAddress || 'unknown';
@@ -403,7 +421,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
   if (req.method === 'GET' && req.url === '/api/health') {
-    return sendJSON(res, 200, { status: 'ok', model: GEMINI_MODEL });
+    return sendJSON(res, 200, { status: 'ok', model: MODEL_NAME });
   }
 
   if (req.method === 'POST' && req.url === '/api/ask') {
@@ -504,9 +522,9 @@ if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`⚡ Sparky AI  →  http://localhost:${PORT}`);
     console.log(`   AI    : ${AI_PROVIDER}`);
-    console.log(`   Model : ${GEMINI_MODEL}`);
+    console.log(`   Model : ${MODEL_NAME}`);
     console.log(`   Health: http://localhost:${PORT}/api/health`);
   });
 }
 
-module.exports = { server, clientKey };
+module.exports = { server, clientKey, finishAIReply };

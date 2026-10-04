@@ -106,6 +106,7 @@ The AI runs on the server, so the API key never reaches the browser. The `AI_PRO
 | Provider | What it uses | Needs |
 | --- | --- | --- |
 | `gemini` (default) | Google Gemini, `gemini-flash-latest` unless `GEMINI_MODEL` is set | `GEMINI_API_KEY` |
+| `deepseek` | DeepSeek, `deepseek-flash` unless `DEEPSEEK_MODEL` is set (thinking mode off, for speed) | `DEEPSEEK_API_KEY` and a topped-up balance |
 | `claude` | The local Claude Code command-line tool | A Claude Code login |
 | `fixture` | Saved responses in `test/fixtures/ask/` | Nothing. Good for testing. |
 

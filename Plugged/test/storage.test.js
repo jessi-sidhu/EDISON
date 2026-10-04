@@ -13,6 +13,46 @@ function fake(seed) {
   };
 }
 
+// Like a browser's localStorage near its ~5 MB limit: setItem throws once
+// the total stored would pass the quota.
+function fakeWithQuota(quota, seed) {
+  const s = fake(seed);
+  const m = new Map(Object.entries(seed || {}));
+  const size = () => [...m.values()].reduce((n, v) => n + v.length, 0);
+  return Object.assign(s, {
+    getItem:    k => (m.has(k) ? m.get(k) : null),
+    removeItem: k => m.delete(k),
+    setItem: (k, v) => {
+      const next = size() - (m.has(k) ? m.get(k).length : 0) + String(v).length;
+      if (next > quota) { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; }
+      m.set(k, String(v));
+    },
+  });
+}
+
+test('sign-in moves a large legacy list even when two copies would not fit', () => {
+  const big = JSON.stringify([{ id: 'a', thumbnail: 'x'.repeat(600) }]);
+  const s = fakeWithQuota(1000, { sparky_local_projects: big });
+
+  S.signIn(s, 'u1');
+
+  assert.equal(s.getItem(S.projectsKey('u1')), big);
+  assert.equal(s.getItem('sparky_local_projects'), null);
+});
+
+test('when storage is already full, sign-in does not throw and loses nothing', () => {
+  const mine  = JSON.stringify([{ id: 'm', thumbnail: 'y'.repeat(500) }]);
+  const guest = JSON.stringify([{ id: 'g', thumbnail: 'z'.repeat(450) }]);
+  const seed  = { [S.projectsKey('u1')]: mine, [S.projectsKey(null)]: guest };
+  const full  = Object.values(seed).reduce((n, v) => n + v.length, 0);
+  const s = fakeWithQuota(full, seed);   // not one more byte fits
+
+  S.signIn(s, 'u1');
+
+  assert.equal(s.getItem(S.projectsKey(null)), guest, 'guest circuits must not be lost');
+  assert.equal(s.getItem(S.projectsKey('u1')), mine);
+});
+
 test('adopts legacy unkeyed projects on sign-in', () => {
   const s = fake({ sparky_local_projects: JSON.stringify([{ id: 'a' }]) });
   S.signIn(s, 'u1');

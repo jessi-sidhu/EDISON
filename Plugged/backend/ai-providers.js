@@ -106,6 +106,83 @@ function askClaude(markdown, userMsg, history, ctx) {
   });
 }
 
+// ── DeepSeek provider ────────────────────────────────────────
+// OpenAI-compatible chat completions with native tool calls. Thinking mode
+// is on by default on DeepSeek; it is switched off here because it is
+// slower, bills reasoning tokens, and ignores temperature.
+const DEEPSEEK_URL   = 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-flash';
+
+// Gemini's schema uses upper-case type names ("OBJECT", "STRING").
+function lowerTypes(schema) {
+  if (Array.isArray(schema)) return schema.map(lowerTypes);
+  if (!schema || typeof schema !== 'object') return schema;
+  const out = {};
+  for (const [k, v] of Object.entries(schema)) {
+    out[k] = k === 'type' && typeof v === 'string' ? v.toLowerCase() : lowerTypes(v);
+  }
+  return out;
+}
+
+// CIRCUIT_TOOLS (Gemini function_declarations) -> OpenAI "tools".
+function toOpenAITools(circuitTools) {
+  const decls = (circuitTools && circuitTools[0] && circuitTools[0].function_declarations) || [];
+  return decls.map(d => ({
+    type: 'function',
+    function: {
+      name: d.name,
+      description: d.description || '',
+      parameters: d.parameters ? lowerTypes(d.parameters) : { type: 'object', properties: {} },
+    },
+  }));
+}
+
+async function askDeepSeek(markdown, userMsg, history, ctx) {
+  const msg = userMsg || 'Analyze my circuit and tell me what to do next.';
+  const boardState = markdown || '**Board is EMPTY — no components or wires placed.**';
+
+  const messages = [{ role: 'system', content: ctx.SYSTEM_PROMPT }];
+  for (const h of history || []) {
+    if (h && h.text) messages.push({ role: h.role === 'model' ? 'assistant' : 'user', content: h.text });
+  }
+  messages.push({ role: 'user', content: `BOARD STATE:\n${boardState}\n\nQUESTION: ${msg}` });
+
+  const res = await (ctx.fetch || fetch)(DEEPSEEK_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${ctx.apiKey || process.env.DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages,
+      tools: toOpenAITools(ctx.CIRCUIT_TOOLS),
+      tool_choice: 'auto',
+      thinking: { type: 'disabled' },
+      temperature: 0.3,
+      max_tokens: 2048,
+    }),
+  });
+
+  if (!res.ok) {
+    const hint = res.status === 402 ? ' (balance is empty: top up at https://platform.deepseek.com/top_up)' : '';
+    throw new Error(`DeepSeek ${res.status}${hint}: ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  const m = (data.choices && data.choices[0] && data.choices[0].message) || {};
+  const actions = [];
+  for (const call of m.tool_calls || []) {
+    const fn = call && call.function;
+    if (!fn || !fn.name) continue;
+    // The model can emit invalid JSON arguments; drop that call, keep the rest.
+    let args;
+    try { args = JSON.parse(fn.arguments || '{}'); } catch { continue; }
+    actions.push({ tool: fn.name, ...args });
+  }
+  return { reply: String(m.content || '').trim(), actions };
+}
+
 // ── Shared parser ────────────────────────────────────────────
 function parseAgentJSON(raw) {
   let text = String(raw || '').trim();
@@ -181,9 +258,16 @@ function makeAsk(askGemini, ctx) {
       return askFixture(markdown, userMsg, history);
     }
 
-    const result = provider === 'claude'
-      ? await askClaude(markdown, userMsg, history, ctx)
-      : await askGemini(markdown, userMsg, history);
+    let result;
+    if (provider === 'claude') {
+      result = await askClaude(markdown, userMsg, history, ctx);
+    } else if (provider === 'deepseek') {
+      // Same clean-up and circuit checks the Gemini path applies itself.
+      const finish = ctx.finish || (r => r);
+      result = finish(await askDeepSeek(markdown, userMsg, history, ctx));
+    } else {
+      result = await askGemini(markdown, userMsg, history);
+    }
 
     if (process.env.RECORD_FIXTURES === '1') {
       recordFixture(markdown, userMsg, history, result, provider);
@@ -192,4 +276,4 @@ function makeAsk(askGemini, ctx) {
   };
 }
 
-module.exports = { makeAsk, parseAgentJSON, fixtureKey, describeTools };
+module.exports = { makeAsk, parseAgentJSON, fixtureKey, describeTools, toOpenAITools, askDeepSeek };

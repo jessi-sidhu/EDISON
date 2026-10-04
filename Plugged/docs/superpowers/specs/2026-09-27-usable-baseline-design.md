@@ -157,7 +157,8 @@ AI.
   (`/api/circuits*`), and their environment variables and startup warnings.
   This also removes the `postMessage(d, "*")` token leak.
 - **Rate limit by the real visitor:** when `TRUST_PROXY=1`, key the limit on
-  the first `X-Forwarded-For` address. Otherwise use `remoteAddress`, as now.
+  the last `X-Forwarded-For` address, the one the proxy appended; earlier
+  entries are whatever the client sent. Otherwise use `remoteAddress`, as now.
 - **Request size limit:** stop reading the body at 256 KB and respond
   `413 Request too large`.
 - **Make it testable:** `server.js` only calls `listen()` when run directly

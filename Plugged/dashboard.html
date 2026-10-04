@@ -767,8 +767,9 @@
       // Switch to this user's circuits, adopting any saved as guest or before
       // circuits were kept per user.
       SparkyStorage.signIn(localStorage, user.uid);
-      LS_KEY      = SparkyStorage.projectsKey(user.uid);
-      STARRED_KEY = SparkyStorage.starredKey(user.uid);
+      // Read back what was recorded: the editor uses the same key.
+      LS_KEY      = SparkyStorage.projectsKey(SparkyStorage.currentUid(localStorage));
+      STARRED_KEY = SparkyStorage.starredKey(SparkyStorage.currentUid(localStorage));
       renderMyCircuits();
       _authUsername = user.email ? user.email.split('@')[0] : (user.displayName || '');
       localStorage.setItem('sparky_username', _authUsername);
