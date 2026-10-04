@@ -151,8 +151,8 @@ test("controls.mode: 'series' by default, saved with the circuit", () => {
 test('values voltage2 (0–30 V, 12 V default) and limit2 (1 mA–3 A, 0.5 A default); checkValue bounds them', () => {
   const v = supply().values;
   assert.deepStrictEqual(JSON.parse(JSON.stringify({ voltage2: v.voltage2, limit2: v.limit2 })), {
-    voltage2: { unit: 'V', default: 12, min: 0, max: 30, ai: false },
-    limit2:   { unit: 'A', default: 0.5, min: 0.001, max: 3, ai: false },
+    voltage2: { unit: 'V', default: 12, min: 0, max: 30, ai: false, activeWhen: { mode: 'independent', note: 'tracks CH1' } },
+    limit2:   { unit: 'A', default: 0.5, min: 0.001, max: 3, ai: false, activeWhen: { mode: 'independent', note: 'tracks CH1' } },
   });
   assert.deepStrictEqual(Parts.checkValue('bench_supply', 'voltage2', 30), { ok: true, value: 30 });
   assert.equal(Parts.checkValue('bench_supply', 'voltage2', 31).ok, false);

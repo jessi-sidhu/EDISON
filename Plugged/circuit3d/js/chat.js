@@ -282,7 +282,11 @@
     return `${text}\nApplied: ${done.length ? done.map(describeAction).join(', ') : 'nothing'}` + (n ? ` (${n} could not be applied).` : '.');
   }
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, EDITS, ROTATION };
+  // The page's own guard on /api/ask (issue #129): longer than the server's
+  // 60 s DeepSeek deadline, so the server's clear 504 normally arrives first.
+  const ASK_TIMEOUT_MS = 75000;
+
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, EDITS, ROTATION, ASK_TIMEOUT_MS };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -332,13 +336,24 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
   }
 
   async function askSparky(markdown, userMsg, history, board) {
-    const res = await fetch('/api/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ markdown, message: userMsg, history, board }),
-    });
-    let data = null;
-    try { data = await res.json(); } catch { /* upstream returned a non-JSON error page */ }
+    // A stalled AI ends in a clear message, not a minutes-long spinner (#129).
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Chat.ASK_TIMEOUT_MS);
+    let res, data = null;
+    try {
+      res = await fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown, message: userMsg, history, board }),
+        signal: controller.signal,
+      });
+      try { data = await res.json(); } catch (e) { if (controller.signal.aborted) throw e; /* else a non-JSON error page */ }
+    } catch (e) {
+      if (controller.signal.aborted) throw new Error('The AI took too long — try again.');
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok || !data) {
       console.error('/api/ask failed:', res.status, data);
       throw new Error((data && data.reply) || 'Sparky could not reach the AI service. Please try again in a moment.');

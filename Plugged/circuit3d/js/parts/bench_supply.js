@@ -273,9 +273,10 @@
     values:   {
       voltage: { unit: 'V', default: 12,  min: 0,     max: 30 },
       limit:   { unit: 'A', default: 0.5, min: 0.001, max: 3 },
-      // CH2, used only when independent; kept from the AI (#124)
-      voltage2: { unit: 'V', default: 12,  min: 0,     max: 30, ai: false },
-      limit2:   { unit: 'A', default: 0.5, min: 0.001, max: 3,  ai: false },
+      // CH2, used only when independent; kept from the AI (#124), greyed
+      // in the inspector in series (#127)
+      voltage2: { unit: 'V', default: 12,  min: 0,     max: 30, ai: false, activeWhen: { mode: 'independent', note: 'tracks CH1' } },
+      limit2:   { unit: 'A', default: 0.5, min: 0.001, max: 3,  ai: false, activeWhen: { mode: 'independent', note: 'tracks CH1' } },
     },
     controls: {
       mode: { type: 'choice', options: ['series', 'independent'], default: 'series', saved: true,

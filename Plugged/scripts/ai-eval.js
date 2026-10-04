@@ -9,6 +9,8 @@
 //    npm run ai-eval -- --only demo       one case, by id or tag
 //    npm run ai-eval -- --runs 5 --json /tmp/eval.json
 //  Exits 1 when a demo-tagged case misses pass^N (every run passing).
+//  The model fallback (#130) is off, so the configured model is measured
+//  alone; DEEPSEEK_FALLBACK_MODEL=<model> npm run ai-eval turns it on.
 //
 //  Requiring this file starts nothing and calls nothing: backend/server.js
 //  (which loads the key) is required only in the CLI path below.
@@ -224,6 +226,10 @@ async function main() {
 
   // The server reads backend/.env itself and picks the provider on require.
   process.env.AI_PROVIDER = 'deepseek';
+  // No fallback unless the shell names one (#130): a pass the fallback
+  // model answered isn't a pass for the configured model. Set before the
+  // require, so the server's env file can't turn it back on.
+  if (process.env.DEEPSEEK_FALLBACK_MODEL === undefined) process.env.DEEPSEEK_FALLBACK_MODEL = '';
   const { ask } = require('../backend/server.js');
 
   const results = [], raw = [];
@@ -244,7 +250,8 @@ async function main() {
       const why = o === 'pass' ? 'PASS'
         : o === 'fail' ? 'FAIL ' + graded.failed.join(', ')
         : 'ERROR ' + (res instanceof Error ? describeError(res) : res && res.reply);
-      console.log(`${c.id} run ${run}/${args.runs}: ${why}`);
+      const by = res && res.fallbackModel ? ` (answered by ${res.fallbackModel})` : '';
+      console.log(`${c.id} run ${run}/${args.runs}: ${why}${by}`);
       raw.push({ id: c.id, run, outcome: o, failed: graded ? graded.failed : null,
                  reply: res instanceof Error ? { error: describeError(res) } : res });
     }

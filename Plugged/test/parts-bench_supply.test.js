@@ -186,8 +186,8 @@ test('values: voltage 0–30 V (12 V default), limit 1 mA–3 A (0.5 A default),
   assert.deepStrictEqual(plain(supply().values), {
     voltage:  { unit: 'V', default: 12, min: 0, max: 30 },
     limit:    { unit: 'A', default: 0.5, min: 0.001, max: 3 },
-    voltage2: { unit: 'V', default: 12, min: 0, max: 30, ai: false },   // kept from the AI (#124)
-    limit2:   { unit: 'A', default: 0.5, min: 0.001, max: 3, ai: false },
+    voltage2: { unit: 'V', default: 12, min: 0, max: 30, ai: false, activeWhen: { mode: 'independent', note: 'tracks CH1' } },   // kept from the AI (#124)
+    limit2:   { unit: 'A', default: 0.5, min: 0.001, max: 3, ai: false, activeWhen: { mode: 'independent', note: 'tracks CH1' } },
   });
 });
 

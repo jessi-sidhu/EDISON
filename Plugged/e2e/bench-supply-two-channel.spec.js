@@ -215,3 +215,88 @@ test('simulating: an LED + 1 kΩ on CH2 alone lights at 10.0 mA in series; a cli
   expect(reading.top, 'the resistor\'s top is CH2\'s 5 V').toBeCloseTo(5, 6);
   expect(errors).toEqual([]);
 });
+
+// ── The inspector greys CH2 out in SERIES (issue #127) ────────────────────
+// The page the builder matches (chosen here): a row whose value doesn't apply
+// in the current mode is `#inspector .inspector-row[data-key=…]` with class
+// `inspector-row-disabled`, its input `disabled`, and its note ("tracks CH1")
+// shown in the row. Independent, the row has neither and the note is hidden
+// or gone. A mode flip from the 3D button or the inspector's own dropdown
+// redraws the rows at once.
+// The circuit (wired after the clicks on the case, so no wire is in front of
+// it): CH2 + (com2) → bp, CH2 − (neg) → bn, 1 kΩ g20–g24 from
+// bp_20 → j20 to j24 → bn_24. Independent with voltage2 5: j20 at 5 V, j24 at
+// 0 V (CH2's own ground).
+
+test('inspector: CH2\'s rows are greyed "tracks CH1" in series, editable after the mode button flips to INDEP, a CH2 edit of 5 V runs as 5 V, and the inspector\'s mode dropdown greys them again', async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors = watchErrors(page);
+  await openEditor(page);
+  await placeSupply(page);
+  await page.evaluate(() => {
+    const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
+    App.placePart('resistor', [hole('g20'), hole('g24')], { resistance: 1000 });
+  });
+  await page.keyboard.press('Escape');
+
+  const row   = key => page.locator(`#inspector .inspector-row[data-key="${key}"]`);
+  const input = key => row(key).locator('input');
+  const greyed = async (msg) => {
+    for (const key of ['voltage2', 'limit2']) {
+      await expect(input(key), `${msg}: ${key}'s input is disabled`).toBeDisabled();
+      await expect(row(key), `${msg}: ${key}'s row is greyed`).toHaveClass(/\binspector-row-disabled\b/);
+      await expect(row(key).getByText('tracks CH1'), `${msg}: ${key}'s row says "tracks CH1"`).toBeVisible();
+    }
+    for (const key of ['voltage', 'limit']) {
+      await expect(input(key), `${msg}: CH1's ${key} stays editable`).toBeEnabled();
+      await expect(row(key)).not.toHaveClass(/\binspector-row-disabled\b/);
+    }
+  };
+  const normal = async (msg) => {
+    for (const key of ['voltage2', 'limit2']) {
+      await expect(input(key), `${msg}: ${key}'s input is enabled`).toBeEnabled();
+      await expect(row(key), `${msg}: ${key}'s row is not greyed`).not.toHaveClass(/\binspector-row-disabled\b/);
+      await expect(row(key).getByText('tracks CH1'), `${msg}: no "tracks CH1" on ${key}`).toBeHidden();
+    }
+  };
+
+  // Series (the default): select the supply by its case.
+  await clickOn(page, 'readout');
+  await expect.poll(() => page.evaluate(() => App.state.selected && App.state.selected.item.label)).toBe('PS1');
+  expect(await mode(page)).not.toBe('independent');
+  await greyed('series, on select');
+
+  // The 3D mode button: INDEP, the rows come back at once.
+  await clickOn(page, 'mode-button');
+  await expect.poll(() => mode(page), { message: 'the mode button flips to independent' }).toBe('independent');
+  await normal('after the mode button');
+
+  // CH2 set to 5 V through the inspector, then Run: CH2 gives 5 V.
+  await input('voltage2').fill('5');
+  await input('voltage2').press('Enter');
+  await expect.poll(() => page.evaluate(() => App.state.components.find(c => c.label === 'PS1').values.voltage2),
+    { message: 'the inspector edit lands on voltage2' }).toBe(5);
+  // Wired now: the wires would sit in front of the case for the click above.
+  await wire(page, 'PS1.3', 'bp_63');   // com2, CH2 +
+  await wire(page, 'PS1.2', 'bn_63');   // neg, CH2 −
+  await wire(page, 'bp_20', 'j20');
+  await wire(page, 'j24', 'bn_24');
+  await expect(row('mode'), 'PS1 is still in the inspector').toHaveCount(1);
+  await page.locator('#sim-run-btn').click();
+  await expect(page.locator('#sim-results')).toBeVisible();
+  await expect.poll(() => simText(page), { message: 'the headline reads CH2 5V' }).toContain('CH2 5V');
+  const at = await page.evaluate(() => {
+    const r = window.__lastSim;
+    const v = s => { const { col, row } = App.parseHole(s); return r.voltageAt({ col, row }); };
+    return { top: v('j20'), bottom: v('j24') };
+  });
+  expect(at.top, 'CH2 + is 5 V above CH2 −').toBeCloseTo(5, 6);
+  expect(at.bottom, 'CH2 − is its own ground').toBeCloseTo(0, 6);
+
+  // The inspector's own mode dropdown back to series: greyed again at once.
+  await row('mode').locator('select').selectOption('series');
+  await expect.poll(() => mode(page), { message: 'the dropdown flips back to series' }).toBe('series');
+  await greyed('series again, from the dropdown');
+  await expect(input('voltage2'), 'the value set in independent still shows').toHaveValue('5');
+  expect(errors).toEqual([]);
+});

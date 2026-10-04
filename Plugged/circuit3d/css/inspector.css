@@ -111,6 +111,25 @@
 .inspector-hint[hidden],
 .inspector-error[hidden] { display: none; }
 
+/* A value that doesn't apply in the part's mode (a supply's CH2 in series):
+   greyed, its input disabled, its note beside the name (#127). */
+.inspector-off {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 500;
+  font-style: italic;
+  text-transform: none;
+  color: var(--text-muted);
+}
+.inspector-off[hidden] { display: none; }
+
+.inspector-row-disabled { opacity: 0.5; }
+.inspector-row-disabled .inspector-input {
+  color: var(--text-muted);
+  background: #f3f4f6;
+  cursor: not-allowed;
+}
+
 .inspector-empty {
   font-size: 11px;
   color: var(--text-muted);

@@ -85,6 +85,12 @@ const nPins = n => variant(testThree, d => {
   d.elements   = () => [{ kind: 'R', pins: ['p0', 'p1'], ohms: 1000 }];
 });
 
+// A part with a choice control `mode` (a / b), for activeWhen (#127).
+const testModes = () => variant(testSpan, d => {
+  d.controls.mode = { type: 'choice', options: ['a', 'b'], default: 'a', saved: true };
+});
+const when = aw => variant(testModes, d => { d.values.resistance.activeWhen = aw; });
+
 // Inline <svg> markup of exactly `bytes` UTF-8 bytes, padded with `ch`.
 function svgOf(bytes, ch = 'a') {
   const shell = '<svg></svg>';
@@ -215,6 +221,22 @@ const BROKEN = [
   ['a V element whose ref is not one of its pins',
                                       variant(testOff, d => { d.elements = v => [{ kind: 'V', pins: ['a', 'b'], volts: v.voltage, ref: 'nope' }]; }), [/\(V\)/, /ref/, /nope/], 'test_off'],
 
+  // activeWhen (#127): { <choice control>: <one of its options>, note: 1–24 chars }
+  ['an activeWhen that is not an object',
+                                      when('b'),                                                      [/values\.resistance\.activeWhen/, /object/]],
+  ['an activeWhen naming no control', when({ note: 'only in b' }),                                     [/values\.resistance\.activeWhen/, /control/]],
+  ['an activeWhen on a missing control',
+                                      when({ nope: 'a', note: 'only in a' }),                         [/values\.resistance\.activeWhen/, /nope/]],
+  ['an activeWhen on a control that is not a choice',
+                                      when({ closed: true, note: 'only closed' }),                    [/values\.resistance\.activeWhen/, /closed/, /choice/]],
+  ['an activeWhen on an option the control does not have',
+                                      when({ mode: 'zz', note: 'only in zz' }),                       [/values\.resistance\.activeWhen/, /zz/]],
+  ['an activeWhen with no note',      when({ mode: 'b' }),                                            [/values\.resistance\.activeWhen/, /note/]],
+  ['an activeWhen note that is not a string',
+                                      when({ mode: 'b', note: 42 }),                                  [/values\.resistance\.activeWhen/, /note/]],
+  ['an activeWhen note that is empty', when({ mode: 'b', note: '' }),                                 [/values\.resistance\.activeWhen/, /note/]],
+  ['an activeWhen note of 25 chars',  when({ mode: 'b', note: 'N'.repeat(25) }),                      [/values\.resistance\.activeWhen/, /note/, /24/]],
+
   // Examples and keywords
   ['no examples',                     variant(testSpan, d => { d.examples = []; }),                   [/example/]],
   ['9 keywords',                      variant(testSpan, d => { d.ai.keywords = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8', 'k9']; }), [/keyword/, /8/]],
@@ -261,6 +283,11 @@ const AT_LIMIT = [
                              variant(testSpan, d => { d.values.resistance.ai = false; Object.assign(d.controls.closed, { ai: false, clickAnytime: true }); })],
   ['a V element whose ref is one of its pins',
                              variant(testOff, d => { d.elements = v => [{ kind: 'V', pins: ['a', 'b'], volts: v.voltage, ref: 'b' }]; })],
+  // The valid twins of the #127 activeWhen rejections.
+  ['an activeWhen on a choice control\'s option, note of 24 chars',
+                             when({ mode: 'b', note: 'N'.repeat(24) })],
+  ['an activeWhen like the bench supply\'s (note "tracks CH1") on the default option',
+                             when({ mode: 'a', note: 'tracks CH1' })],
 ];
 
 for (const [what, def] of AT_LIMIT) {

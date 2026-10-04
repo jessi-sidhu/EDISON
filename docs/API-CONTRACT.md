@@ -82,6 +82,7 @@ Exactly one of these three kinds:
 ```
 The default must be valid. `Parts.checkValue` is the only validator, and the inspector, AI path and file loading all use it.
 - Either form may add `ai: false`: the value is left out of the AI's `place_` tool and `set_value` (the inspector still shows it), e.g. the bench supply's `voltage2` / `limit2` (#124).
+- Either form may add `activeWhen: { <control>: <option>, note }`: the value applies only while that `choice` control has that option; otherwise the inspector greys its row with `note` (1–24 chars) and refuses edits, e.g. the bench supply's `voltage2` / `limit2` with `{ mode: 'independent', note: 'tracks CH1' }` (#127).
 
 ### `ControlSpec`
 ```js
@@ -217,6 +218,8 @@ The board as plain data, no THREE or DOM, so an AI build can be applied and simu
 
 ### `POST /api/ask` (#84)
 - Request: `{ markdown, message, history, board? }`. `board` is `App.exportBoard()`. A request without it (an older client) behaves as before #84.
+- Errors (#129): a DeepSeek ask past its deadline (`DEEPSEEK_TIMEOUT_MS`, default 60000, shared by every round, repairs included) → 504 `{ reply: 'The AI took too long — try again.', actions: [], code: 'AI_TIMEOUT' }`. Any other AI failure → 502 `{ reply, actions: [] }`. The page gives up on its own after `SparkyChat.ASK_TIMEOUT_MS` (75000) with the same message.
+- Fallback model (#130): when one DeepSeek request takes longer than `DEEPSEEK_PRIMARY_TIMEOUT_MS` (default 25000), or answers 5xx, or can't be reached, the whole ask restarts once on `DEEPSEEK_FALLBACK_MODEL` (default `deepseek-v4-pro`; empty turns it off) inside the same `DEEPSEEK_TIMEOUT_MS` deadline. A 4xx never falls back. The response shape is unchanged; only the server log adds ` (fallback <model>)`.
 - Every live wire has an id `W<n>` (highest in use + 1, never renumbered; after the AI's `delete_all` it starts again at W1). The markdown Wires table is `| id | from | to | color |`.
 - Server checks: a reply with `delete_all` is checked from its last one, as before. An edit with a `board` is checked on `Board.apply(board, actions).board`, rebuilt by `Board.toActions` so it gets the full checker and the simulator, with the rebuild's labels mapped back to the board's own in the problems. An edit reports only the problems it introduces: the board after it minus the board before, compared in the board's own labels, so unfinished wiring already on the board is never reported. The repair loop and the Heads up both use this. An edit without a `board` is not checked. The actions sent back are always the reply's own.
 

@@ -137,7 +137,56 @@ function toOpenAITools(circuitTools) {
   }));
 }
 
-async function askDeepSeek(markdown, userMsg, history, ctx, board) {
+// One overall deadline for a whole DeepSeek ask (issue #129): every tool-loop
+// and repair round shares it. Read per ask so a test can set it.
+const deepSeekTimeoutMs = () => Number(process.env.DEEPSEEK_TIMEOUT_MS) || 60000;
+
+// Runs run(signal) against one deadline of `ms`. Past it, the signal aborts
+// every request still open and this rejects with code AI_TIMEOUT, even if
+// run is between requests. Several calls inside one run (a fallback model,
+// #130) share the same deadline.
+function withDeadline(ms, run) {
+  const controller = new AbortController();
+  const error = Object.assign(new Error(`The AI took longer than ${ms} ms`), { code: 'AI_TIMEOUT' });
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => { reject(error); controller.abort(error); }, ms);
+  });
+  return Promise.race([run(controller.signal), expired]).finally(() => clearTimeout(timer));
+}
+
+// The fallback model (#130): unset means deepseek-v4-pro, '' turns it off.
+// Read per ask, like the timeouts, so a test can change them.
+function deepSeekFallbackModel() {
+  const v = process.env.DEEPSEEK_FALLBACK_MODEL;
+  return v === undefined ? 'deepseek-v4-pro' : v.trim();
+}
+// How long ONE primary-model request may take before the ask switches.
+const deepSeekPrimaryTimeoutMs = () => Number(process.env.DEEPSEEK_PRIMARY_TIMEOUT_MS) || 25000;
+
+// One ask under one overall deadline. While a fallback model is set, each
+// primary request gets deepSeekPrimaryTimeoutMs; past it, or on a 5xx or a
+// network error, the whole ask restarts once on the fallback with the same
+// opening messages, keeping nothing from the primary's rounds. A 4xx never
+// falls back. The fallback gets only the time left. A reply from the fallback
+// carries a non-enumerable `fallbackModel` (kept out of the JSON for the page).
+function askDeepSeek(markdown, userMsg, history, ctx, board) {
+  const fallback = deepSeekFallbackModel();
+  return withDeadline(deepSeekTimeoutMs(), async signal => {
+    const run = extra => deepSeekRounds(markdown, userMsg, history, { ...ctx, signal, ...extra }, board);
+    if (!fallback || fallback === DEEPSEEK_MODEL) return run({ model: DEEPSEEK_MODEL });
+    try {
+      return await run({ model: DEEPSEEK_MODEL, requestMs: deepSeekPrimaryTimeoutMs() });
+    } catch (e) {
+      if (signal.aborted || !e.canFallBack) throw e;
+      console.warn(`[ask] ${DEEPSEEK_MODEL} failed (${e.message.slice(0, 80)}); retrying on ${fallback}`);
+    }
+    const result = await run({ model: fallback });
+    return Object.defineProperty(result, 'fallbackModel', { value: fallback, enumerable: false });
+  });
+}
+
+async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
   const msg = userMsg || 'Analyze my circuit and tell me what to do next.';
   const boardState = markdown || '**Board is EMPTY — no components or wires placed.**';
 
@@ -246,16 +295,48 @@ function isFixRequest(userMsg) {
   return /\b(fix|repair)\b/i.test(String(userMsg || ''));
 }
 
-// One request to DeepSeek. Returns the assistant message.
+// One request to DeepSeek. Returns the assistant message. With ctx.requestMs
+// the request gets its own signal, aborted past that time or with ctx.signal.
+// An error the fallback model may answer (#130: this request's timeout, a
+// 5xx, a network error) is marked canFallBack.
 async function deepSeekTurn(messages, tools, ctx) {
+  let signal = ctx.signal, timer = null, timedOut = false, unlink = () => {};
+  if (ctx.requestMs) {
+    const request = new AbortController();
+    const follow = () => request.abort(ctx.signal.reason);
+    if (ctx.signal) {
+      if (ctx.signal.aborted) follow();
+      ctx.signal.addEventListener('abort', follow, { once: true });
+      unlink = () => ctx.signal.removeEventListener('abort', follow);
+    }
+    timer = setTimeout(() => { timedOut = true; request.abort(); }, ctx.requestMs);
+    signal = request.signal;
+  }
+  try {
+    return await deepSeekRequest(messages, tools, ctx, signal);
+  } catch (e) {
+    const overall = ctx.signal && ctx.signal.aborted;
+    if (timedOut && !overall) {
+      throw Object.assign(new Error(`DeepSeek ${ctx.model || DEEPSEEK_MODEL} took longer than ${ctx.requestMs} ms`), { canFallBack: true });
+    }
+    if (!overall && (e instanceof TypeError || e.status >= 500)) e.canFallBack = true;
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    unlink();
+  }
+}
+
+async function deepSeekRequest(messages, tools, ctx, signal) {
   const res = await (ctx.fetch || fetch)(DEEPSEEK_URL, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${ctx.apiKey || process.env.DEEPSEEK_API_KEY}`,
     },
     body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
+      model: ctx.model || DEEPSEEK_MODEL,
       messages,
       tools,
       tool_choice: 'auto',
@@ -267,7 +348,7 @@ async function deepSeekTurn(messages, tools, ctx) {
 
   if (!res.ok) {
     const hint = res.status === 402 ? ' (balance is empty: top up at https://platform.deepseek.com/top_up)' : '';
-    throw new Error(`DeepSeek ${res.status}${hint}: ${await res.text()}`);
+    throw Object.assign(new Error(`DeepSeek ${res.status}${hint}: ${await res.text()}`), { status: res.status });
   }
 
   const data = await res.json();
@@ -363,7 +444,10 @@ function makeAsk(askGemini, ctx) {
     } else if (provider === 'deepseek') {
       // Same clean-up and circuit checks the Gemini path applies itself.
       const finish = ctx.finish || (r => r);
-      result = finish({ ...(await askDeepSeek(markdown, userMsg, history, ctx, board)), board, fullCheck: isFixRequest(userMsg) });
+      const raw = await askDeepSeek(markdown, userMsg, history, ctx, board);
+      result = finish({ ...raw, board, fullCheck: isFixRequest(userMsg) });
+      // Which model answered, for the server log only (not enumerable, so not sent).
+      if (raw.fallbackModel) Object.defineProperty(result, 'fallbackModel', { value: raw.fallbackModel, enumerable: false });
     } else {
       result = await askGemini(markdown, userMsg, history, board);
     }
@@ -375,4 +459,4 @@ function makeAsk(askGemini, ctx) {
   };
 }
 
-module.exports = { makeAsk, isFixRequest, parseAgentJSON, fixtureKey, describeTools, toOpenAITools, askDeepSeek, DEEPSEEK_MAX_ROUNDS };
+module.exports = { makeAsk, isFixRequest, parseAgentJSON, fixtureKey, describeTools, toOpenAITools, askDeepSeek, withDeadline, DEEPSEEK_MAX_ROUNDS };

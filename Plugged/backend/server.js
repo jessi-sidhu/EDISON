@@ -1426,12 +1426,14 @@ const server = http.createServer(async (req, res) => {
       if (tooBig) return;
       try {
         const { markdown = '', message = '', history = [], board } = JSON.parse(body || '{}');
-        const { reply, actions } = await ask(markdown, message, history, isBoard(board) ? board : undefined);
-        console.log(`[ask] "${message.slice(0,60)}" → ${actions.length} action(s)`);
+        const result = await ask(markdown, message, history, isBoard(board) ? board : undefined);
+        const { reply, actions } = result;
+        console.log(`[ask] "${message.slice(0,60)}" → ${actions.length} action(s)${result.fallbackModel ? ` (fallback ${result.fallbackModel})` : ''}`);
         return sendJSON(res, 200, { reply, actions });
       } catch (e) {
         // Upstream body can contain key/quota detail, so it stays in the log.
         console.error('[ask] failed:', e.message);
+        if (e.code === 'AI_TIMEOUT') return sendJSON(res, 504, { reply: 'The AI took too long — try again.', actions: [], code: 'AI_TIMEOUT' });
         return sendJSON(res, 502, { reply: 'Sparky could not reach the AI service. Please try again in a moment.', actions: [] });
       }
     });

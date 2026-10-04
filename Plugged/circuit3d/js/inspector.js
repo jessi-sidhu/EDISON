@@ -10,6 +10,8 @@
 //    - slider:  a range input; a drag is one gesture (app.js).
 //    - toggle / momentary: a checkbox. A momentary one works only while
 //               the simulation runs, like a click on the part.
+//  A value whose activeWhen doesn't hold (e.g. a supply's CH2 in series)
+//  is greyed: its input disabled, its note beside the name (#127).
 //  A value edit is App.setValues (one undo step, re-simulates while
 //  running); a control edit is App.controlEdit (the gesture dispatcher).
 //
@@ -20,7 +22,8 @@
 //  Browser: window.Inspector
 //  Node:    module.exports = Inspector
 //
-//  Inspector.rows(def, comp) → Row[]   values (def.ai.values, else all), then controls
+//  Inspector.rows(def, comp) → Row[]   values (def.ai.values, else all), then controls;
+//                                       a value off by its activeWhen adds disabled: true, note
 //  Inspector.edit(comp, key, raw) → { ok: true, values, hint? } | { ok: false, reason }
 //  Inspector.mount(el) · show(comp) · hide() · sync() · current()
 // ─────────────────────────────────────────────────────────────
@@ -37,9 +40,22 @@
 
   const own = (o, k) => !!o && Object.hasOwn(o, k) && o[k] != null;
 
+  // A value's activeWhen note when it doesn't apply now (its control is
+  // off the option, by the saved setting or else the default), else null.
+  function offNote(def, spec, comp) {
+    const aw = spec && spec.activeWhen;
+    if (!aw) return null;
+    const key   = Object.keys(aw).find(k => k !== 'note');
+    const ctrls = (comp && comp.controls) || {};
+    const c     = (def.controls || {})[key];
+    const now   = own(ctrls, key) ? ctrls[key] : c && c.default;
+    return now === aw[key] ? null : aw.note;
+  }
+
   // ── Rows ─────────────────────────────────────────────────────
   // Which values get a row: def.ai.values when set, else every value
-  // (the rule App.formatValue uses).
+  // (the rule App.formatValue uses). A value off by its activeWhen gets
+  // disabled: true and its note; it still shows its value.
   function rows(def, comp) {
     const specs = def.values || {};
     const shown = (def.ai && def.ai.values) || Object.keys(specs);
@@ -50,8 +66,12 @@
     for (const [key, spec] of Object.entries(specs)) {
       if (!shown.includes(key)) continue;
       const value = own(vals, key) ? vals[key] : spec.default;
-      if (spec.choices) out.push({ kind: 'choice', key, options: Object.keys(spec.choices), value });
-      else out.push({ kind: 'number', key, unit: spec.unit, value, min: spec.min, max: spec.max, series: spec.series });
+      const row = spec.choices
+        ? { kind: 'choice', key, options: Object.keys(spec.choices), value }
+        : { kind: 'number', key, unit: spec.unit, value, min: spec.min, max: spec.max, series: spec.series };
+      const note = offNote(def, spec, comp);
+      if (note) Object.assign(row, { disabled: true, note });
+      out.push(row);
     }
 
     for (const [key, spec] of Object.entries(def.controls || {})) {
@@ -77,6 +97,8 @@
     const Parts = registry();
     const def   = Parts.get(comp.type);
     const spec  = def && def.values && Object.hasOwn(def.values, key) ? def.values[key] : null;
+    const off   = spec && offNote(def, spec, comp);
+    if (off) return { ok: false, reason: `${key} is not used in this mode (${off})` };
     let value = raw;
     if (spec && !spec.choices && typeof raw === 'string') {
       const text = raw.trim();
@@ -260,7 +282,13 @@
       const row = el('div', 'inspector-row');
       row.dataset.key  = r.key;
       row.dataset.kind = r.kind;
-      row.append(el('label', 'inspector-key', r.key));
+      const key = el('label', 'inspector-key', r.key);
+      if (r.kind === 'number' || r.kind === 'choice') {
+        const note = el('span', 'inspector-off');
+        note.hidden = true;
+        key.append(note);
+      }
+      row.append(key);
       BUILD[r.kind](comp, r, row);
       const hint = el('div', 'inspector-hint');   hint.hidden = true;
       const err  = el('div', 'inspector-error');  err.hidden  = true;
@@ -279,8 +307,21 @@
     rowsEl().textContent = '';
   }
 
+  // A value row greyed (disabled, its note shown) or not, as rows() says:
+  // a mode flip changes it in place, so no rebuild mid-drag.
+  function setOff(row, r) {
+    const note = row.querySelector('.inspector-off');
+    if (!note) return;
+    const input = row.querySelector('input, select');
+    row.classList.toggle('inspector-row-disabled', !!r.disabled);
+    if (input) input.disabled = !!r.disabled;
+    note.textContent = r.note || '';
+    note.hidden = !r.disabled;
+  }
+
   // Controls follow the part (a run, Stop, a click on the part); a focused
-  // input or a slider mid-drag is left as the user has it.
+  // input or a slider mid-drag is left as the user has it. Value rows grey
+  // out or come back as their activeWhen says.
   function sync() {
     if (!panel || !shownComp) return;
     const def = registry().get(shownComp.type);
@@ -288,6 +329,7 @@
     for (const r of rows(def, shownComp)) {
       const row = rowEl(r.key);
       if (!row) continue;
+      setOff(row, r);
       const input = row.querySelector('input, select');
       if (!input) continue;
       if (input.type === 'checkbox') {

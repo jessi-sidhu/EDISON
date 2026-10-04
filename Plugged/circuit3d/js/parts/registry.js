@@ -170,22 +170,43 @@
     }
   }
 
-  function checkValues(values, bad) {
+  // activeWhen: { <choice control>: <one of its options>, note }: the value
+  // applies only while that control has that option (the inspector greys it
+  // out otherwise, with the note).
+  function checkActiveWhen(aw, controls, at, bad) {
+    at += '.activeWhen';
+    if (!isObj(aw)) return bad(`${at} must be an object { <control>: <option>, note }`);
+    const keys = Object.keys(aw).filter(k => k !== 'note');
+    if (keys.length !== 1) bad(`${at} must name exactly one control; got ${keys.length}`);
+    else {
+      const key = keys[0];
+      const c = isObj(controls) && Object.hasOwn(controls, key) ? controls[key] : null;
+      if (!isObj(c)) bad(`${at} names control "${key}", which is not in controls`);
+      else if (c.type !== 'choice') bad(`${at} names control "${key}", which is not a choice`);
+      else if (!Array.isArray(c.options) || !c.options.includes(aw[key])) {
+        bad(`${at}: "${aw[key]}" is not one of controls.${key}'s options (${list(c.options || [])})`);
+      }
+    }
+    if (typeof aw.note !== 'string' || !aw.note || aw.note.length > 24) bad(`${at}.note must be text of 1–24 characters`);
+  }
+
+  function checkValues(values, controls, bad) {
     if (!isObj(values)) return bad('values must be an object of ValueSpecs');
     for (const [key, spec] of Object.entries(values)) {
       const at = 'values.' + key;
       if (!isObj(spec)) { bad(`${at} must be a ValueSpec object`); continue; }
       // ai: false keeps the value out of the AI's tools; the inspector still shows it.
       if (spec.ai !== undefined && spec.ai !== false) bad(`${at}.ai may only be false`);
+      if (spec.activeWhen !== undefined) checkActiveWhen(spec.activeWhen, controls, at, bad);
       if ('choices' in spec) {
-        unknownFields(spec, ['choices', 'default', 'ai'], at, bad);
+        unknownFields(spec, ['choices', 'default', 'ai', 'activeWhen'], at, bad);
         const names = isObj(spec.choices) ? Object.keys(spec.choices) : [];
         if (!names.length) { bad(`${at}.choices must name at least one choice`); continue; }
         for (const c of names) if (!isObj(spec.choices[c])) bad(`${at}.choices.${c} must be an object of overrides`);
         if (!names.includes(spec.default)) bad(`${at}.default "${spec.default}" is not one of its choices (${names.join(', ')})`);
         continue;
       }
-      unknownFields(spec, ['unit', 'default', 'min', 'max', 'series', 'ai'], at, bad);
+      unknownFields(spec, ['unit', 'default', 'min', 'max', 'series', 'ai', 'activeWhen'], at, bad);
       if (spec.unit === undefined) bad(`${at}.unit is required`);
       else if (!UNITS.includes(spec.unit)) bad(`${at}.unit "${spec.unit}" must be one of ${UNITS.join(', ')}`);
       if (spec.series !== undefined && !SERIES[spec.series]) bad(`${at}.series "${spec.series}" must be E12 or E24`);
@@ -431,7 +452,7 @@
     }
 
     if (def.place !== undefined) checkPlace(def.place, pins, bad);
-    if (def.values !== undefined) checkValues(def.values, bad);
+    if (def.values !== undefined) checkValues(def.values, def.controls, bad);
     if (def.controls !== undefined) checkControls(def.controls, bad);
     if (def.gestures !== undefined) checkGestures(def.gestures, def.controls, bad);
     checkBehaviour(def, pins, bad);
