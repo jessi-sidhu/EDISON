@@ -18,8 +18,9 @@
 //                      the net in mA; sums to about 0
 //      problems()      [{ kind, labels[], why, info? }], the mistake checker
 //                      (#95): 'short' | 'no-resistor' | 'backwards' | 'open'
-//                      | 'over' | 'no-supply' | 'output-shorted', and
-//                      'clipped' with info: true (a note, never an error)
+//                      | 'over' | 'no-supply' | 'output-shorted'
+//                      | 'floating-input', and 'clipped' with info: true
+//                      (a note, never an error)
 //      thevenin(a, b)  two holes → { Vth V, Rth Ω, In mA } between them, or
 //                      { why } (#93); solves a copy of the board when called
 //      lines()         [{ label, title, sub[], level }], one per part with
@@ -276,6 +277,15 @@
       // comparator clips on purpose. An unused half (inputs floating) is neither.
       labelled.filter(g => warned(g.comp.label, /no supply/i))
         .forEach(g => add('no-supply', [g.comp.label], `${g.comp.label}: ${warnings(g.comp.label)}`));
+      // A half the simulator opened because an input connects to nothing
+      // (#1): one row per chip, its own warnings under one "U1: " lead (each
+      // already starts with it). An unpowered chip is no-supply only.
+      labelled.filter(g => parts[g.comp.label] && !warned(g.comp.label, /no supply/i) &&
+                           opampsOf(g, parts[g.comp.label]).some(o => o.floating))
+        .forEach(g => {
+          const label = g.comp.label, lead = new RegExp(`^${escapeRe(label)}:\\s*`);
+          add('floating-input', [label], `${label}: ` + parts[label].warnings.map(w => w.replace(lead, '')).join(' '));
+        });
       labelled.forEach(g => {
         const label = g.comp.label, ops = opampsOf(g, parts[label] || { r: { pins: {}, current: {}, modes: {} } });
         const limited = ops.find(o => o.mode === 'isrc+' || o.mode === 'isrc−');
@@ -357,7 +367,8 @@
 
   // lines(): a problem kind's title, its rank, and the text tidying.
   const TITLES = { short: 'Short circuit', 'no-resistor': 'No resistor', backwards: 'Backwards', open: 'Circuit open',
-                   over: 'Over rating', 'no-supply': 'No supply', 'output-shorted': 'Output shorted', clipped: 'Clipped' };
+                   over: 'Over rating', 'no-supply': 'No supply', 'output-shorted': 'Output shorted', clipped: 'Clipped',
+                   'floating-input': 'Input not connected' };
   const LEVEL_RANK = { fault: 0, warn: 1, ok: 2 };
   const sentence = s => s.charAt(0).toUpperCase() + s.slice(1);
   const escapeRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
