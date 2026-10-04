@@ -804,12 +804,30 @@
     const settle   = open => {
       const blockEls = els.filter(e => e.el.kind === 'D' || (isModeE(e) && !open.has(e)));
       const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]).concat([...open].map(e => [e, 'open'])));
+      let curModes = [];
       const solveFor = modes => solveMNA(graph, grounds, modesOf(modes), parallel.skip, waveT);
+      const solveTrack = modes => { curModes = modes.slice(); return solveFor(modes); };
+      // An E on a rail that asks for 'linear' under positive feedback (du/ds > 1
+      // against the opposite rail) flips to that rail instead: in the ~30 µV band
+      // at a threshold, rail and linear both fail and would ping-pong to the round
+      // cap (#18, the blinker froze at 5.4 s).
       const blocks   = blockEls.map((e, i) => (e.el.kind === 'E'
-        ? { initial: 'linear', check: (sol, mode) => checkE(e, sol, mode),
+        ? { initial: 'linear', check: (sol, mode) => {
+              const x = checkE(e, sol, mode);
+              if (!x || x.to !== 'linear' || (mode !== 'high' && mode !== 'low') || !e.rails) return x;
+              const other = mode === 'high' ? 'low' : 'high';
+              const cur = curModes.slice(); cur[i] = other;
+              const probe = solveFor(cur);
+              if (!probe) return x;
+              const drive = s => s.v(e.nodes[1]) + e.el.gain * (s.v(e.ctrl[0]) - s.v(e.ctrl[1]));
+              const level = s => s.v(e.nodes[0]) + (e.el.rout || 0) * s.eCurrent.get(e);
+              const ds = level(probe) - level(sol);
+              if (Math.abs(ds) > MODE_EPS && (drive(probe) - drive(sol)) / ds > 1) x.to = other;
+              return x;
+            },
             unstable: (sol, modes) => runaway(e, i, sol, modes, solveFor, (held.get(e) || {}).was) }
         : { initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
-      return { blockEls, modesOf, solveFor, solved: settleModes(blocks, solveFor) };
+      return { blockEls, modesOf, solveFor, solved: settleModes(blocks, solveTrack) };
     };
 
     // No solve: an op-amp with a floating input and a driven output can
