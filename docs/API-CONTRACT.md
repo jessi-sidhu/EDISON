@@ -8,16 +8,237 @@
 - Until the real implementation lands, callers use the mock response. Frontend work never waits on backend work.
 - Changes are additive where possible (a new optional field, a new endpoint). A breaking change must list every caller that needs updating.
 
+---
+
+# Part file contract (parts registry)
+
+**Why it exists:** adding a part means writing **one file**, `Plugged/circuit3d/js/parts/<type>.js`, and nothing else. The simulator, placement, 3D view, AI tools, save/load, sidebar and inspector all read the registry. There are no per-type tables anywhere else.
+
+**Design note:** decisions, trade-offs and the build order are in `docs/superpowers/specs/2026-09-27-parts-registry-design.md`.
+
+**Loading:**
+- Each part file is a UMD module that calls `Parts.define({...})`.
+- `parts/index.js` lists every part file. The browser loads it after `parts/registry.js` and before `components.js`, `interaction.js`, `simulate.js`, `ids.js` and `app.js`, in `index.html` and `viewer.html`.
+- Node (`backend/server.js`, Vitest) calls `require('circuit3d/js/parts')`.
+- The **definition half** of a part never touches `THREE`, `document` or `window`.
+- The **view half** (`view`) runs only in the browser.
+
 ## Shared types
-<!-- Core data shapes used across modules, as TypeScript types / JSON examples. -->
+
+### `PartDefinition`
+Passed to `Parts.define()`. **Required** fields are marked ●. Anything not listed here is rejected at registration.
+
+| Field | Type | Rules |
+|---|---|---|
+| ● `type` | string | `/^[a-z][a-z0-9_]*$/`, unique. Saved in circuit files, so it's **never renamed**. |
+| ● `name` | string | Sidebar title, ≤ 24 chars, e.g. `"Resistor"`. |
+| ● `sub` | string | Sidebar subtitle, ≤ 32 chars, e.g. `"2 leads · axial"`. |
+| ● `category` | enum | `Passives`, `Sources`, `Semiconductors`, `I/O` or `Instruments`. |
+| ● `icon` | string | Inline `<svg>` markup, ≤ 2 KB. |
+| ● `prefix` | string | Label prefix, `/^[A-Z]{1,3}$/`, unique (`R` → R1, R2…). |
+| ● `pins` | string[] | 2–16 names, unique, `/^[A-Za-z0-9]+$/`, e.g. `['cathode','anode']`. **The order is saved to disk: never reorder, only append.** `LED1.anode` and `LED1.1` both refer to a pin. |
+| `ref` | pin name | Only for sources: this pin is 0 V (ground). The first part by label that has `ref` wins. |
+| ● `place` | `Placement` | See below. |
+| `values` | `{ [key]: ValueSpec }` | Editable settings, saved. |
+| `controls` | `{ [key]: ControlSpec }` | Live settings (knob, switch). |
+| `gestures` | `{ click?: key, scroll?: key }` | Map 3D gestures onto a control key. |
+| ● `elements` | `(values, controls) → Element[]` | The simulator's building blocks. Pure function. |
+| `measure` | `(r: PartResult) → object` | Flat, JSON-safe outputs, e.g. `{ on: true, current: 14.9 }`. Drives visuals and results. |
+| `warnings` | `(r, m) → string[]` | Advice, e.g. `"LED1 is backwards"`. Each ≤ 120 chars. |
+| ● `report` | `(r, m) → string` | One results line, ≤ 80 chars, e.g. `"ON, 14.9 mA"`. |
+| ● `ai` | `AiSpec` | See below. |
+| ● `view` | `ViewSpec` | Browser only. See below. |
+| ● `examples` | `Example[]` | At least 1 known-answer circuit. See the testing contract. |
+
+### `Placement`
+Exactly one of these three kinds:
+
+```js
+{ kind: 'span', span: { min, max, default }, rotations: ['h'] | ['h','v'] }
+//   2-lead parts. span counts holes along the placement direction (a3→a7 = 4).
+//   min ≤ default ≤ max. A fixed size is min = max = default (the button is {3,3,3}).
+//   The ghost and hand placement use `default`; the AI may use anything in range.
+
+{ kind: 'footprint', legs: [[dCol, dRow], ...], straddle?: boolean, rotations: [0, 180] | [0, 90, 180, 270] }
+//   3+ lead parts. One offset per pin, in pin order, from the anchor (pin 0).
+//   straddle: true = chip across the centre gap (legs in rows e and f); rotations limited to [0, 180].
+
+{ kind: 'offboard' }
+//   Battery, bench supply, instruments. Sits beside the board; legs have hole: null.
+```
+
+### `ValueSpec`
+```js
+{ unit: 'Ω'|'V'|'A'|'F'|'H'|'%'|'°C'|'lux', default: number, min: number, max: number, series?: 'E12'|'E24' }
+//   Any number in [min, max] is allowed. `series` only powers the "closest kit value" hint.
+{ choices: { [name]: { ...overrides } }, default: name }
+//   e.g. LED colour: { red: { vf: 2.0 }, green: { vf: 2.2 }, ... }. A choice may set other values.
+```
+The default must be valid. `Parts.checkValue` is the only validator, and the inspector, AI path and file loading all use it.
+
+### `ControlSpec`
+```js
+{ type: 'toggle',    default: boolean, saved: boolean }
+{ type: 'momentary', default: false,   saved: false }            // button: true only while held/pressed
+{ type: 'slider',    default: number,  min, max, step, unit?, saved: boolean }
+```
+
+### `Element` (the simulator's building blocks)
+The element `pins` name the part's pins, or internal nodes written `'#name'` (private to the part). The optional `id` names the element for `r.current[id]`.
+
+| `kind` | Fields | Notes |
+|---|---|---|
+| `R` | `pins:[a,b], ohms` | `ohms > 0` |
+| `V` | `pins:[plus,minus], volts` | Adds one unknown. |
+| `I` | `pins:[from,to], amps` | Arrives with the first part that needs it. |
+| `SW` | `pins:[a,b], closed` | Closed = 1 mΩ, open = removed. Never an ideal short. |
+| `D` | `pins:[anode,cathode], vf, ron, vz?` | Mode block: `off` / `on` / (`breakdown` if `vz`). Replaces today's LED special case. |
+| `E` | `out:[+,−], ctrl:[+,−], gain, clamp?:[lo,hi]` | Voltage-controlled voltage source. `clamp` makes it a mode block (`linear` / `low` / `high`): the op-amp's rails. Arrives with dependent sources. |
+| `G` | `out:[from,to], ctrl:[+,−], gain` | Voltage-controlled current source. Arrives with dependent sources. |
+| `C`, `L` | none | **Reserved.** Rejected until Phase 5–6. |
+
+**Mode blocks** (`D`, and `E` with `clamp`) are solved by one generic loop:
+1. Solve.
+2. Find the mode block most inconsistent with the result, and flip it.
+3. Repeat, up to `4·n + 10` rounds, with anti-cycling.
+
+If it doesn't settle, the status is `'unsettled'`. It never reports wrong numbers.
+
+### `PartResult` (the core → a part's `measure` / `warnings` / `report`)
+```js
+{
+  label: 'LED1', values, controls,
+  pins:    { cathode: 0.00, anode: 2.00 },   // volts vs ground, null if floating
+  current: { d: 14.9 },                       // mA, by element id (or index), + in pin order
+  modes:   { d: 'on' },                       // mode blocks only
+}
+```
+
+### `AiSpec`
+```js
+{
+  tool?: 'place_<type>',       // default; must be unique
+  about: '≤ 200 chars',        // tool description (ranges and kit series are appended automatically)
+  keywords: ['pot', 'knob'],   // ≤ 8, lower case; used by tool selection
+  guide?: '≤ 400 chars',       // wiring rules, sent only when this tool is sent
+  recipe?: Example,            // a worked build; must also pass the testing contract
+}
+```
+
+### `ViewSpec` (browser only)
+```js
+{
+  build(ctx, values, controls, legs) → { group: THREE.Group, pinPositions: THREE.Vector3[] },
+  //   One pin position per pin, in pin order. The ghost is this same build drawn with ghost materials.
+  //   ctx: { THREE, lead(from,to), mat.{body,metal,glass,label}, holeWorld(col,row), boardGeometry }
+  update?(obj, measured, r) → void,   // glow, spin, sound; called after every simulation
+}
+```
+
+### `Example` (known-answer circuit)
+```js
+{
+  name: 'LED on 9 V with 470 Ω lights at ~14.9 mA',
+  parts: [ { type: 'battery', label: 'BAT1' },
+           { type: 'resistor', label: 'R1', holes: ['a2','a6'] },
+           { type: 'led', label: 'LED1', holes: ['b8','b6'], values: { color: 'red' } } ],   // cathode b8, anode b6
+  wires: [ ['BAT1.0','tp_50'], ['BAT1.1','tn_50'], ['tp_2','b2'], ['c8','tn_8'] ],        // one lead per hole
+  expect: { 'LED1': { on: true, current: [14.0, 15.8] } },   // exact value or [lo, hi]; keys are measure() fields
+}
+```
+
+### Placed-part record (runtime) and saved record
+```js
+// runtime (state.components[i])
+{ type, label, values, controls, holeRefs: [{col,row}|null per pin], position?: {x,z}, group, pinMeshes, ... }
+
+// saved (file, autosave, undo): unchanged shape, plus `controls` (saved ones only)
+{ type, label, values, controls?, holeRefs, position }
+// holeRefs has ONE entry per pin, in pin order (2-lead parts: unchanged from today).
+// Off-board parts: holeRefs null, position set. Unknown types are kept as-is (#3).
+```
+
+### Legs and the hole map
+```js
+Parts.legsOf(comp) → [ { pin: 'cathode', col: 8, row: 'b', hole: 'b8' },
+                       { pin: 'anode',   col: 6, row: 'b', hole: 'b6' } ]   // hole: null for off-board legs
+App.holeMap() → Map<'b6', { label: 'LED1', pin: 'anode' } | { wire: 3, end: 'from' | 'to' }>
+```
+- **The stored legs are the truth.** The footprint is only used when placing.
+- **The hole map is rebuilt from the records after every change** (place, delete, undo, load, AI apply). It is never patched as things change, and never saved. It replaces `breadboard.js`'s unused `occupied` flag.
+- **The same map feeds** the overlap check, the AI board state, the stacked-holes check, and later the multimeter and check-my-board.
 
 ## Interfaces
-<!-- Copy this block per endpoint / function / event. -->
 
-### `<METHOD> /path` or `functionName()`
-- **Owner:**
-- **Called by:**
-- **Input:**
-- **Output:**
-- **Errors:**
-- **Mock:**
+### `Parts.define(def)`
+- **Owner:** registry (`parts/registry.js`)
+- **Called by:** every `parts/<type>.js`
+- **Input:** a `PartDefinition`
+- **Output:** the frozen definition
+- **Errors:** throws `PartDefinitionError` naming the part and every rule broken. Examples:
+  - an unknown field
+  - a default outside its range
+  - a duplicate prefix
+  - `C`/`L` elements
+  - a guide over 400 chars
+  - a pin count that doesn't match the footprint
+- **Mock:** none. The registry is the first thing built (issue A).
+
+### `Parts.get(type)` / `Parts.all()`
+- **Input:** `type` string / none
+- **Output:** a definition or `null` / an array in category order, then name order
+- **Errors:** none
+
+### `Parts.checkValue(type, key, value)`
+- **Output:** `{ ok: true, value, hint? }`, where `hint` is e.g. `"closest kit value: 1.2 kΩ"` when `series` is set and the value isn't in it. Or `{ ok: false, reason }`.
+- **Errors:** `reason` examples:
+  - `"resistance must be 1 Ω–10 MΩ; got −5"`
+  - `"color must be one of red, yellow, green, blue, white"`
+
+### `Parts.nearestKit(value, series)`
+- **Output:** the nearest value in the E-series across decades. `1234, 'E12'` gives `1200`, and `470, 'E12'` gives `470`.
+
+### `Parts.checkPlacement(type, legs, holeMap, board)`
+- **Called by:** hand placement (`interaction.js`), the AI apply path (`chat.js`), the server (`finishAIReply`, inside the AI's tool loop), and file loading, where it only flags, never blocks.
+- **Output:** `{ ok: true }` or `{ ok: false, reason }`
+- **Errors:** `reason` always names the rule and the allowed range:
+  - Span: `"R1 not placed: a resistor's leads must be 3–8 columns apart; a3 to a33 is 30."`
+  - Overlap: `"LED1 not placed: b6 already holds R1's pin 2. A hole holds one lead; use another hole in column 6."`
+  - Edge: `"U1 not placed: an 8-pin chip at column 62 would run past column 63."`
+  - Straddle: `"U1 not placed: a chip must sit across the centre gap (rows e and f)."`
+
+### `Sim.analyze(components, wires)` (changed)
+- **Output:** as today (`status, lines, nodeVoltages, currents, shorted, voltageAt`), plus:
+  - `status` can also be `'unsettled'` or `'no-source'`
+  - `parts: { [label]: { r: PartResult, m: measured, warnings: string[] } }`
+- `ledsOn` and `buzzersOn` stay until issue C removes the last caller.
+
+### AI tools (generated by `server.js` from the registry)
+- **`span` parts:** `place_<type> { holeA, holeB, ...values }`. Existing names are unchanged.
+- **`footprint` parts:** `place_<type> { hole, direction: 'right'|'left'|'up'|'down', ...values }`. `hole` = pin 0.
+- **`offboard` parts:** `place_<type> { ...values }`.
+- **Always sent:** `delete_all`, `add_wire`, `place_battery`, and:
+  - `set_value { part: 'R1', <key>: value }`
+  - `set_control { part: 'SW1', <key>: value }`
+  - `delete_part { part: 'R1' }`
+  - `use_parts { types: [...] }`, which adds those parts' tools and continues the same tool loop.
+- **Tool selection** is `selectTools(message, boardTypes) → tool[]`, a pure function that's tested. Per request it sends:
+  1. the always-sent tools
+  2. the tools for parts on the board
+  3. keyword matches
+  4. if nothing else matched, the everyday set (resistor, LED, button, buzzer)
+
+  It sends **at most 12 tools**. The prompt always carries a one-line catalogue of every part.
+- **Generated prompt sections:** label prefixes, sizing lines built from `span`/`legs` (e.g. `"resistor: 3–8 columns apart (4 is typical)"`), pin names, and the guides of the tools being sent. Recipes stay hand-written.
+- **The server's circuit checks** read `elements`: `R` and `SW` conduct, and `D` conducts one way. Placement goes through `Parts.checkPlacement`.
+
+## Testing contract (a part is done when all of these pass)
+1. **Registry check**, automatic for every part: every rule in `PartDefinition` and `Placement`.
+2. **Known answers:** every `examples[]` entry is run through `Sim.analyze` and matches `expect`.
+3. **Round trip**, automatic for every part: place → save → load gives back the same type, label, values, saved controls and legs.
+4. **AI:** its generated tool is valid, and `selectTools` returns it for its keywords.
+5. **Recipe**, if present: simulates to its `expect`, uses no hole twice, and passes `findCircuitProblems`.
+6. **Placement**, for every 2-lead part: default span OK, `max + 1` and `min − 1` refused with the range in the message. For the resistor specifically: **a3→a33 is refused, and the message contains "3–8"**. For footprint parts: an edge placement is refused.
+7. **Hole map:** after place, delete, undo and reload, `App.holeMap()` equals a fresh rebuild. Every part has one leg per pin.
+8. **Browser**, one Playwright spec looping over `Parts.all()`: place from the sidebar, see the ghost, simulate, no console errors. The viewer page loads a circuit that uses every part.
+9. **QA:** a `docs/QA.md` case with a real AI prompt that uses the part.

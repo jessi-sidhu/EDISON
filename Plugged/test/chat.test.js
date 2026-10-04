@@ -3,12 +3,18 @@
 const assert = require('node:assert');
 const Chat = require('../circuit3d/js/chat.js');
 
+// Where the fake board says an AI battery goes: off the right-hand end of a
+// board BOARD_W wide, right behind the top rails (tp/tn midpoint, z = -3.15).
+// chat.js never works this out itself; it asks the board (issue #6).
+const spotFor = BOARD_W => ({ x: BOARD_W / 2 + 2.5, z: -3.15 });
+
 // Stands in for the 3D board. Records wires instead of drawing them.
 function fakeBoard(parts) {
   const wires = [];
   return {
     wires,
     components: () => parts,
+    batterySpot: () => spotFor(21.4),   // today's 50-column board
     parseHole: s => {
       const m = /^([a-j])(\d+)$/.exec(s);
       if (!m) throw new Error('parseHole: unrecognised hole address: ' + s);
@@ -261,4 +267,34 @@ test('buzzers and buttons get no values, even if the action carries some', () =>
     { tool: 'place_button', holeA: 'a6', holeB: 'a9', resistance: 1000, color: 'green', voltage: 5 },
   ], board);
   assert.deepStrictEqual(board.got, [['buzzer', {}], ['button', {}]]);
+});
+
+// ── Battery spot comes from the board, issue #6 ─────────────────
+
+// A board that records where placeBattery was asked to put the battery.
+function spotBoard(spot) {
+  const got = [];
+  const board = Object.assign(fakeBoard([]), {
+    batterySpot:  () => spot,
+    placeBattery: (x, z) => got.push({ x, z }),
+  });
+  board.got = got;
+  return board;
+}
+
+test('on a 63-column board the AI battery lands past the board end, behind the top rails', () => {
+  const board = spotBoard(spotFor(26.6));   // (63 - 1) * 0.40 + 2 * 0.90
+  const out = Chat.applyActions([{ tool: 'place_battery' }], board);
+  assert.deepEqual(out, { applied: 1, failed: 0 });
+  assert.equal(board.got.length, 1);
+  assert.ok(board.got[0].x > 13.3, `battery x ${board.got[0].x} is on the 63-column board, not past its end (13.3)`);
+  assert.equal(board.got[0].z, -3.15);
+});
+
+test('the AI battery goes wherever the board says, with no spot of chat.js\'s own', () => {
+  const board = spotBoard({ x: 99, z: -3.15 });
+  Chat.acceptBuild([{ tool: 'delete_all' }, { tool: 'place_battery' }],
+    Object.assign(board, { batch: fn => fn() }));
+  assert.deepStrictEqual(board.got, [{ x: 99, z: -3.15 }]);
+  assert.equal(Chat.BATTERY_SPOT, undefined, 'the hard-coded BATTERY_SPOT {x:13, z:0} must be gone');
 });

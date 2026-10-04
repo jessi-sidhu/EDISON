@@ -12,9 +12,16 @@
   scene.background = new THREE.Color(0xdcdad4);
 
   // ── Camera ─────────────────────────────────────────────────
+  // The only copy of each view: home (start + reset button) and the
+  // isometric angle saved thumbnails are shot from.
+  App.CAMERA = {
+    home:  { pos: [0, 22, 30], target: [0, 0, 0] },
+    thumb: { pos: [20, 22, 20], target: [0, 0, 0] },
+  };
+
   const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 300);
-  camera.position.set(0, 22, 30);
-  camera.lookAt(0, 0, 0);
+  camera.position.set(...App.CAMERA.home.pos);
+  camera.lookAt(...App.CAMERA.home.target);
 
   // ── Renderer ───────────────────────────────────────────────
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -38,7 +45,7 @@
     MIDDLE: THREE.MOUSE.DOLLY,
     RIGHT:  THREE.MOUSE.PAN,
   };
-  controls.target.set(0, 0, 0);
+  controls.target.set(...App.CAMERA.home.target);
 
   // Suppress browser right-click menu on canvas so right-drag pan works
   canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -85,5 +92,12 @@
   App.camera   = camera;
   App.renderer = renderer;
   App.controls = controls;
+
+  // Back to the home view (the reset-camera button calls this).
+  App.resetCamera = function () {
+    controls.target.set(...App.CAMERA.home.target);
+    camera.position.set(...App.CAMERA.home.pos);
+    controls.update();
+  };
 
 })(window.App = window.App || {});

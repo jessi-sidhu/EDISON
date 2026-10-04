@@ -59,3 +59,85 @@ test('the dashboard signs users in and out through storage.js and never deletes 
   assert.match(html, /SparkyStorage\.signOut\(localStorage\)/);
   assert.doesNotMatch(html, /removeItem\(LS_KEY\)|\[LS_KEY, STARRED_KEY/, 'sign-out must not remove saved circuits');
 });
+
+// ── One copy of each number, issue #6 ───────────────────────────
+//  Before the board grows to 63 columns, the camera view, the battery spot
+//  and the part spans each live in one place. These count the copies.
+
+const JS_DIR = 'circuit3d/js';
+const editorSources = () => [
+  ...fs.readdirSync(path.join(__dirname, '..', JS_DIR))
+    .filter(f => f.endsWith('.js'))
+    .map(f => ({ file: `${JS_DIR}/${f}`, src: read(`${JS_DIR}/${f}`) })),
+  { file: 'circuit3d/index.html', src: read('circuit3d/index.html') },
+];
+
+// Every file (and how many times) a pattern appears in the editor's code.
+function copiesOf(re) {
+  const g = new RegExp(re.source, 'g');
+  return editorSources()
+    .map(({ file, src }) => ({ file, n: (src.match(g) || []).length }))
+    .filter(x => x.n > 0);
+}
+const total = hits => hits.reduce((s, x) => s + x.n, 0);
+const where = hits => hits.map(x => `${x.file} x${x.n}`).join(', ') || 'nowhere';
+
+test('the home camera view (0, 22, 30) is written once, as App.CAMERA in scene.js', () => {
+  const hits = copiesOf(/22,\s*(z:\s*)?30\b/);
+  assert.equal(total(hits), 1, 'home camera position found in: ' + where(hits));
+  assert.equal(hits[0].file, 'circuit3d/js/scene.js');
+  const scene = read('circuit3d/js/scene.js');
+  assert.match(scene, /App\.CAMERA\s*=/);
+  assert.match(scene, /App\.resetCamera\s*=/);
+  assert.match(read('circuit3d/js/app.js'), /App\.CAMERA\.home/, '_isCamDefault must read App.CAMERA.home');
+});
+
+test('the thumbnail camera view (20, 22, 20) is written once', () => {
+  const hits = copiesOf(/20,\s*22,\s*20/);
+  assert.equal(total(hits), 1, 'thumbnail camera position found in: ' + where(hits));
+});
+
+test('the reset-camera button calls App.resetCamera() instead of its own copy of the view', () => {
+  const html = read('circuit3d/index.html');
+  const btn = /<button id="reset-cam-btn"[^>]*>/.exec(html);
+  assert.ok(btn, 'reset-cam-btn not found');
+  assert.match(btn[0], /App\.resetCamera\(\)/);
+  assert.doesNotMatch(html, /position\.set\(\s*0\s*,\s*22\s*,\s*30\s*\)/, 'index.html still sets the camera to (0,22,30) itself');
+});
+
+test('the battery margin is one named constant, not "BOARD_W / 2 + 2.5" in each file', () => {
+  const hits = copiesOf(/\/\s*2\s*\+\s*2\.5\b/);
+  assert.equal(total(hits), 0, '"/ 2 + 2.5" still found in: ' + where(hits));
+  const defs = copiesOf(/BATTERY_MARGIN\s*=/);
+  assert.equal(total(defs), 1, 'BATTERY_MARGIN defined in: ' + where(defs));
+  assert.equal(total(copiesOf(/App\.batterySpot\s*=/)), 1, 'App.batterySpot must be defined once');
+  assert.match(read('circuit3d/js/interaction.js'), /BATTERY_MARGIN|batterySpot\(/,
+    'the user-placement clamp must share the margin');
+});
+
+test('chat.js has no battery spot of its own, and the preview asks for the same spot Accept uses', () => {
+  const src = read('circuit3d/js/chat.js');
+  assert.doesNotMatch(src, /BATTERY_SPOT/, 'chat.js still has its own BATTERY_SPOT');
+  assert.doesNotMatch(src, /\bx:\s*13\b/, 'chat.js still hard-codes the battery at x: 13');
+  const preview = /function sparkyPreviewActions[\s\S]*?\n {2}function /.exec(src);
+  assert.ok(preview, 'sparkyPreviewActions not found');
+  assert.match(preview[0], /batterySpot\(/, 'the preview ghost must read the spot from the board/App');
+});
+
+test('part spans are one App.SPANS table in app.js; the old names read from it', () => {
+  const hits = copiesOf(/SPANS\s*=\s*\{/);
+  assert.equal(total(hits), 1, 'span tables found in: ' + where(hits));
+  assert.equal(hits[0].file, 'circuit3d/js/app.js');
+  const app = read('circuit3d/js/app.js');
+  assert.match(app, /App\.SPANS\s*=\s*\{\s*resistor:\s*4,\s*led:\s*2,\s*buzzer:\s*2,\s*button:\s*3\s*\}/);
+  for (const [alias, key] of [['RESISTOR_SPAN', 'resistor'], ['LED_SPAN', 'led'],
+                              ['BUZZER_SPAN', 'buzzer'], ['BUTTON_SPAN', 'button']]) {
+    assert.match(app, new RegExp(`App\\.${alias}\\s*=\\s*(App\\.)?SPANS\\.${key}\\b`), `${alias} must read App.SPANS.${key}`);
+  }
+  assert.match(read('circuit3d/js/interaction.js'), /App\.SPANS/);
+  assert.match(read('circuit3d/js/chat.js'), /App\.SPANS/);
+});
+
+test('App.exportState stays: e2e tests and debugging use it (issue #6, step 3 dropped)', () => {
+  assert.match(read('circuit3d/js/app.js'), /App\.exportState\s*=\s*function/);
+});

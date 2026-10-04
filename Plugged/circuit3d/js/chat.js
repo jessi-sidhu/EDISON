@@ -47,9 +47,6 @@
   const COLOR_MAP = { red: 0xef4444, yellow: 0xfbbf24, green: 0x22c55e,
                       blue: 0x3b82f6, black: 0x111111, white: 0xffffff };
 
-  // Where an AI-placed battery goes, off the right-hand end of the board.
-  const BATTERY_SPOT = { x: 13, z: 0 };
-
   function colorHex(name) { return COLOR_MAP[String(name || '').toLowerCase()] || COLOR_MAP.red; }
 
   const PLACE = { place_resistor: 'placeResistor', place_led: 'placeLED',
@@ -72,7 +69,12 @@
       board[PLACE[a.tool]](hA, hB, partValues(a));
       return true;
     }
-    if (a.tool === 'place_battery') { board.placeBattery(BATTERY_SPOT.x, BATTERY_SPOT.z, partValues(a)); return true; }
+    if (a.tool === 'place_battery') {
+      // The board says where an AI battery goes (App.batterySpot in a page).
+      const { x, z } = board.batterySpot();
+      board.placeBattery(x, z, partValues(a));
+      return true;
+    }
     if (a.tool === 'delete_all')    { board.clearAll(); return true; }
     if (a.tool === 'add_wire') {
       const from = resolveEndpoint(a.from, board), to = resolveEndpoint(a.to, board);
@@ -113,7 +115,7 @@
     });
   }
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, partValues, colorHex, BATTERY_SPOT };
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, partValues, colorHex };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -125,6 +127,7 @@ if (typeof window !== 'undefined') (function (App, Chat) {
   // The real board, in the shape applyActions expects.
   const board = {
     components:    () => App.state.components,
+    batterySpot:   () => App.batterySpot(),
     parseHole:     s => App.parseHole(s),
     getHole:       (col, row) => App.state.breadboard.getHole(col, row),
     placeResistor: (a, b, v) => App.placeResistor(a, b, v),
@@ -219,7 +222,7 @@ if (typeof window !== 'undefined') (function (App, Chat) {
     actions.forEach((a, i) => {
       if (a.tool === 'delete_all') batteryIdx = 0;
       if (a.tool === 'place_battery') {
-        const { x, z } = Chat.BATTERY_SPOT;
+        const { x, z } = board.batterySpot();
         const pins = [new THREE.Vector3(x - 0.32, H + 0.54, z), new THREE.Vector3(x + 0.32, H + 0.24, z)];
         pins.forEach((p, k) => {
           pendingPins[`${labels[i]}.${k}`.toLowerCase()] = p;
@@ -237,15 +240,14 @@ if (typeof window !== 'undefined') (function (App, Chat) {
         const hA = Chat.resolveEndpoint(a.holeA, board);
         const hB = Chat.resolveEndpoint(a.holeB, board);
         if (hA && hA.hole && hB && hB.hole) {
-          const SPANS = { resistor: App.RESISTOR_SPAN, led: App.LED_SPAN,
-                          buzzer: App.BUZZER_SPAN, button: App.BUTTON_SPAN };
           const rotation = hA.hole.col === hB.hole.col ? 1 : 0;
-          ghost = App.buildPreview(type, SPANS[type] || 2, bb.HS, rotation, Chat.partValues(a));
+          ghost = App.buildPreview(type, App.SPANS[type] || 2, bb.HS, rotation, Chat.partValues(a));
           ghost.position.set((hA.hole.x + hB.hole.x) / 2, 0, (hA.hole.z + hB.hole.z) / 2);
         }
       } else if (a.tool === 'place_battery') {
+        const spot = board.batterySpot();   // the same spot Accept uses
         ghost = App.buildPreview('battery', 0, bb.HS, 0);
-        ghost.position.set(Chat.BATTERY_SPOT.x, 0, Chat.BATTERY_SPOT.z);
+        ghost.position.set(spot.x, 0, spot.z);
       } else if (a.tool === 'add_wire') {
         ghost = buildWireGhost(a.from, a.to, a.color, pendingPins);
       }

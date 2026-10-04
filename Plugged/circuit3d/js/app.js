@@ -13,8 +13,9 @@
     tempWire:         null,    // dashed preview line
     wireColor:        0xef4444,
     selected:         null,    // { item, kind }
-    components:       [],
+    components:       [],      // placeholders ({ unknown: true, group: null }) keep their slot
     wires:            [],
+    unknownWires:     [],      // saved wires to a placeholder, kept for the next save
     breadboard:       null,
     circuitName:      'Untitled',
     circuitId:        null,    // assigned on first auto-save
@@ -43,28 +44,39 @@
     return `Untitled (${n})`;
   }
 
-  // Span constants (exposed so interaction.js can read them)
-  App.RESISTOR_SPAN = 4;   // columns (or rows) between leads — narrower
-  App.LED_SPAN      = 2;
-  App.BUZZER_SPAN   = 2;
-  App.BUTTON_SPAN   = 3;
+  // Span constants: columns (or rows) between leads. The one table;
+  // interaction.js and chat.js read App.SPANS, the old names are aliases.
+  App.SPANS = { resistor: 4, led: 2, buzzer: 2, button: 3 };
+  App.RESISTOR_SPAN = App.SPANS.resistor;
+  App.LED_SPAN      = App.SPANS.led;
+  App.BUZZER_SPAN   = App.SPANS.buzzer;
+  App.BUTTON_SPAN   = App.SPANS.button;
+
+  // How far past the board's end a battery sits (user and AI placement).
+  App.BATTERY_MARGIN = 2.5;
+
+  // Where the AI's battery goes: just past the right-hand end of the board,
+  // right behind the top + and − rails so its wires drop straight in.
+  App.batterySpot = function () {
+    const { BOARD_W, ROW_Z } = App.BOARD_GEOMETRY;
+    return { x: BOARD_W / 2 + App.BATTERY_MARGIN, z: (ROW_Z.tp + ROW_Z.tn) / 2 };
+  };
 
   const state = App.state;
 
   // ── Render Loop ─────────────────────────────────────────────
 
-  const _defaultCamPos = { x: 0, y: 22, z: 30 };
-  const _defaultCamTgt = { x: 0, y: 0, z: 0 };
   const _camThreshold = 0.5;
 
   function _isCamDefault() {
     const p = App.camera.position, t = App.controls.target;
-    return Math.abs(p.x - _defaultCamPos.x) < _camThreshold &&
-           Math.abs(p.y - _defaultCamPos.y) < _camThreshold &&
-           Math.abs(p.z - _defaultCamPos.z) < _camThreshold &&
-           Math.abs(t.x - _defaultCamTgt.x) < _camThreshold &&
-           Math.abs(t.y - _defaultCamTgt.y) < _camThreshold &&
-           Math.abs(t.z - _defaultCamTgt.z) < _camThreshold;
+    const { pos, target } = App.CAMERA.home;
+    return Math.abs(p.x - pos[0])    < _camThreshold &&
+           Math.abs(p.y - pos[1])    < _camThreshold &&
+           Math.abs(p.z - pos[2])    < _camThreshold &&
+           Math.abs(t.x - target[0]) < _camThreshold &&
+           Math.abs(t.y - target[1]) < _camThreshold &&
+           Math.abs(t.z - target[2]) < _camThreshold;
   }
 
   function animate() {
@@ -278,7 +290,7 @@
 
   App.placeBattery = function (wx, wz, values, opts) {
     pushHistory();
-    const margin = state.breadboard.BOARD_W / 2 + 2.5;
+    const margin = state.breadboard.BOARD_W / 2 + App.BATTERY_MARGIN;
     const placedX = wx >= 0 ? Math.max(wx, margin) : Math.min(wx, -margin);
     const { group, pins } = App.buildBattery(placedX, wz);
     App.scene.add(group);
@@ -407,6 +419,7 @@
   const origEmissive = new Map();
 
   App.selectItem = function (item, kind) {
+    if (kind === 'component' && item && item.unknown) return;   // not drawn, can't be picked
     App.deselect();
     state.selected = { item, kind };
 
@@ -450,8 +463,9 @@
 
     if (kind === 'component') {
       (item.pinMeshes || []).forEach(pm => App.scene.remove(pm));
-      App.scene.remove(item.group);
+      if (item.group) App.scene.remove(item.group);
       state.components = state.components.filter(c => c !== item);
+      state.unknownWires = state.unknownWires.filter(w => w.startComp !== item && w.endComp !== item);
       // Wires anchored to this component's pins would keep pointing at the
       // deleted record, so take them with it.
       state.wires = state.wires.filter(w => {
@@ -472,25 +486,21 @@
   // ── Save / Load ──────────────────────────────────────────────
 
   // ── Isometric thumbnail capture ──────────────────────────────
-  function captureIsometricThumb() {
+  // Renders one frame from App.CAMERA.thumb, hands the canvas to draw()
+  // (which returns the image), then puts the user's camera back.
+  function withThumbView(draw) {
     // Stash camera
     const prevPos    = App.camera.position.clone();
     const prevTarget = App.controls.target.clone();
 
     // Isometric view
-    App.camera.position.set(20, 22, 20);
-    App.controls.target.set(0, 0, 0);
-    App.camera.lookAt(0, 0, 0);
+    const { pos, target } = App.CAMERA.thumb;
+    App.camera.position.set(...pos);
+    App.controls.target.set(...target);
+    App.camera.lookAt(...target);
     App.renderer.render(App.scene, App.camera);
 
-    // Downsample to 320-wide thumbnail
-    const src = App.renderer.domElement;
-    const scale = Math.min(1, 320 / src.width);
-    const th  = document.createElement('canvas');
-    th.width  = Math.round(src.width  * scale);
-    th.height = Math.round(src.height * scale);
-    th.getContext('2d').drawImage(src, 0, 0, th.width, th.height);
-    const dataURL = th.toDataURL('image/jpeg', 0.72);
+    const out = draw(App.renderer.domElement);
 
     // Restore camera
     App.camera.position.copy(prevPos);
@@ -498,7 +508,19 @@
     App.camera.lookAt(prevTarget);
     App.controls.update();
 
-    return dataURL;
+    return out;
+  }
+
+  function captureIsometricThumb() {
+    // Downsample to 320-wide thumbnail
+    return withThumbView(src => {
+      const scale = Math.min(1, 320 / src.width);
+      const th  = document.createElement('canvas');
+      th.width  = Math.round(src.width  * scale);
+      th.height = Math.round(src.height * scale);
+      th.getContext('2d').drawImage(src, 0, 0, th.width, th.height);
+      return th.toDataURL('image/jpeg', 0.72);
+    });
   }
 
   App.saveCircuit = function () {
@@ -509,7 +531,8 @@
       version:   1,
       name,
       thumbnail: captureIsometricThumb(),
-      components: state.components.map((c, i) => ({
+      // A part this build doesn't know is written back as it was loaded.
+      components: App.recordsFor(state.components, c => ({
         type:     c.type,
         id:       App.componentId(state.components, c),
         label:    c.label,             // on each part, never at file level
@@ -519,15 +542,7 @@
           ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) }
           : null,
       })),
-      wires: state.wires.map(w => ({
-        startHole:   w.startHole,
-        endHole:     w.endHole,
-        startCompIdx: w.startComp ? state.components.indexOf(w.startComp) : -1,
-        startPinIdx:  w.startPinIdx,
-        endCompIdx:   w.endComp   ? state.components.indexOf(w.endComp)   : -1,
-        endPinIdx:    w.endPinIdx,
-        color:        w.group?.children?.[0]?.material?.color?.getHex?.() ?? state.wireColor,
-      })),
+      wires: wireRecords(),
     };
 
     // Also ensure the local project entry is up-to-date
@@ -557,7 +572,9 @@
     }
     if (data.id) state.circuitId = data.id;
 
-    App.setHint(`Loaded "${data.name || 'circuit'}" — ${data.components?.length ?? 0} components`, 3000);
+    const kept   = state.components.filter(c => c.unknown).length;
+    const loaded = `Loaded "${data.name || 'circuit'}" — ${state.components.length - kept} components`;
+    App.setHint(kept ? `${loaded} · ${keptHint(kept)}` : loaded, kept ? 8000 : 3000);
   };
 
   // Replaying a board re-runs the place/wire helpers, which would each record
@@ -572,13 +589,14 @@
     const bb = state.breadboard;
 
     // Rebuild components
-    // One slot per saved part, null where it could not be rebuilt, so the
-    // wires below still find their parts by index.
+    // One slot per saved part, so the wires below still find their parts by
+    // index: null for a known part that could not be rebuilt (dropped), a
+    // placeholder for a type this build doesn't know. rebuildComponents
+    // fills in labels missing from files saved before labels existed.
     const PLACE = { resistor: App.placeResistor, led: App.placeLED,
                     buzzer: App.placeBuzzer, button: App.placeButton };
-    // Files saved before labels existed get them filled in, in list order.
-    const records = App.assignMissingLabels(data.components);
-    const rebuilt = App.rebuildComponents(records, c => {
+    const knows = t => t === 'battery' || !!PLACE[t];
+    const rebuilt = App.rebuildComponents(data.components, c => {
       const before = state.components.length;
       const opts   = { label: c.label };
       if (c.type === 'battery' && c.position) {
@@ -589,11 +607,16 @@
         if (hA && hB) PLACE[c.type](hA, hB, c.values, opts);
       }
       return state.components.length > before ? state.components[state.components.length - 1] : null;
-    });
+    }, knows);
+    state.components = rebuilt.filter(Boolean);   // placeholders included, in saved order
 
-    // Rebuild wires
+    // Rebuild wires, indexing into `rebuilt` (nulls and all) as saved. Wires
+    // to a placeholder can't be drawn; keep them aside so the next save
+    // writes them back. A wire to a dropped part is skipped below.
+    const { known, unknown } = App.splitWires(data.wires, rebuilt);
+    state.unknownWires = unknown;
     const savedColor = state.wireColor;
-    for (const w of (data.wires || [])) {
+    for (const w of known) {
       state.wireColor = w.color ?? 0xef4444;
 
       let startWorld = null, startHole = null, startPinMesh = null;
@@ -604,7 +627,7 @@
         if (h) { startWorld = h.world.clone(); startHole = { col: h.col, row: h.row }; }
       } else if (w.startCompIdx >= 0 && rebuilt[w.startCompIdx]) {
         const comp = rebuilt[w.startCompIdx];
-        const pm   = comp.pinMeshes[w.startPinIdx];
+        const pm   = (comp.pinMeshes || [])[w.startPinIdx];
         if (pm) { startWorld = pm.userData.world.clone(); startPinMesh = pm; }
       }
 
@@ -613,7 +636,7 @@
         if (h) { endWorld = h.world.clone(); endHole = { col: h.col, row: h.row }; }
       } else if (w.endCompIdx >= 0 && rebuilt[w.endCompIdx]) {
         const comp = rebuilt[w.endCompIdx];
-        const pm   = comp.pinMeshes[w.endPinIdx];
+        const pm   = (comp.pinMeshes || [])[w.endPinIdx];
         if (pm) { endWorld = pm.userData.world.clone(); endPinMesh = pm; }
       }
 
@@ -688,7 +711,9 @@
       return App.formatHole(ref);      // e.g. "e14", "tp_14"
     }
 
-    const comps = state.components;
+    // Parts this build doesn't know are left out: the AI can't use them, and
+    // their wires are in state.unknownWires, not state.wires.
+    const comps = state.components.filter(c => !c.unknown);
     const wires = state.wires;
 
     // ── Summary line ──
@@ -765,7 +790,7 @@
       return App.formatHole(ref);       // e.g. "e14", "tp_14"
     }
 
-    const components = state.components.map(c => {
+    const components = state.components.filter(c => !c.unknown).map(c => {
       const obj = { type: c.type.toUpperCase(), id: App.componentId(state.components, c) };
       if (c.holeRefs) {
         obj.holes = c.holeRefs.map(holeStr);
@@ -809,11 +834,12 @@
     App.cancelWire();
     state.components.forEach(c => {
       (c.pinMeshes || []).forEach(pm => App.scene.remove(pm));
-      App.scene.remove(c.group);
+      if (c.group) App.scene.remove(c.group);
     });
     state.wires.forEach(w => App.scene.remove(w.group));
-    state.components = [];
-    state.wires      = [];
+    state.components   = [];
+    state.wires        = [];
+    state.unknownWires = [];   // unknown parts go with the rest of the board
   }
 
   App.clearAll = function () {
@@ -841,25 +867,40 @@
   App.history = history;   // chat.js groups an accepted AI build into one undo step
   let _historyMuted = false;
 
+  // Undo snapshots and autosave. A placeholder's saved record goes back
+  // unchanged, and the wires kept for it follow the drawn ones.
   function serializeBoard() {
     return {
-      components: state.components.map(c => ({
+      components: App.recordsFor(state.components, c => ({
         type:     c.type,
         label:    c.label,
         values:   c.values,
         holeRefs: c.holeRefs,
         position: c.group ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) } : null,
       })),
-      wires: state.wires.map(w => ({
-        startHole:    w.startHole,
-        endHole:      w.endHole,
-        startCompIdx: w.startComp ? state.components.indexOf(w.startComp) : -1,
-        startPinIdx:  w.startPinIdx,
-        endCompIdx:   w.endComp   ? state.components.indexOf(w.endComp)   : -1,
-        endPinIdx:    w.endPinIdx,
-        color:        w.group?.children?.[0]?.material?.color?.getHex?.() ?? state.wireColor,
-      })),
+      wires: wireRecords(),
     };
+  }
+
+  // Every wire as a saved record: the drawn ones, then the ones kept for
+  // parts this build doesn't know, re-pointed at where those parts now sit.
+  function wireRecords() {
+    return state.wires.map(w => ({
+      startHole:    w.startHole,
+      endHole:      w.endHole,
+      startCompIdx: w.startComp ? state.components.indexOf(w.startComp) : -1,
+      startPinIdx:  w.startPinIdx,
+      endCompIdx:   w.endComp   ? state.components.indexOf(w.endComp)   : -1,
+      endPinIdx:    w.endPinIdx,
+      color:        w.group?.children?.[0]?.material?.color?.getHex?.() ?? state.wireColor,
+    })).concat(App.unknownWireRecords(state.unknownWires, state.components));
+  }
+
+  // "1 part from a newer version was kept but isn't shown."
+  function keptHint(n) {
+    return n === 1
+      ? "1 part from a newer version was kept but isn't shown."
+      : `${n} parts from a newer version were kept but aren't shown.`;
   }
 
   function newCircuitId() {
@@ -925,21 +966,12 @@
     // Lightweight thumbnail for auto-save (smaller than download)
     let thumb = null;
     try {
-      const prevPos    = App.camera.position.clone();
-      const prevTarget = App.controls.target.clone();
-      App.camera.position.set(20, 22, 20);
-      App.controls.target.set(0, 0, 0);
-      App.camera.lookAt(0, 0, 0);
-      App.renderer.render(App.scene, App.camera);
-      const src = App.renderer.domElement;
-      const th  = document.createElement('canvas');
-      th.width  = 240; th.height = Math.round(240 * src.height / src.width);
-      th.getContext('2d').drawImage(src, 0, 0, th.width, th.height);
-      thumb = th.toDataURL('image/jpeg', 0.55);
-      App.camera.position.copy(prevPos);
-      App.controls.target.copy(prevTarget);
-      App.camera.lookAt(prevTarget);
-      App.controls.update();
+      thumb = withThumbView(src => {
+        const th  = document.createElement('canvas');
+        th.width  = 240; th.height = Math.round(240 * src.height / src.width);
+        th.getContext('2d').drawImage(src, 0, 0, th.width, th.height);
+        return th.toDataURL('image/jpeg', 0.55);
+      });
     } catch {}
 
     const board = serializeBoard();
@@ -961,7 +993,7 @@
   function refreshCounts() {
     const cc = document.getElementById('comp-count');
     const wc = document.getElementById('wire-count');
-    if (cc) cc.textContent = state.components.length;
+    if (cc) cc.textContent = state.components.filter(c => !c.unknown).length;
     if (wc) wc.textContent = state.wires.length;
 
     const clearBtn = document.getElementById('clear-all-btn');

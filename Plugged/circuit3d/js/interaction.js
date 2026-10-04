@@ -31,7 +31,8 @@
 
     function getAllComponentMeshes() {
       const out = [];
-      state.components.forEach(c => c.group.traverse(o => { if (o.isMesh) out.push(o); }));
+      // Parts this build doesn't know have no group: nothing to hit.
+      state.components.forEach(c => { if (c.group) c.group.traverse(o => { if (o.isMesh) out.push(o); }); });
       return out;
     }
 
@@ -58,8 +59,7 @@
 
       destroyGhost();
       const bb   = state.breadboard;
-      const SPANS = { led: App.LED_SPAN, resistor: App.RESISTOR_SPAN, buzzer: App.BUZZER_SPAN, button: App.BUTTON_SPAN };
-      const span = SPANS[t] || 0;
+      const span = App.SPANS[t] || 0;
       ghostGroup = App.buildPreview(t, span, bb.HS, r);
       ghostGroup.visible = false;
       scene.add(ghostGroup);
@@ -85,8 +85,7 @@
       const holeA = state.breadboard.getNearestHole(pt.x, pt.z, null);
       if (!holeA) return null;
 
-      const SPANS = { led: App.LED_SPAN, resistor: App.RESISTOR_SPAN, buzzer: App.BUZZER_SPAN, button: App.BUTTON_SPAN };
-      const span  = SPANS[type] || App.RESISTOR_SPAN;
+      const span  = App.SPANS[type] || App.SPANS.resistor;
       return { holeA, holeB: state.breadboard.getSpanHole(holeA, span, state.placementRotation) };
     }
 
@@ -169,7 +168,7 @@
           const pt  = new THREE.Vector3();
           const hit = raycaster.ray.intersectPlane(boardPlane, pt);
           if (hit && ghostGroup) {
-            const margin  = state.breadboard.BOARD_W / 2 + 2.5;
+            const margin  = state.breadboard.BOARD_W / 2 + App.BATTERY_MARGIN;
             const clampX  = pt.x >= 0 ? Math.max(pt.x, margin) : Math.min(pt.x, -margin);
             ghostGroup.position.set(clampX, 0, pt.z);
             ghostGroup.visible = true;
@@ -356,6 +355,7 @@
 
         // Walk up to find owning component group
         for (const comp of state.components) {
+          if (!comp.group) continue;   // unknown part: not drawn
           let found = false;
           comp.group.traverse(o => { if (o === hitObj) found = true; });
           if (found) { App.selectItem(comp, 'component'); return; }
