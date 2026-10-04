@@ -38,6 +38,11 @@
 //   photo-reader.test.js section 9), deepseek-flash follows only a Gemini
 //   400/401/403 when listed, and the [photo] line gains retries=N. A test
 //   that reaches those retries runs on a fake clock (drive()).
+// - #176: Robotics-ER silent at PHOTO_FALLBACK_AT_MS (new env, default 25000)
+//   → the same box request also goes to PHOTO_FALLBACK_MODEL (new env,
+//   default 'gemini-3.1-flash-lite'; '' turns it off); the response's model
+//   is the model that answered (provider stays 'gemini'), and the [photo]
+//   line says model=<that model> fallback=yes when the fallback answered.
 //
 // How: the real HTTP server, requests through node:http (so a stubbed global
 // fetch only ever stands in for the AI). No network, no key. Each request
@@ -218,8 +223,13 @@ test('a sample id is a key, not a path: one that climbs out of the fixtures fold
 
 // #172 rewrote this one: the default is Gemini alone now, and its 503s are
 // retried for seconds, so the image with no recording runs on the fake clock.
-test('live mode (default: Gemini alone, #172), Gemini down (503): the sample\'s recording answers with no AI call; an image with no recording → 502 AI_FAILED after Gemini\'s 4 calls, deepseek never asked, retries=3 in the log', async () => {
+// #176: with the fallback model on, Robotics-ER spending its 4 calls brings
+// gemini-3.1-flash-lite in at once (the next tests). This one counts
+// Robotics-ER's own calls, so the fallback is off here.
+test('live mode (default: Gemini alone, #172; fallback model off, PHOTO_FALLBACK_MODEL=\'\', #176), Gemini down (503): the sample\'s recording answers with no AI call; an image with no recording → 502 AI_FAILED after Gemini\'s 4 calls, deepseek never asked, retries=3 in the log', async () => {
   const restore = withAiKeys();
+  const savedFallback = process.env.PHOTO_FALLBACK_MODEL;
+  process.env.PHOTO_FALLBACK_MODEL = '';
   try {
     const calls = stubAi({ gemini: 503, deepseek: 503 });
     const withFixture = await postPhoto(demoBody());
@@ -240,6 +250,8 @@ test('live mode (default: Gemini alone, #172), Gemini down (503): the sample\'s 
     assert.match(line, /\bretries=3\b/, `4 Gemini calls are 3 retries: ${line}`);
   } finally {
     restore();
+    if (savedFallback === undefined) delete process.env.PHOTO_FALLBACK_MODEL;
+    else process.env.PHOTO_FALLBACK_MODEL = savedFallback;
   }
 });
 
@@ -613,6 +625,109 @@ test('#172: the [photo] line counts Gemini\'s retries: a 503, then Gemini answer
   } finally {
     restore();
   }
+});
+
+// ── The fallback model in the [photo] line (#176) ───────────────────────────
+// Robotics-ER silent at PHOTO_FALLBACK_AT_MS (default 25000), or out of calls
+// before then (a 503 storm, at once) → the same box request also goes to
+// PHOTO_FALLBACK_MODEL (default gemini-3.1-flash-lite); the response's model
+// is the model that answered, and the [photo] line says so, with fallback=yes
+// (photo-reader.test.js section 10 has the rules).
+
+const ER_MODEL = 'gemini-robotics-er-2-preview';
+const FB_MODEL = 'gemini-3.1-flash-lite';
+const FB_ENV   = ['PHOTO_GEMINI_MODEL', 'PHOTO_FALLBACK_MODEL', 'PHOTO_FALLBACK_AT_MS', 'PHOTO_HEDGE_MS'];
+
+// Runs run() with fake AI keys and the photo models' env unset (the
+// defaults), putting both back after.
+async function withPhotoDefaults(run) {
+  const restore = withAiKeys();
+  const saved = Object.fromEntries(FB_ENV.map(k => [k, process.env[k]]));
+  for (const k of FB_ENV) delete process.env[k];
+  try {
+    return await run();
+  } finally {
+    restore();
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+// A global fetch for the two Gemini models. erMode() says what Robotics-ER
+// does: 'hang' (until its call is aborted), '503' or 'answer'. The fallback
+// model answers at once. Returns each call's model, in order.
+function stubTwoModels(erMode) {
+  const calls = [];
+  vi.stubGlobal('fetch', vi.fn((url, opts = {}) => {
+    const u = String(url);
+    const model = (/\/models\/([^/:]+):generateContent$/.exec(u) || [])[1] || u;
+    calls.push(model);
+    const mode = model === FB_MODEL ? 'answer' : model === ER_MODEL ? erMode() : 'unexpected';
+    if (mode === 'answer') {
+      const text = JSON.stringify(GEMINI_READS);
+      return Promise.resolve({ ok: true, status: 200, text: async () => text, json: async () => JSON.parse(text) });
+    }
+    if (mode === '503') {
+      const text = JSON.stringify({ error: { code: 503 } });
+      return Promise.resolve({ ok: false, status: 503, text: async () => text, json: async () => JSON.parse(text) });
+    }
+    if (mode !== 'hang') return Promise.reject(new Error(`the photo reader called an unexpected URL: ${u}`));
+    return new Promise((_, reject) => {
+      if (opts.signal) opts.signal.addEventListener('abort', () => reject(opts.signal.reason || new Error('aborted')), { once: true });
+    });
+  }));
+  return calls;
+}
+
+test('#176: Robotics-ER silent → gemini-3.1-flash-lite answers at 25 s → 200 with model gemini-3.1-flash-lite, and the [photo] line says model=gemini-3.1-flash-lite fallback=yes; Robotics-ER answering → its model, fallback=no', async () => {
+  await withPhotoDefaults(async () => {
+    let erMode = 'hang';
+    const calls = stubTwoModels(() => erMode);
+
+    vi.useFakeTimers(CLOCK);
+    logs.length = 0;
+    const res = await drive(postPhoto({ image: photo(2048, 'q').dataUrl, grid: GRID }, { ms: LONG }));
+    const line = logs.find(l => l.startsWith('[photo]')) || '(no [photo] line)';
+    assert.equal(res.status, 200, `Robotics-ER silent: status ${res.status} (${res.raw.slice(0, 120)}); calls: ${calls.join(', ')}; ${line}`);
+    assert.ok(calls.includes(FB_MODEL), `${FB_MODEL} was never asked; calls: ${calls.join(', ')}`);
+    assert.equal(res.body.model, FB_MODEL, `the response's model is the model that answered: ${JSON.stringify(res.body).slice(0, 200)}`);
+    assert.equal(res.body.provider, 'gemini', JSON.stringify(res.body).slice(0, 200));
+    assert.match(line, /\bmodel=gemini-3\.1-flash-lite\s/, `the [photo] line names the model that answered: ${line}`);
+    assert.match(line, /\bfallback=yes\b/, `the fallback model answered: ${line}`);
+    vi.useRealTimers();
+
+    erMode = 'answer';
+    calls.length = 0;
+    logs.length = 0;
+    const er = await postPhoto({ image: photo(2048, 'u').dataUrl, grid: GRID });
+    const erLine = logs.find(l => l.startsWith('[photo]')) || '(no [photo] line)';
+    assert.equal(er.status, 200, `Robotics-ER answering: status ${er.status}: ${er.raw.slice(0, 200)}`);
+    assert.equal(er.body.model, ER_MODEL, JSON.stringify(er.body).slice(0, 200));
+    assert.deepStrictEqual(calls, [ER_MODEL], `Robotics-ER answered at once; calls: ${calls.join(', ')}`);
+    assert.match(erLine, /\bmodel=gemini-robotics-er-2-preview\s/, erLine);
+    assert.match(erLine, /\bfallback=no\b/, `Robotics-ER answered, not the fallback: ${erLine}`);
+  });
+});
+
+test('#176: Robotics-ER 503 every time → its 4 calls spent within seconds, gemini-3.1-flash-lite asked at once and answering → 200 well before 25 s, model gemini-3.1-flash-lite, fallback=yes in the [photo] line', async () => {
+  await withPhotoDefaults(async () => {
+    const calls = stubTwoModels(() => '503');
+    vi.useFakeTimers(CLOCK);
+    logs.length = 0;
+    const started = Date.now();
+    const res = await drive(postPhoto({ image: photo(2048, 'z').dataUrl, grid: GRID }, { ms: LONG }));
+    const took = Date.now() - started;
+    const line = logs.find(l => l.startsWith('[photo]')) || '(no [photo] line)';
+    assert.equal(res.status, 200, `Robotics-ER spent on 503s: status ${res.status} (${res.raw.slice(0, 120)}); calls: ${calls.join(', ')}; ${line}`);
+    assert.deepStrictEqual(calls, [ER_MODEL, ER_MODEL, ER_MODEL, ER_MODEL, FB_MODEL],
+      `Robotics-ER's 4 calls, then the fallback once; calls: ${calls.join(', ')}`);
+    assert.ok(took < 25000, `answered after ${took} ms of fake time; the fallback should go out at once when Robotics-ER is spent, not at 25 s`);
+    assert.equal(res.body.model, FB_MODEL, JSON.stringify(res.body).slice(0, 200));
+    assert.match(line, /\bmodel=gemini-3\.1-flash-lite\s/, line);
+    assert.match(line, /\bfallback=yes\b/, `the fallback model answered: ${line}`);
+  });
 });
 
 // ── validateReading ─────────────────────────────────────────────────────────

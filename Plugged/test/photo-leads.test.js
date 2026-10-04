@@ -23,7 +23,7 @@
 //   'application/json', a responseSchema, temperature 1, maxOutputTokens
 //   32768. The fake tells the items' calls apart by their image.
 // - Timers: PHOTO_HEDGE_MS (default 12000) and PHOTO_LEADS_TIMEOUT_MS
-//   (default 25000), read per call and measured from readLeads' start, run on
+//   (default 40000 since #173; it was 25000), read per call and measured from readLeads' start, run on
 //   the global setTimeout/clearTimeout (vi.useFakeTimers drives those; it
 //   can't drive AbortSignal.timeout). Every call gets an AbortSignal, and
 //   aborting it makes the fake fetch reject, as a real fetch does.
@@ -49,6 +49,25 @@
 //   hex digits is an image hash (what /api/photo returns for a photo with no
 //   sample); any other plain id (isSafeId) is a sample id. A sample id with a
 //   file is replayed straight away, unless PHOTO_RECORD=1.
+//
+// - #173 (section 9), the confirm screen opens after the box round and each
+//   part's legs snap in as its crop answers:
+//   readLeads(body, opts) takes opts.onItem(entry): called exactly once per
+//   requested id, as that item settles, in finish order: an answer, an
+//   AI_FAILED, and an AI_TIMEOUT at the cutoff. The entry is the one the
+//   resolved `items` holds for that id (so an image-hash item that failed
+//   live and takes its saved answer reports the saved answer). Replays (a
+//   sample id with a file, PHOTO_PROVIDERS=fixture) and the no-key path call
+//   it too. The resolved { items, provider, model, ms, … } is unchanged.
+//   The route streams only when the request's Accept header includes
+//   application/x-ndjson: 200, Content-Type application/x-ndjson, one line
+//   per item as it settles ({ id, found, leads, conf } or { id, error }),
+//   then a last line { done: true, provider, model, ms }. Every requested id
+//   gets exactly one line. Without that Accept the JSON answer is unchanged;
+//   errors before the stream (400 BAD_ITEMS, 413, 429) stay JSON.
+//   PHOTO_LEADS_TIMEOUT_MS defaults to 40000 (was 25000): the page no longer
+//   waits on the cutoff. The tests that time the 25 s cutoff set
+//   PHOTO_LEADS_TIMEOUT_MS=25000 themselves (cutoffAt25()).
 //
 // The golden, test/fixtures/prompts/photo-crop.txt, was written by hand from
 // the issue's Step 4. It holds what is sent for a resistor (value 470) and a
@@ -103,7 +122,11 @@ const DEEPSEEK_KEY  = 'test-deepseek-key-159';
 const GEMINI_BASE   = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const DEFAULT_MODEL = 'gemini-robotics-er-2-preview';
 const HEDGE_MS      = 12000;
-const TIMEOUT_MS    = 25000;
+const TIMEOUT_MS    = 25000;   // the cutoff the #159/#172 tests time; they set it (cutoffAt25)
+const DEFAULT_CUTOFF_MS = 40000;   // #173: PHOTO_LEADS_TIMEOUT_MS's default (was 25000)
+// #173 moved the default cutoff to 40 s; a test that times the 25 s cutoff
+// sets it, so it times the same thing as before.
+const cutoffAt25 = () => { process.env.PHOTO_LEADS_TIMEOUT_MS = String(TIMEOUT_MS); };
 
 const GOLDEN = path.join(__dirname, 'fixtures', 'prompts', 'photo-crop.txt');
 const UPDATE = process.env.UPDATE_GOLDEN === '1';
@@ -459,6 +482,7 @@ test('resend: an item with no answer at 12 s gets a second identical call; the f
 });
 
 test('cutoff: at 25 s an unanswered item is AI_TIMEOUT and both its calls are aborted, while the other items keep their answers', async () => {
+  cutoffAt25();   // #173: the default is 40 s now
   const items = [item('R1', { window: WIN_R1 }), item('LED1'), item('W1', { window: WIN_W1 })];
   const fake = fakeGemini(items, c => (c.id === 'LED1' ? HANG : answer(P1)));
   const s = start({ key: 'no-saved-leads', items }, fake);
@@ -525,6 +549,7 @@ test('a reply that fails (503, a network error, not JSON, cut off) → that item
 // #172 changed the 503 row from 2 calls (resent at 12 s) to 3 (retried 1–2 s
 // after each failure, up to 3 calls).
 test('a 400, 401 or 403 from Gemini is never resent: that item is AI_FAILED after exactly 1 call, past the 12 s resend and up to the cutoff (a 503, for contrast, is retried up to 3 calls)', async () => {
+  cutoffAt25();   // #173: the default is 40 s now
   for (const [code, calls] of [[400, 1], [401, 1], [403, 1], [503, 3]]) {
     const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 })];
     // W1 hangs, so readLeads stays open until the cutoff and R1's resend timer has every chance to fire.
@@ -668,6 +693,7 @@ test('live, with a saved file for an image-hash key: the items Gemini answers ar
 });
 
 test('live, with a saved file for an image-hash key: an item whose calls hang past the 25 s cutoff takes that id\'s saved answer, not AI_TIMEOUT; an item the file lacks is AI_TIMEOUT', async () => {
+  cutoffAt25();   // #173: the default is 40 s now
   const dir = tempDir('timeout-fallback');
   try {
     const hash = sha('a photo with no sample, Gemini hangs');
@@ -763,20 +789,22 @@ let ipCount = 0;
 const freshIp = () => `10.159.${Math.floor(++ipCount / 250)}.${ipCount % 250 + 1}`;
 
 // POSTs `body` (an object, or a raw string) from `ip`. Destroyed after `ms`
-// so a hung server fails the assertion, not the runner.
-function post(urlPath, body, { ip = freshIp(), ms = 5000 } = {}) {
+// so a hung server fails the assertion, not the runner. `accept` (#173) sets
+// the Accept header; none is sent by default.
+function post(urlPath, body, { ip = freshIp(), ms = 5000, accept } = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   const started = Date.now();
   let req;
   return new Promise((resolve, reject) => {
-    req = http.request({ host: '127.0.0.1', port, path: urlPath, method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), 'X-Forwarded-For': ip } }, res => {
+    const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), 'X-Forwarded-For': ip };
+    if (accept) headers.Accept = accept;
+    req = http.request({ host: '127.0.0.1', port, path: urlPath, method: 'POST', headers }, res => {
       let out = '';
       res.on('data', c => { out += c; });
       res.on('end', () => {
         let parsed = null;
         try { parsed = JSON.parse(out); } catch { /* not JSON: a 404 page, say */ }
-        resolve({ status: res.statusCode, body: parsed, raw: out, ms: Date.now() - started });
+        resolve({ status: res.statusCode, headers: res.headers, body: parsed, raw: out, ms: Date.now() - started });
       });
     });
     req.on('error', reject);
@@ -996,6 +1024,7 @@ test('#172 bug: with 24 items, only the first PHOTO_LEADS_CONCURRENCY (default 1
 // Now a stall resend goes out on time even when the cap is full, while the
 // queued items keep waiting for a first-call slot.
 test('#172 bug: with 24 items whose calls all hang, the first PHOTO_LEADS_CONCURRENCY calls (default 16, or 3 when set) go out; at 12 s each gets its stall resend at once although the cap is full, while the queued items still wait; at the 25 s cutoff every item is AI_TIMEOUT, in order, with every call aborted', async () => {
+  cutoffAt25();   // #173: the default is 40 s now
   for (const [what, env, cap] of [['default', undefined, 16], ['PHOTO_LEADS_CONCURRENCY=3', '3', 3]]) {
     if (env === undefined) delete process.env.PHOTO_LEADS_CONCURRENCY;
     else process.env.PHOTO_LEADS_CONCURRENCY = env;
@@ -1071,6 +1100,7 @@ test('#172: at most 3 calls per item, retries and the stall resend together: an 
     vi.useRealTimers();
   }
 
+  cutoffAt25();   // #173: the default is 40 s now; these end at the cutoff, within finish()'s 40 s
   const mixed = [
     ['the first call hangs, every other one is a 503', c => (c.n === 1 ? HANG : status(503))],
     ['every call answers a 503 after 13 s', () => after(13000, status(503))],
@@ -1141,4 +1171,235 @@ test('#172: PHOTO_LEADS_CONCURRENCY=1: R1\'s first call stalls, its resend wins 
   assert.deepStrictEqual(out.items, [{ id: 'R1', found: true, leads: R1_P2, conf: 0.8 }, { id: 'R2', found: true, leads: R1_P1, conf: 0.8 }],
     'R1 answered by its resend, R2 by its first call');
   assert.ok(out.ms < TIMEOUT_MS, `readLeads took ${out.ms} ms`);
+});
+
+// ── 9. Answers as they come: onItem and the streamed route (#173) ───────────
+// The page waited for the whole crop round (up to 25 s, often all of it)
+// behind "placing legs…" before showing anything. Now the confirm screen
+// opens after the box round and each part's legs snap in as its crop
+// answers: readLeads reports each item as it settles (opts.onItem), and the
+// route streams those as NDJSON lines when the page asks for them.
+
+const NDJSON = 'application/x-ndjson';
+// W1's P1 in WIN_W1: x = 1200.5 + (250/1000·700 − 45) / 2.5 = 1252.5 and
+// 1200.5 + (750/1000·700 − 45) / 2.5 = 1392.5; y = 80 + (500/1000·1000 − 45) / 2.5 = 262.
+const W1_P1 = [{ pin: '1', pt: [1252.5, 262], role: 'none' }, { pin: '2', pt: [1392.5, 262], role: 'none' }];
+
+// The complete lines of an NDJSON body so far, parsed (a line still being
+// written is left out until the body ends).
+function lines(s) {
+  const done = s.ended ? s.raw : s.raw.slice(0, s.raw.lastIndexOf('\n') + 1);
+  return done.split('\n').filter(l => l.trim()).map(l => {
+    try { return JSON.parse(l); } catch { return assert.fail(`a streamed line is not JSON: ${l.slice(0, 200)}`); }
+  });
+}
+
+// POSTs `body` and keeps what has arrived so far, for watching a stream on
+// the fake clock: s.status and s.headers once the head arrives, s.raw, s.ended.
+function openPost(urlPath, body, { ip = freshIp(), accept } = {}) {
+  const text = JSON.stringify(body);
+  const s = { status: null, headers: null, raw: '', ended: false, error: null };
+  const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), 'X-Forwarded-For': ip };
+  if (accept) headers.Accept = accept;
+  const req = http.request({ host: '127.0.0.1', port, path: urlPath, method: 'POST', headers }, res => {
+    s.status = res.statusCode;
+    s.headers = res.headers;
+    res.setEncoding('utf8');
+    res.on('data', c => { s.raw += c; });
+    res.on('end', () => { s.ended = true; });
+  });
+  req.on('error', e => { s.error = e; s.ended = true; });
+  req.end(text);
+  s.destroy = () => req.destroy();
+  return s;
+}
+
+test('#173: PHOTO_LEADS_TIMEOUT_MS defaults to 40 s (was 25 s; the confirm screen no longer waits on it): every call hanging, readLeads is still open just before 40 s and every item is AI_TIMEOUT at 40 s', async () => {
+  const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 })];
+  const fake = fakeGemini(items, () => HANG);
+  const s = start({ key: 'no-saved-leads', items }, fake);
+  await until(() => fake.calls.length === 2, 'R1\'s and W1\'s first calls');
+  await advance(DEFAULT_CUTOFF_MS - 1);
+  assert.equal(s.done, false, `readLeads gave up before the ${DEFAULT_CUTOFF_MS / 1000} s default cutoff (${s.value ? JSON.stringify(s.value.items) : ''}); the old default was 25 s`);
+  await advance(1);
+  assert.ok(s.done, `readLeads had not answered at the ${DEFAULT_CUTOFF_MS / 1000} s default cutoff`);
+  assert.deepStrictEqual(result(s).items, [{ id: 'R1', error: 'AI_TIMEOUT' }, { id: 'W1', error: 'AI_TIMEOUT' }]);
+});
+
+test('#173: readLeads calls opts.onItem(entry) once per id as each item settles, in finish order (X1\'s 400 AI_FAILED at once, W1 at 1 s, R1 at 3 s, LED1 AI_TIMEOUT at the cutoff), each before readLeads resolves and each the entry `items` holds; the resolved items stay in request order', async () => {
+  process.env.PHOTO_LEADS_TIMEOUT_MS = '8000';   // under the 12 s resend: one call an item
+  const items = [item('R1', { window: WIN_R1 }), item('LED1'), item('W1', { window: WIN_W1 }), item('X1')];
+  const says = { R1: () => after(3000, answer(P1)), W1: () => after(1000, answer(P1)), X1: () => status(400), LED1: () => HANG };
+  const fake = fakeGemini(items, c => says[c.id]());
+  vi.useFakeTimers(FAKE);
+  const t0 = Date.now(), seen = [], run = {};
+  const s = start({ key: 'no-saved-leads', items }, fake, {
+    onItem: e => seen.push({ at: Date.now() - t0, resolved: run.s ? run.s.done : false, entry: JSON.parse(JSON.stringify(e)) }),
+  });
+  run.s = s;
+  const ids = () => seen.map(x => x.entry && x.entry.id);
+  await until(() => fake.calls.length === 4, 'the 4 first calls');
+  await flush();
+  assert.deepStrictEqual(ids(), ['X1'], `X1's 400 settles it at once (AI_FAILED, never resent), so onItem reports it first and alone; onItem got ${JSON.stringify(ids())}`);
+  await advance(1000);
+  assert.deepStrictEqual(ids(), ['X1', 'W1'], 'W1 answered at 1 s: reported then');
+  await advance(2000);
+  assert.deepStrictEqual(ids(), ['X1', 'W1', 'R1'], 'R1 answered at 3 s: reported then');
+  await advance(4999);
+  assert.deepStrictEqual(ids(), ['X1', 'W1', 'R1'], 'LED1 is still out before the 8 s cutoff');
+  assert.equal(s.done, false, 'readLeads is still open while LED1 is out');
+  await advance(1);
+  await flush();
+  assert.deepStrictEqual(ids(), ['X1', 'W1', 'R1', 'LED1'], 'LED1 is reported at the cutoff');
+  const out = result(s);
+
+  assert.deepStrictEqual(seen.map(x => x.at), [0, 1000, 3000, 8000], 'each reported as it settled, on the fake clock');
+  for (const x of seen.slice(0, 3)) assert.equal(x.resolved, false, `${x.entry.id}: reported as it settled, before readLeads resolved`);
+  assert.deepStrictEqual(seen.map(x => x.entry), [
+    { id: 'X1', error: 'AI_FAILED' },
+    { id: 'W1', found: true, leads: W1_P1, conf: 0.8 },
+    { id: 'R1', found: true, leads: R1_P1, conf: 0.8 },
+    { id: 'LED1', error: 'AI_TIMEOUT' },
+  ], 'the shapes are the response\'s, unchanged');
+  for (const x of seen) assert.deepStrictEqual(x.entry, byId(out, x.entry.id), `${x.entry.id}: onItem's entry is the one the resolved items hold`);
+  assert.deepStrictEqual(out.items.map(x => x.id), ['R1', 'LED1', 'W1', 'X1'], 'the resolved items stay in request order');
+  await advance(DEFAULT_CUTOFF_MS);
+  assert.equal(seen.length, 4, `exactly once per id; onItem got ${JSON.stringify(ids())}`);
+});
+
+test('#173: replays and the no-key path call onItem too, once per id, each the entry `items` holds: a sample key with a saved file (an id it lacks AI_FAILED), PHOTO_PROVIDERS=fixture with and without a file, no GEMINI_API_KEY; and live with an image-hash file, a failed item reports its saved answer', async () => {
+  const dir = tempDir('onitem-replay');
+  try {
+    const hash = sha('a photo with no sample, #173');
+    save(dir, 'leads-sample', { key: 'leads-sample', model: 'gemini-recorded-1', items: SAVED_ITEMS });
+    save(dir, hash, { key: hash, model: 'gemini-recorded-1', items: SAVED_ITEMS });
+    const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 }), item('X9')];
+    const failedAll = items.map(it => ({ id: it.id, error: 'AI_FAILED' }));
+    const cases = [
+      ['a sample key with a saved file', 'leads-sample', () => {}, [SAVED_ITEMS[1], SAVED_ITEMS[0], { id: 'X9', error: 'AI_FAILED' }]],
+      ['PHOTO_PROVIDERS=fixture, no file', 'no-such-sample', () => { process.env.PHOTO_PROVIDERS = 'fixture'; }, failedAll],
+      ['PHOTO_PROVIDERS=fixture, a file', hash, () => { process.env.PHOTO_PROVIDERS = 'fixture'; }, [SAVED_ITEMS[1], SAVED_ITEMS[0], { id: 'X9', error: 'AI_FAILED' }]],
+      ['no GEMINI_API_KEY', 'no-saved-leads', () => { delete process.env.GEMINI_API_KEY; }, failedAll],
+      ['live with an image-hash file: R1 answers, W1 and X9 fail every call', hash, () => {},
+        [{ id: 'R1', found: true, leads: R1_P2, conf: 0.8 }, SAVED_ITEMS[0], { id: 'X9', error: 'AI_FAILED' }]],
+    ];
+    for (const [what, key, setup, want] of cases) {
+      delete process.env.PHOTO_PROVIDERS;
+      process.env.GEMINI_API_KEY = GEMINI_KEY;
+      setup();
+      const fake = fakeGemini(items, c => (c.id === 'R1' ? answer(P2) : status(503)));
+      const seen = [];
+      const out = await readAll({ key, items }, fake, { fixturesDir: dir, onItem: e => seen.push(JSON.parse(JSON.stringify(e))) });
+      assert.deepStrictEqual(out.items, want, `${what}: the resolved items are unchanged`);
+      assert.deepStrictEqual(seen.map(e => e && e.id).sort(), ['R1', 'W1', 'X9'], `${what}: onItem once per requested id; it got ${JSON.stringify(seen.map(e => e && e.id))}`);
+      for (const e of seen) assert.deepStrictEqual(e, byId(out, e.id), `${what}: ${e.id}'s onItem entry is the one the resolved items hold`);
+      vi.useRealTimers();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#173: route: with Accept application/x-ndjson the answer streams: 200 application/x-ndjson, one line per item as it settles (X1\'s 400 at once, W1 at 1 s, R1 at 5 s, each on the wire before the next answers), then { done: true, provider, model, ms }', async () => {
+  const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 }), item('X1')];
+  const wait = { R1: 5000, W1: 1000 };
+  const fake = fakeGemini(items, c => (c.id === 'X1' ? status(400) : after(wait[c.id], answer(P1))));
+  vi.stubGlobal('fetch', fake.fetch);
+  vi.useFakeTimers(FAKE);
+  const s = openPost('/api/photo/leads', { key: 'no-saved-leads', items }, { accept: NDJSON });
+  try {
+    await until(() => fake.calls.length === 3, 'the 3 first calls');
+    await until(() => lines(s).length >= 1,
+      () => `no line on the wire after X1's 400 settled it at once (status ${s.status}, body so far ${JSON.stringify(s.raw.slice(0, 200))}): the route must write each item as it settles`);
+    assert.equal(s.status, 200, `status ${s.status}`);
+    assert.match(String(s.headers['content-type']), /^application\/x-ndjson/, `Content-Type ${s.headers['content-type']}`);
+    assert.deepStrictEqual(lines(s), [{ id: 'X1', error: 'AI_FAILED' }], 'X1 settled first, so its line is first');
+
+    await advance(1000);
+    await until(() => lines(s).length >= 2, () => `no W1 line after it answered at 1 s: ${JSON.stringify(s.raw.slice(0, 300))}`);
+    assert.deepStrictEqual(lines(s)[1], { id: 'W1', found: true, leads: W1_P1, conf: 0.8 }, 'W1\'s line, in the response\'s shape');
+    assert.equal(s.ended, false, 'the stream stays open while R1 is out');
+    await advance(3999);
+    await flush();
+    assert.equal(lines(s).length, 2, `no more lines before R1 answers at 5 s: ${JSON.stringify(lines(s))}`);
+
+    await advance(1);
+    await until(() => s.ended, 'the stream to end after the last item');
+    const all = lines(s);
+    assert.deepStrictEqual(all.slice(0, 3), [
+      { id: 'X1', error: 'AI_FAILED' },
+      { id: 'W1', found: true, leads: W1_P1, conf: 0.8 },
+      { id: 'R1', found: true, leads: R1_P1, conf: 0.8 },
+    ], 'one line per item, in finish order');
+    assert.equal(all.length, 4, `then exactly one more line, done: ${JSON.stringify(all)}`);
+    const last = all[3];
+    assert.equal(last.done, true, `the last line is { done: true, … }: ${JSON.stringify(last)}`);
+    assert.equal(last.provider, 'gemini', `done.provider: ${JSON.stringify(last)}`);
+    assert.equal(last.model, DEFAULT_MODEL, `done.model: ${JSON.stringify(last)}`);
+    assert.equal(typeof last.ms, 'number', `done.ms: ${JSON.stringify(last)}`);
+  } finally {
+    s.destroy();
+  }
+});
+
+test('#173: route: a replay streams too: PHOTO_PROVIDERS=fixture with no file → one { id, error: AI_FAILED } line per id, then done (provider fixture, model null); a sample key with a saved file → its saved answers, one line per id (an id it lacks AI_FAILED), then done with its recorded model; never a fetch', async () => {
+  const LEADS_DIR = path.join(__dirname, 'fixtures', 'photo', 'leads');
+  const key = 'zz-test-173-stream-replay';
+  const madeDir = !fs.existsSync(LEADS_DIR);
+  save(LEADS_DIR, key, { key, model: 'gemini-recorded-1', items: SAVED_ITEMS });
+  try {
+    const calls = offline();
+    const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 }), item('X9')];
+    const cases = [
+      ['PHOTO_PROVIDERS=fixture, no file', 'no-such-sample-173', 'fixture', items.map(it => ({ id: it.id, error: 'AI_FAILED' })), null],
+      ['a sample key with a saved file', key, undefined, [SAVED_ITEMS[1], SAVED_ITEMS[0], { id: 'X9', error: 'AI_FAILED' }], 'gemini-recorded-1'],
+    ];
+    for (const [what, k, providers, want, model] of cases) {
+      if (providers) process.env.PHOTO_PROVIDERS = providers;
+      else delete process.env.PHOTO_PROVIDERS;
+      const res = await postLeads({ key: k, items }, { accept: NDJSON });
+      assert.equal(res.status, 200, `${what}: status ${res.status}: ${res.raw.slice(0, 200)}`);
+      assert.match(String(res.headers['content-type']), /^application\/x-ndjson/, `${what}: a replay streams too; Content-Type ${res.headers['content-type']}`);
+      const all = lines({ raw: res.raw, ended: true });
+      const itemLines = all.filter(l => !l.done);
+      assert.deepStrictEqual(itemLines.map(l => l.id).sort(), ['R1', 'W1', 'X9'], `${what}: one line per requested id: ${JSON.stringify(all)}`);
+      for (const w of want) assert.deepStrictEqual(itemLines.find(l => l.id === w.id), w, `${what}: ${w.id}'s line`);
+      const last = all[all.length - 1];
+      assert.ok(last && last.done === true, `${what}: the last line is { done: true, … }: ${JSON.stringify(last)}`);
+      assert.equal(last.provider, 'fixture', `${what}: done.provider`);
+      assert.equal(last.model, model, `${what}: done.model`);
+    }
+    assert.deepStrictEqual(calls, [], 'a replay never calls out');
+  } finally {
+    fs.rmSync(path.join(LEADS_DIR, `${key}.json`), { force: true });
+    if (madeDir) fs.rmSync(LEADS_DIR, { recursive: true, force: true });
+  }
+});
+
+// Pin: the JSON answer and the errors are what tests, recording and an older
+// page rely on; the stream is opt-in.
+test('#173 pin: route: without Accept application/x-ndjson (none, application/json, */*) the answer is the one JSON body { items, provider, model, ms } as before; with it, errors before the stream (400 BAD_ITEMS, 429) stay JSON', async () => {
+  offline();
+  for (const accept of [undefined, 'application/json', '*/*']) {
+    const res = await postLeads(validBody(), { accept });
+    assert.equal(res.status, 200, `Accept ${accept}: status ${res.status}: ${res.raw.slice(0, 200)}`);
+    assert.match(String(res.headers['content-type']), /^application\/json/, `Accept ${accept}: Content-Type ${res.headers['content-type']}`);
+    assert.ok(res.body, `Accept ${accept}: one JSON body, not lines: ${res.raw.slice(0, 200)}`);
+    assert.deepStrictEqual(res.body.items, [{ id: 'R1', error: 'AI_FAILED' }, { id: 'W1', error: 'AI_FAILED' }], `Accept ${accept}`);
+    assert.ok('provider' in res.body && 'model' in res.body && typeof res.body.ms === 'number', `Accept ${accept}: ${JSON.stringify(res.body)}`);
+  }
+
+  const bad = await postLeads({ key: 'no-saved-leads', items: [] }, { accept: NDJSON });
+  assertBadItems(bad, 'no items, with Accept application/x-ndjson');
+  assert.match(String(bad.headers['content-type']), /^application\/json/, `the 400 stays JSON: ${bad.headers['content-type']}`);
+
+  const ip = '10.173.250.7';
+  for (let n = 1; n <= 6; n++) {
+    const res = await postLeads(validBody(), { ip, accept: NDJSON });
+    assert.equal(res.status, 200, `request ${n} of 6 got ${res.status}`);
+  }
+  const seventh = await postLeads(validBody(), { ip, accept: NDJSON });
+  assert.equal(seventh.status, 429, `the 7th request in a minute got ${seventh.status}`);
+  assert.match(String(seventh.headers['content-type']), /^application\/json/, `the 429 stays JSON: ${seventh.headers['content-type']}`);
+  assert.equal(typeof (seventh.body && seventh.body.reply), 'string', `the 429 body: ${seventh.raw.slice(0, 200)}`);
 });

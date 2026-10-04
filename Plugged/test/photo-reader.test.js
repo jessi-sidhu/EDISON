@@ -43,6 +43,33 @@
 //   setInterval, clearInterval, Date from fake ms 0). Node's AbortSignal.timeout
 //   is out of the fake clock's reach, so startRead() puts it on the same
 //   clock: any per-call time limit then shows up in fake time.
+// - The box round's fallback model (#176, section 10):
+//   - PHOTO_FALLBACK_MODEL (new env, default 'gemini-3.1-flash-lite', a pinned
+//     name, never a -latest alias; set but empty '' turns the fallback off)
+//     and PHOTO_FALLBACK_AT_MS (new env, default 25000), read per request.
+//   - When Robotics-ER (PHOTO_GEMINI_MODEL, default
+//     gemini-robotics-er-2-preview), with its own retries and resend, has no
+//     valid answer PHOTO_FALLBACK_AT_MS after the box round starts (fake ms 0
+//     here), the same request (the same body: prompt, schema, image part; the
+//     same x-goog-api-key) also goes to POST <GEMINI_BASE><fallback model>:generateContent.
+//   - The fallback runs under raceGemini's rules with at most 2 calls (a 503
+//     or invalid JSON is sent again 1–2 s later).
+//   - The first valid answer from either model wins, converted by the same
+//     boxesToReading, and every other call is aborted. One model running out
+//     of calls doesn't end the round while the other is still out. Nothing
+//     valid by PHOTO_TIMEOUT_MS → AI_TIMEOUT, as before.
+//   - The answer's model is the model that answered; provider stays 'gemini'.
+//     The route's [photo] line says fallback=yes and that model when the
+//     fallback model answered (photo-route.test.js).
+//   - The crop round (readLeads) never uses it.
+//   - Robotics-ER using up its 4 calls (every one failed, e.g. a 503 storm)
+//     before the fallback went out brings the fallback in at once, not at
+//     PHOTO_FALLBACK_AT_MS; with PHOTO_FALLBACK_MODEL='' that round ends
+//     AI_FAILED at once, as before. Both models spent → AI_FAILED at once.
+//   - A Robotics-ER 400/401/403 never brings the fallback in (a request or
+//     key problem; the provider list handles it).
+//   - Section 9's tests where Gemini fails or stalls every time are about
+//     Robotics-ER's own calls, so they run with PHOTO_FALLBACK_MODEL=''.
 //
 // Every test runs with DEEPSEEK_MODEL and DEEPSEEK_FALLBACK_MODEL set to
 // deepseek-v4-pro, the /api/ask settings that must never reach photos (that
@@ -75,7 +102,7 @@ const UPDATE = process.env.UPDATE_GOLDEN === '1';
 // ── Environment ─────────────────────────────────────────────────────────────
 
 const ENV_KEYS = ['GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'PHOTO_GEMINI_MODEL', 'PHOTO_RECORD', 'PHOTO_PROVIDERS',
-  'PHOTO_TIMEOUT_MS', 'PHOTO_HEDGE_MS', 'DEEPSEEK_MODEL', 'DEEPSEEK_FALLBACK_MODEL'];
+  'PHOTO_TIMEOUT_MS', 'PHOTO_HEDGE_MS', 'PHOTO_FALLBACK_MODEL', 'PHOTO_FALLBACK_AT_MS', 'DEEPSEEK_MODEL', 'DEEPSEEK_FALLBACK_MODEL'];
 let savedEnv, emptyDir;
 beforeAll(() => { emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'photo-reader-')); });
 afterAll(() => fs.rmSync(emptyDir, { recursive: true, force: true }));
@@ -88,6 +115,8 @@ beforeEach(() => {
   delete process.env.PHOTO_PROVIDERS;
   delete process.env.PHOTO_TIMEOUT_MS;
   delete process.env.PHOTO_HEDGE_MS;
+  delete process.env.PHOTO_FALLBACK_MODEL;   // #176: unset is the default fallback model
+  delete process.env.PHOTO_FALLBACK_AT_MS;
   Object.assign(process.env, ASK_ENV);
   for (const m of ['log', 'info', 'warn', 'error']) vi.spyOn(console, m).mockImplementation(() => {});
 });
@@ -831,7 +860,12 @@ test('#172: a Gemini 400, 401 or 403 is never retried: Gemini alone → AI_FAILE
   }
 });
 
-test('#172: at most 4 Gemini calls in a box round: a Gemini that fails every time is called exactly 4 times, then AI_FAILED long before the deadline; with stalls in the mix, never more than 4', async () => {
+test('#172: at most 4 Gemini calls in a box round (fallback model off, PHOTO_FALLBACK_MODEL=\'\', #176): a Gemini that fails every time is called exactly 4 times, then AI_FAILED long before the deadline; with stalls in the mix, never more than 4', async () => {
+  // #176: with the fallback on, Robotics-ER spending its 4 calls brings the
+  // fallback model in at once, and a stall past 25 s brings it in then (at
+  // most 2 more calls, section 10). This test is about Robotics-ER's own 4,
+  // so the fallback is off here.
+  process.env.PHOTO_FALLBACK_MODEL = '';
   const always = [
     ['503 every time', () => fails(503)],
     ['a network error every time', () => { throw new TypeError('fetch failed'); }],
@@ -869,7 +903,10 @@ test('#172: at most 4 Gemini calls in a box round: a Gemini that fails every tim
 // deepseek-flash, though listed, is not asked: it would only burn the time
 // left (#172: deepseek follows a 400/401/403 alone). An image whose hash has
 // a recording still gets that recording.
-test('#172: PHOTO_PROVIDERS=gemini,deepseek, a Gemini that answers 503 (or a network error) every time → exactly 4 Gemini calls, no deepseek, AI_FAILED well before 45 s; with a recording for the image, the recording answers and deepseek is still never asked', async () => {
+test('#172: PHOTO_PROVIDERS=gemini,deepseek (fallback model off, PHOTO_FALLBACK_MODEL=\'\', #176), a Gemini that answers 503 (or a network error) every time → exactly 4 Gemini calls, no deepseek, AI_FAILED well before 45 s; with a recording for the image, the recording answers and deepseek is still never asked', async () => {
+  // #176: with the fallback on, Robotics-ER spending its 4 calls brings the
+  // fallback model in at once (section 10). This test counts Robotics-ER's
+  // calls and deepseek's, so the fallback is off here.
   const rows = [
     ['503 every time', () => fails(503)],
     ['a network error every time', () => { throw new TypeError('fetch failed'); }],
@@ -879,6 +916,7 @@ test('#172: PHOTO_PROVIDERS=gemini,deepseek, a Gemini that answers 503 (or a net
       const label = `${what}, ${recorded ? 'a recording for the image hash' : 'no recording'}`;
       await withFixtures(recorded ? { [IMG_SHA]: { sample: null, sha256: IMG_SHA, reading: SAVED, provider: 'gemini', model: 'gemini-recorded-1' } } : {}, async dir => {
         process.env.PHOTO_PROVIDERS = 'gemini,deepseek';
+        process.env.PHOTO_FALLBACK_MODEL = '';
         const fake = clockFetch({ gemini, deepseek: () => deepseekOK(ONE_LED) });
         const s = startRead(fake, { fixturesDir: dir });   // no sample: the image's hash is its key
         await flush();
@@ -900,4 +938,289 @@ test('#172: PHOTO_PROVIDERS=gemini,deepseek, a Gemini that answers 503 (or a net
       });
     }
   }
+});
+
+// ── 10. A fast second model when Robotics-ER is silent (#176) ───────────────
+// #173's live check, run 2: Robotics-ER's call and its 12 s resend both just
+// hung, no 503 to retry, and the photo ended AI_TIMEOUT at 45 s. So at 25 s
+// with no valid answer the box round also asks gemini-3.1-flash-lite (~3 s,
+// rougher boxes, but rough boxes beat an error), and the first valid answer
+// wins. Robotics-ER answers ONE_LED and the fallback RESISTOR here, so the
+// parts tell who answered.
+
+const FALLBACK_MODEL = 'gemini-3.1-flash-lite';
+const urlFor = model => `${GEMINI_BASE}${model}:generateContent`;
+
+// A fake Gemini that answers per model: er(n, call) for the Robotics-ER model
+// (primary), fb(n, call) for any other; n is the call's number for its URL.
+// fake.er() and fake.fb() list the calls to primary and to fallback,
+// fake.stray() the URLs of calls to any other model.
+function twoModels(er, fb, { primary = DEFAULT_MODEL, fallback = FALLBACK_MODEL } = {}) {
+  const fake = clockFetch({ gemini: c => {
+    const n = fake.calls.gemini.filter(x => x.url === c.url).indexOf(c) + 1;
+    return c.url === urlFor(primary) ? er(n, c) : fb(n, c);
+  } });
+  fake.er    = () => fake.calls.gemini.filter(c => c.url === urlFor(primary));
+  fake.fb    = () => fake.calls.gemini.filter(c => c.url === urlFor(fallback));
+  fake.stray = () => fake.calls.gemini.filter(c => c.url !== urlFor(primary) && c.url !== urlFor(fallback)).map(c => c.url);
+  return fake;
+}
+const sentAt = calls => calls.map(c => c.at).join(', ') || '-';
+const models = fake => `Robotics-ER ×${fake.er().length} (sent at ${sentAt(fake.er())} ms), fallback ×${fake.fb().length} (sent at ${sentAt(fake.fb())} ms)`;
+const until  = ms => advance(ms - Date.now());   // to fake ms `ms`
+
+test('#176 bug: Robotics-ER silent → at exactly 25 s the same box request also goes to gemini-3.1-flash-lite (its model in the URL); its answer is returned with model gemini-3.1-flash-lite, provider gemini, and every Robotics-ER call is aborted (PHOTO_GEMINI_MODEL is the model watched)', async () => {
+  const rows = [['the default Robotics-ER model', DEFAULT_MODEL, false], ['PHOTO_GEMINI_MODEL=gemini-test-pinned-001', 'gemini-test-pinned-001', true]];
+  for (const [what, primary, setEnv] of rows) {
+    if (setEnv) process.env.PHOTO_GEMINI_MODEL = primary;
+    else delete process.env.PHOTO_GEMINI_MODEL;
+    const fake = twoModels(() => HANG, () => geminiOK(RESISTOR), { primary });
+    const s = startRead(fake);   // no providers, no deadlineMs: the defaults, as the route calls it
+    await flush();
+    await until(24999);
+    assert.equal(fake.fb().length, 0, `${what}: ${FALLBACK_MODEL} was asked before 25 s (${models(fake)})`);
+    assert.equal(s.done, false, `${what}: ${state(s)}`);
+    await advance(1);
+    assert.equal(fake.fb().length, 1,
+      `${what}: Robotics-ER had no answer at 25 s and ${FALLBACK_MODEL} was not asked (${models(fake)}; stray: ${JSON.stringify(fake.stray())}; ${state(s)})`);
+    const [first] = fake.er(), [fb] = fake.fb();
+    assert.equal(fb.at, 25000, `${what}: the fallback call went out at ${fb.at} ms, not at PHOTO_FALLBACK_AT_MS (default 25000)`);
+    assert.equal(fb.headers.get('x-goog-api-key'), GEMINI_KEY, `${what}: the fallback call carries the key in x-goog-api-key`);
+    assert.deepStrictEqual(fb.body, first.body, `${what}: the fallback gets the same request (prompt, schema, image part)`);
+    assert.ok(s.done && s.value, `${what}: the fallback answered at 25 s and the round did not end with it: ${state(s)}`);
+    assert.equal(s.value.model, FALLBACK_MODEL, `${what}: model is the model that answered: ${state(s)}`);
+    assert.equal(s.value.provider, 'gemini', `${what}: ${state(s)}`);
+    assert.deepStrictEqual(kinds(s.value), ['resistor'], `${what}: the fallback's answer`);
+    close(s.value.reading.parts[0].box, [204, 213, 510, 284], `${what}: the fallback's box goes through the same conversion`);
+    for (const c of fake.er()) assert.ok(c.signal && c.signal.aborted, `${what}: Robotics-ER call sent at ${c.at} ms was not aborted when the fallback won`);
+    await advance(46000);
+    assert.equal(fake.fb().length, 1, `${what}: nothing more after the fallback won (${models(fake)})`);
+    assert.deepStrictEqual(fake.stray(), [], `${what}: only Robotics-ER and ${FALLBACK_MODEL} are ever called`);
+    vi.useRealTimers();
+  }
+});
+
+test('pin (#176): Robotics-ER answering before 25 s (at 20 s, or at 24.999 s) is the answer, and the fallback model is never asked', async () => {
+  for (const ms of [20000, 24999]) {
+    const fake = twoModels(n => (n === 1 ? later(ms, geminiOK(ONE_LED)) : HANG), () => geminiOK(RESISTOR));
+    const s = startRead(fake);
+    await flush();
+    await until(ms);
+    assert.ok(s.done && s.value, `Robotics-ER answered at ${ms} ms: ${state(s)}`);
+    assert.equal(s.value.model, DEFAULT_MODEL, `answered at ${ms} ms: ${state(s)}`);
+    assert.deepStrictEqual(kinds(s.value), ['led'], `answered at ${ms} ms: Robotics-ER's answer`);
+    await advance(46000);
+    assert.equal(fake.fb().length + fake.stray().length, 0, `Robotics-ER answered at ${ms} ms, yet another model was asked (${models(fake)}; stray: ${JSON.stringify(fake.stray())})`);
+    vi.useRealTimers();
+  }
+});
+
+test('#176: Robotics-ER answering at 27 s while the fallback call is still out wins: model Robotics-ER, and the fallback call is aborted', async () => {
+  const fake = twoModels(n => (n === 1 ? later(27000, geminiOK(ONE_LED)) : HANG), () => HANG);
+  const s = startRead(fake);
+  await flush();
+  await until(25000);
+  assert.equal(fake.fb().length, 1, `Robotics-ER had no answer at 25 s and ${FALLBACK_MODEL} was not asked (${models(fake)}; ${state(s)})`);
+  await until(26999);
+  assert.equal(s.done, false, state(s));
+  await advance(1);
+  assert.ok(s.done && s.value, `Robotics-ER answered at 27 s: ${state(s)}`);
+  assert.equal(s.value.model, DEFAULT_MODEL, `the first valid answer was Robotics-ER's: ${state(s)}`);
+  assert.equal(s.value.provider, 'gemini', state(s));
+  assert.deepStrictEqual(kinds(s.value), ['led'], 'Robotics-ER\'s answer');
+  for (const c of fake.fb()) assert.ok(c.signal && c.signal.aborted, `the fallback call sent at ${c.at} ms lost the race and was not aborted`);
+  await advance(46000);
+  assert.equal(fake.fb().length, 1, `nothing more after Robotics-ER won (${models(fake)})`);
+});
+
+test('#176: the fallback follows raceGemini\'s rules: a 503 or invalid JSON is sent again 1–2 s later, the same request, at most 2 fallback calls; Robotics-ER can still win after that; nothing valid by 45 s → AI_TIMEOUT', async () => {
+  const BAD = [['a 503', () => fails(503)], ['invalid JSON', () => geminiOK('I cannot tell what is on this board.')]];
+  const ER = [
+    ['Robotics-ER silent', () => HANG, 0],
+    ['Robotics-ER answering at 30 s', n => (n === 1 ? later(30000, geminiOK(ONE_LED)) : HANG), 30000],
+  ];
+  for (const [bad, fb] of BAD) {
+    for (const [erWhat, er, answersAt] of ER) {
+      const what = `the fallback answering ${bad} every time, ${erWhat}`;
+      const fake = twoModels(er, fb);
+      const s = startRead(fake);
+      await flush();
+      await until(25000);
+      assert.equal(fake.fb().length, 1, `${what}: no fallback call at 25 s (${models(fake)}; ${state(s)})`);
+      await advance(999);
+      assert.equal(fake.fb().length, 1, `${what}: the fallback was sent again sooner than 1 s after its failure (${models(fake)})`);
+      await advance(1001);
+      assert.equal(fake.fb().length, 2, `${what}: the fallback's failure was not sent again within 2 s (${models(fake)}; ${state(s)})`);
+      const [a, b] = fake.fb();
+      assert.ok(b.at >= 26000 && b.at <= 27000, `${what}: the fallback's retry went out at ${b.at} ms, not 1–2 s after its failure at 25 s`);
+      assert.deepStrictEqual(b.body, a.body, `${what}: the retry is the same request`);
+      assert.equal(s.done, false, `${what}: the fallback using up its 2 calls ended the round while Robotics-ER was still out: ${state(s)}`);
+      if (answersAt) {
+        await until(answersAt - 1);
+        assert.equal(s.done, false, `${what}: ${state(s)}`);
+        await advance(1);
+        assert.ok(s.done && s.value, `${what}: Robotics-ER's answer at ${answersAt} ms should win: ${state(s)}`);
+        assert.equal(s.value.model, DEFAULT_MODEL, `${what}: ${state(s)}`);
+        assert.deepStrictEqual(kinds(s.value), ['led'], `${what}: Robotics-ER's answer`);
+      } else {
+        await until(44999);
+        assert.equal(s.done, false, `${what}: the round ended before the 45 s deadline: ${state(s)}`);
+        await advance(1);
+        assert.ok(s.done && s.error && s.error.code === 'AI_TIMEOUT', `${what}: nothing valid by 45 s is AI_TIMEOUT: ${state(s)}`);
+        for (const c of fake.er()) assert.ok(c.signal && c.signal.aborted, `${what}: Robotics-ER call sent at ${c.at} ms was not aborted at the deadline`);
+      }
+      await advance(46000);
+      assert.equal(fake.fb().length, 2, `${what}: at most 2 fallback calls (${models(fake)})`);
+      assert.deepStrictEqual(fake.stray(), [], what);
+      vi.useRealTimers();
+    }
+  }
+
+  // The fallback's retry answering counts like any first answer.
+  const fake = twoModels(() => HANG, n => (n === 1 ? geminiOK('Not JSON at all.') : geminiOK(RESISTOR)));
+  const s = startRead(fake);
+  await flush();
+  await until(25000);
+  assert.equal(fake.fb().length, 1, `invalid JSON, then an answer: no fallback call at 25 s (${models(fake)}; ${state(s)})`);
+  await advance(2000);
+  assert.equal(fake.fb().length, 2, `invalid JSON, then an answer: the fallback was not sent again (${models(fake)})`);
+  assert.ok(s.done && s.value, `invalid JSON, then an answer: the retry's answer should end the round: ${state(s)}`);
+  assert.equal(s.value.model, FALLBACK_MODEL, state(s));
+  assert.deepStrictEqual(kinds(s.value), ['resistor'], 'the fallback retry\'s answer');
+  assert.ok(s.at >= 26000 && s.at <= 27000, `answered at ${s.at} ms, not at the fallback's retry 1–2 s after 25 s`);
+});
+
+test('#176: Robotics-ER using up its calls after the fallback went out does not end the round: the fallback\'s answer at 35 s wins', async () => {
+  // Robotics-ER: call 1 → 503 at 13 s; its resend (12 s) → 503 at 26 s; the
+  // retries after that → 503 at once. So its 4 calls are spent by 30 s.
+  const er = n => (n === 1 ? later(13000, fails(503)) : n === 2 ? later(14000, fails(503)) : fails(503));
+  const fake = twoModels(er, () => later(10000, geminiOK(RESISTOR)));
+  const s = startRead(fake);
+  await flush();
+  await until(25000);
+  assert.equal(fake.fb().length, 1, `Robotics-ER had no valid answer at 25 s and ${FALLBACK_MODEL} was not asked (${models(fake)}; ${state(s)})`);
+  await until(31000);
+  assert.equal(fake.er().length, 4, `Robotics-ER should have spent its 4 calls by 31 s (${models(fake)})`);
+  assert.equal(s.done, false, `Robotics-ER running out of calls ended the round while the fallback was still out: ${state(s)}`);
+  await until(35000);
+  assert.ok(s.done && s.value, `the fallback answered at 35 s: ${state(s)}`);
+  assert.equal(s.value.model, FALLBACK_MODEL, state(s));
+  assert.deepStrictEqual(kinds(s.value), ['resistor'], 'the fallback\'s answer');
+});
+
+test('pin (#176): PHOTO_FALLBACK_MODEL set but empty turns the fallback off: Robotics-ER silent → no other model is ever called, AI_TIMEOUT at 45 s as before', async () => {
+  process.env.PHOTO_FALLBACK_MODEL = '';
+  const fake = twoModels(() => HANG, () => geminiOK(RESISTOR));
+  const s = startRead(fake);
+  await flush();
+  await until(44999);
+  assert.equal(s.done, false, `the round ended before the 45 s deadline: ${state(s)}`);
+  await advance(1);
+  assert.ok(s.done && s.error && s.error.code === 'AI_TIMEOUT', `at 45 s the request ends AI_TIMEOUT: ${state(s)}`);
+  assert.deepStrictEqual(fake.calls.gemini.filter(c => c.url !== urlFor(DEFAULT_MODEL)).map(c => c.url), [],
+    `PHOTO_FALLBACK_MODEL='' and another model was asked (${models(fake)})`);
+  for (const c of fake.er()) assert.ok(c.signal && c.signal.aborted, `Robotics-ER call sent at ${c.at} ms was not aborted at the deadline`);
+});
+
+test('#176: PHOTO_FALLBACK_AT_MS=3000 moves the fallback call to 3 s, and PHOTO_FALLBACK_MODEL picks the model asked', async () => {
+  const rows = [
+    ['PHOTO_FALLBACK_AT_MS=3000', { PHOTO_FALLBACK_AT_MS: '3000' }, FALLBACK_MODEL],
+    ['PHOTO_FALLBACK_AT_MS=3000, PHOTO_FALLBACK_MODEL=gemini-test-fallback-002', { PHOTO_FALLBACK_AT_MS: '3000', PHOTO_FALLBACK_MODEL: 'gemini-test-fallback-002' }, 'gemini-test-fallback-002'],
+  ];
+  for (const [what, env, fallback] of rows) {
+    delete process.env.PHOTO_FALLBACK_MODEL;
+    Object.assign(process.env, env);
+    const fake = twoModels(() => HANG, () => geminiOK(RESISTOR), { fallback });
+    const s = startRead(fake);
+    await flush();
+    await until(2999);
+    assert.equal(fake.fb().length, 0, `${what}: the fallback was asked before 3 s (${models(fake)})`);
+    await advance(1);
+    assert.equal(fake.fb().length, 1, `${what}: no call to ${fallback} at 3 s (${models(fake)}; stray: ${JSON.stringify(fake.stray())}; ${state(s)})`);
+    assert.equal(fake.fb()[0].at, 3000, what);
+    assert.ok(s.done && s.value, `${what}: ${state(s)}`);
+    assert.equal(s.value.model, fallback, `${what}: ${state(s)}`);
+    assert.deepStrictEqual(fake.stray(), [], `${what}: only Robotics-ER and ${fallback} are called`);
+    vi.useRealTimers();
+  }
+});
+
+test('#176: both models silent → the fallback goes out at 25 s, at most 2 fallback calls, AI_TIMEOUT at 45 s with every call of both models aborted', async () => {
+  const fake = twoModels(() => HANG, () => HANG);
+  const s = startRead(fake);
+  await flush();
+  await until(25000);
+  assert.equal(fake.fb().length, 1, `Robotics-ER had no answer at 25 s and ${FALLBACK_MODEL} was not asked (${models(fake)}; ${state(s)})`);
+  await until(44999);
+  assert.equal(s.done, false, `the round ended before the 45 s deadline: ${state(s)}`);
+  await advance(1);
+  assert.ok(s.done && s.error && s.error.code === 'AI_TIMEOUT', `at 45 s the request ends AI_TIMEOUT: ${state(s)}`);
+  assert.ok(fake.fb().length <= 2, `${models(fake)}: at most 2 fallback calls`);
+  for (const c of fake.calls.gemini) assert.ok(c.signal && c.signal.aborted, `the call to ${c.url.slice(GEMINI_BASE.length)} sent at ${c.at} ms was not aborted at the deadline`);
+  await advance(46000);
+  assert.ok(fake.fb().length <= 2, `${models(fake)}: nothing more after the deadline`);
+});
+
+test('#176: Robotics-ER using up its 4 calls before 25 s (a 503 storm) brings the fallback in at once, right after the 4th failure: its answer wins; when the fallback fails too, AI_FAILED at once, long before 45 s', async () => {
+  const rows = [
+    ['the fallback answers', () => geminiOK(RESISTOR), true],
+    ['the fallback answers 503 too', () => fails(503), false],
+  ];
+  for (const [what, fb, answers] of rows) {
+    const fake = twoModels(() => fails(503), fb);
+    const s = startRead(fake);   // the defaults, as the route calls it
+    await flush();
+    for (let t = 0; t < 10000 && !s.done; t += 100) await advance(100);
+    const er = fake.er();
+    assert.equal(er.length, 4, `${what}: Robotics-ER answering 503 every time is called 4 times (${models(fake)}; ${state(s)})`);
+    assert.ok(fake.fb().length >= 1,
+      `${what}: Robotics-ER used up its 4 calls by ${er[3].at} ms and ${FALLBACK_MODEL} was not asked at once (${models(fake)}; ${state(s)})`);
+    const [first] = fake.fb();
+    assert.ok(first.at - er[3].at <= 10, `${what}: the fallback went out at ${first.at} ms, not at once after Robotics-ER's 4th failure at ${er[3].at} ms`);
+    assert.deepStrictEqual(first.body, er[0].body, `${what}: the fallback gets the same request`);
+    if (answers) {
+      assert.ok(s.done && s.value, `${what}: the fallback's answer should end the round: ${state(s)}`);
+      assert.equal(s.value.model, FALLBACK_MODEL, `${what}: model is the model that answered: ${state(s)}`);
+      assert.equal(s.value.provider, 'gemini', `${what}: ${state(s)}`);
+      assert.deepStrictEqual(kinds(s.value), ['resistor'], `${what}: the fallback's answer`);
+    } else {
+      assert.ok(s.done && s.error && s.error.code === 'AI_FAILED', `${what}: both models used up their calls, so AI_FAILED at once: ${state(s)}`);
+      assert.equal(fake.fb().length, 2, `${what}: the fallback's 503 is sent again once, 2 calls in all (${models(fake)})`);
+    }
+    await advance(46000);
+    assert.deepStrictEqual([fake.er().length, fake.fb().length], [4, answers ? 1 : 2], `${what}: nothing more went out (${models(fake)})`);
+    assert.deepStrictEqual(fake.stray(), [], what);
+    vi.useRealTimers();
+  }
+});
+
+test('pin (#176): a Robotics-ER 400, 401 or 403 never brings the fallback in (a request or key problem): AI_FAILED at once after 1 call, the fallback model never asked', async () => {
+  for (const code of [400, 401, 403]) {
+    const fake = twoModels(() => fails(code), () => geminiOK(RESISTOR));
+    const s = startRead(fake);
+    await flush();
+    assert.ok(s.done && s.error && s.error.code === 'AI_FAILED', `${code}: a bad request or key ends the round at once: ${state(s)}`);
+    await advance(46000);
+    assert.deepStrictEqual([fake.er().length, fake.fb().length], [1, 0], `${code}: ${models(fake)}; the fallback is not for a bad request or key`);
+    assert.deepStrictEqual(fake.stray(), [], String(code));
+    vi.useRealTimers();
+  }
+});
+
+test('pin (#176): the crop round (readLeads) never asks the fallback model, even with Robotics-ER silent past PHOTO_FALLBACK_AT_MS', async () => {
+  process.env.PHOTO_FALLBACK_AT_MS = '3000';
+  const { readLeads } = require('../backend/photo-leads.js');
+  const fake = twoModels(() => HANG, () => geminiOK({ found: true, type: 'resistor', leads: [['1', [500, 250]], ['2', [500, 750]]], conf: 0.8 }));
+  vi.useFakeTimers(FAKE);
+  const crop = { id: 'R1', kind: 'part', type: 'resistor', value: 470, image: IMG,
+    window: { x: 0, y: 0, scale: 3, padLeft: 27, padTop: 27, width: 600, height: 400 } };
+  let out;
+  readLeads({ key: IMG_SHA, items: [crop] }, { fetch: fake.fetch, fixturesDir: emptyDir }).then(v => { out = v; });
+  await flush();
+  for (let t = 0; t < 46000 && !out; t += 1000) await advance(1000);
+  assert.ok(out, 'readLeads did not end by 46 s');
+  assert.deepStrictEqual(out.items, [{ id: 'R1', error: 'AI_TIMEOUT' }], `Robotics-ER silent: the crop is AI_TIMEOUT at the cutoff; got ${JSON.stringify(out.items)}`);
+  assert.ok(fake.er().length >= 1, models(fake));
+  assert.deepStrictEqual(fake.calls.gemini.filter(c => c.url !== urlFor(DEFAULT_MODEL)).map(c => c.url), [],
+    `the crop round asked another model (${models(fake)}); the fallback is for boxes only`);
 });

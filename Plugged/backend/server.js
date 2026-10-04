@@ -7,6 +7,7 @@
  * POST /api/ask            { markdown, message, history, board?, explain? }  →  { reply, actions[] }
  * POST /api/photo          { image, grid, sample? }        →  { reading, provider, model, ms, key }
  * POST /api/photo/leads    { key, items }                  →  { items, provider, model, ms }
+ *                          (Accept application/x-ndjson: a line per item as it settles, then { done, … })
  * GET  /api/health
  * GET  anything else       the app's static files
  */
@@ -1531,15 +1532,29 @@ async function handleLeads(req, res) {
     return sendJSON(res, 400, { reply: LEADS_REPLY.BAD_ITEMS, code: 'BAD_ITEMS' });
   }
 
+  // #173: a page that asks for NDJSON gets one line per item as it settles,
+  // then { done: true, provider, model, ms }; anyone else the one JSON body.
+  const stream = /application\/x-ndjson/i.test(String(req.headers.accept || ''));
+  const sent   = new Set();
+  const line   = o => { if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(o)}\n`); };
+  if (stream) {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders();
+  }
+  const onItem = stream ? e => { sent.add(e.id); line(e); } : undefined;
+
   let out;
   try {
-    out = await readLeads({ key, items });
+    out = await readLeads({ key, items }, { onItem });
   } catch (e) {   // readLeads never rejects; if it ever does, every item failed
     console.error('photo-leads: readLeads failed:', e.message);
     out = { items: items.map(it => ({ id: it.id, error: 'AI_FAILED' })), provider: null, model: null };
   }
   logLeads({ key, count, out, started, bytes });
-  return sendJSON(res, 200, { items: out.items, provider: out.provider, model: out.model, ms: Date.now() - started });
+  if (!stream) return sendJSON(res, 200, { items: out.items, provider: out.provider, model: out.model, ms: Date.now() - started });
+  for (const e of out.items) if (!sent.has(e.id)) line(e);   // every id gets its line
+  line({ done: true, provider: out.provider, model: out.model, ms: Date.now() - started });
+  if (!res.writableEnded) res.end();
 }
 
 // A sent board in the board-model shape; anything else is ignored, as

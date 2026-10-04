@@ -307,6 +307,10 @@ html, body {
 #photo-parts li.photo-flagged { background: #fef3c7; border-left: 3px solid #f59e0b; }
 #photo-parts li.photo-notbuilt { opacity: 0.55; }
 #photo-parts li.photo-board { font-size: 11px; color: #92400e; }
+/* #173: a row whose crop is still out says so, softly, until its legs land. */
+#photo-placing-note { font-size: 12px; color: var(--accent); }
+#photo-parts li.photo-placing span::after { content: ' · placing…'; color: var(--text-sub); animation: photo-placing 1.4s ease-in-out infinite; }
+@keyframes photo-placing { 50% { opacity: 0.35; } }
 .photo-addbar { flex-wrap: wrap; justify-content: stretch; }
 .photo-addbar span { display: flex; gap: 6px; width: 100%; }
 #photo-build { justify-content: center; }

@@ -8,9 +8,10 @@
 //  AI_FAILED or AI_TIMEOUT, carrying retries too (for the [photo] line).
 //
 //  A provider is { name, read(input, ctx) }: ctx has { signal, fetch,
-//  deadlineAt, tally } and read resolves { reading, model }; throwing
-//  means it failed, and the next one is tried, unless the error is .spent
-//  (Gemini already retried its own failures and used up its calls, #172).
+//  deadlineAt, tally } and read resolves { reading, model, fallback? };
+//  throwing means it failed, and the next one is tried, unless the error
+//  is .spent (Gemini already retried its own failures and used up its
+//  calls, #172).
 //  So with PHOTO_PROVIDERS=gemini,deepseek, deepseek follows only a Gemini
 //  400/401/403 (.fatal), never a timeout or Gemini's 503s. Every reading
 //  goes through validateReading().
@@ -30,8 +31,9 @@
 //  The live readers (#139) ask for a box per part and wire (photo-prompt.js)
 //  and start each one's 2 legs at the ends of its box, hole '?', for the
 //  page to snap. gemini: PHOTO_GEMINI_MODEL, the whole deadline, up to 4
-//  calls under raceGemini's retry rule (#172). deepseek: deepseek-flash
-//  only, never deepseek-v4-pro: it has no vision.
+//  calls under raceGemini's retry rule (#172), and PHOTO_FALLBACK_MODEL
+//  asked too when it is silent at PHOTO_FALLBACK_AT_MS (#176). deepseek:
+//  deepseek-flash only, never deepseek-v4-pro: it has no vision.
 // ─────────────────────────────────────────────────────────────
 
 const crypto = require('crypto');
@@ -311,22 +313,79 @@ function geminiText(data, who) {
   return text;
 }
 
+// ── The box round's fallback model (#176) ────────────────────
+// Robotics-ER can stall model-wide: on 2026-10-02 a call and its resend
+// both hung, with no 503 to retry, and the photo ended AI_TIMEOUT. So when
+// it has no valid answer PHOTO_FALLBACK_AT_MS into the box round (or has
+// spent its calls before then, never after a 400/401/403), the same request
+// also goes to PHOTO_FALLBACK_MODEL (pinned; '' turns it off), under
+// raceGemini's rules with at most 2 calls. The first valid answer from
+// either model wins and the other race is stopped. Boxes only: its crops
+// are poor (31%), so the crop round never uses it.
+const FALLBACK_MAX_CALLS = 2;
+function photoFallbackModel() {
+  const v = process.env.PHOTO_FALLBACK_MODEL;
+  return v === undefined ? 'gemini-3.1-flash-lite' : v.trim();
+}
+const photoFallbackAtMs = () => (Number(process.env.PHOTO_FALLBACK_AT_MS) > 0 ? Number(process.env.PHOTO_FALLBACK_AT_MS) : 25000);
+
+// er: Robotics-ER's started race; startFallback() starts the fallback's.
+// Resolves the first answer (the fallback's marked fallback: true). With
+// both races spent, or at the deadline (signal), rejects with er's error.
+function withFallback(er, startFallback, signal) {
+  return new Promise((resolve, reject) => {
+    let over = false, fb = null, fbDone = false, erError = null;
+    const timer = setTimeout(() => bringIn(), photoFallbackAtMs());
+    const finish = (settle, value) => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      const why = failed('the other model answered');
+      er.stop(why);
+      if (fb) fb.stop(why);
+      settle(value);
+    };
+    function bringIn() {
+      if (over || fb) return;
+      clearTimeout(timer);
+      fb = startFallback();
+      fb.result.then(v => finish(resolve, { ...v, fallback: true }), e => {
+        fbDone = true;
+        if ((signal && signal.aborted) || erError) finish(reject, erError || e);
+      });
+    }
+    er.result.then(v => finish(resolve, v), e => {
+      erError = e;
+      if ((signal && signal.aborted) || (!fb && e && e.fatal)) return finish(reject, e);
+      if (!fb) return bringIn();   // spent before the fallback went out: ask it now
+      if (fbDone) finish(reject, e);
+    });
+  });
+}
+
 const geminiProvider = {
   name: 'gemini',
   read: async (input, ctx) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw failed('GEMINI_API_KEY is not set');
-    const model = photoGeminiModel(), who = `gemini ${model}`;
+    const model = photoGeminiModel();
     const body  = {
       contents: [{ role: 'user', parts: [{ text: PHOTO_PROMPT }, geminiImagePart(input.image)] }],
       generationConfig: { responseMimeType: 'application/json', responseSchema: PHOTO_SCHEMA, temperature: 1, maxOutputTokens: 32768 },
     };
-    const once = async signal => {
-      const data = await postJSON(ctx, signal, who, `${GEMINI_BASE}${model}:generateContent`, { 'x-goog-api-key': apiKey }, body);
-      return { reading: boxesToReading(parseLooseJSON(geminiText(data, who)), input.grid), model };
+    const once = m => async signal => {
+      const who  = `gemini ${m}`;
+      const data = await postJSON(ctx, signal, who, `${GEMINI_BASE}${m}:generateContent`, { 'x-goog-api-key': apiKey }, body);
+      return { reading: boxesToReading(parseLooseJSON(geminiText(data, who)), input.grid), model: m };
     };
     // No per-call cap: Gemini gets the whole deadline (#172).
-    return raceGemini(once, { maxCalls: BOX_MAX_CALLS, signal: ctx.signal, deadlineAt: ctx.deadlineAt, stats: ctx.tally }).result;
+    const er     = raceGemini(once(model), { maxCalls: BOX_MAX_CALLS, signal: ctx.signal, deadlineAt: ctx.deadlineAt, stats: ctx.tally });
+    const backup = photoFallbackModel();
+    if (!backup || backup === model) return er.result;
+    // The fallback's retries count in the [photo] line's retries too.
+    const counted = (run, kind) => { const p = run(); if (p && kind === 'retry') ctx.tally.retries++; return p; };
+    return withFallback(er, () => raceGemini(once(backup),
+      { maxCalls: FALLBACK_MAX_CALLS, signal: ctx.signal, deadlineAt: ctx.deadlineAt, slot: counted }), ctx.signal);
   },
 };
 
@@ -429,9 +488,9 @@ function record(dir, key, input, out) {
 
 // Resolves { reading, provider, model, fallback, notes, key, retries };
 // fallback is true when the answer didn't come from the first provider
-// listed, key is the fixture key (null when the sample isn't a plain id),
-// and retries counts Gemini's calls sent again after a failure (an error
-// carries it too).
+// listed, or came from the box round's fallback model (#176); key is the
+// fixture key (null when the sample isn't a plain id), and retries counts
+// Gemini's calls sent again after a failure (an error carries it too).
 async function readPhoto(input, opts = {}) {
   const names       = opts.providers || photoProviders();
   const fixturesDir = opts.fixturesDir || FIXTURES_DIR;
@@ -466,7 +525,7 @@ async function readPhoto(input, opts = {}) {
         try {
           const got = await p.read(input, { ...ctxBase, signal });
           const { reading, notes } = validateReading(got && got.reading);
-          return { reading, provider: p.name, model: got.model, fallback: i > 0, notes, key, retries: tally.retries };
+          return { reading, provider: p.name, model: got.model, fallback: i > 0 || got.fallback === true, notes, key, retries: tally.retries };
         } catch (e) {
           console.warn(`photo: ${p.name} failed: ${e.message}`);
           if (signal.aborted) throw e;

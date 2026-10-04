@@ -5,7 +5,8 @@
     "build": "remotion render src/index.ts SparkyDemo out/sparky-demo.mp4",
     "check": "biome lint --error-on-warnings",
     "e2e": "node scripts/e2e.js",
-    "ai-eval": "node scripts/ai-eval.js"
+    "ai-eval": "node scripts/ai-eval.js",
+    "photo-eval": "node scripts/photo-eval.js"
   },
   "dependencies": {
     "@react-three/fiber": "^8.18.0",

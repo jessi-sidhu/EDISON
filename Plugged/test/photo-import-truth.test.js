@@ -13,7 +13,8 @@
 //   photos.json `rails`: each sign's offset in pitches in the j-on-top frame
 //   (row j at 0, row a at 11); a strip under 3.4 pitches from its side's
 //   body row is the inner one (the PhotoGrid snap rule). The printed signs
-//   go in board.rails; a side with no rails listed gets BB830's.
+//   go in board.rails; a side with no rails listed gets BB830's. (railsOf
+//   and holeOf: test/fixtures/photo-web-rails.js.)
 // - LED pins 'anode' / 'cathode' are roles; '?' → 'unknown'. Resistor
 //   values '100', '1k' → ohms; null → 0. LED value → its colour.
 
@@ -24,38 +25,11 @@ const path   = require('node:path');
 const {
   Parts, build, checkInvariants, assertSameNets, jumpersOf, skippedIds, kinds,
 } = require('./fixtures/photo-import-helpers.js');
+const { railsOf, holeOf } = require('./fixtures/photo-web-rails.js');
 
 const WEB    = path.join(__dirname, 'fixtures/photo/web');
 const TRUTH  = JSON.parse(fs.readFileSync(path.join(WEB, 'truth.json'), 'utf8'));
 const PHOTOS = JSON.parse(fs.readFileSync(path.join(WEB, 'photos.json'), 'utf8'));
-
-const DEFAULT_STRIP = { 'a:+': 'aOuter', 'a:-': 'aInner', 'j:+': 'jInner', 'j:-': 'jOuter' };
-const DEFAULT_SIGNS = { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' };
-
-// photos.json rails → { 'a:+': strip, … } and the printed sign of each strip.
-function railsOf(photo) {
-  const strips = Object.assign({}, DEFAULT_STRIP), signs = {};
-  for (const side of ['a', 'j']) {
-    const listed = ['+', '-'].filter(s => photo.rails[`${side}:${s}`] != null);
-    for (const s of listed) {
-      const v = photo.rails[`${side}:${s}`];
-      const dist = side === 'a' ? v - 11 : -v;
-      strips[`${side}:${s}`] = side + (dist < 3.4 ? 'Inner' : 'Outer');
-    }
-    for (const where of ['Outer', 'Inner']) {
-      const s = listed.find(x => strips[`${side}:${x}`] === side + where);
-      signs[side + where] = s || DEFAULT_SIGNS[side + where];
-    }
-  }
-  return { strips, signs };
-}
-
-function holeOf(h, strips) {
-  if (h == null || !String(h).trim()) return '?';
-  const s = String(h).trim();
-  const m = /^rail:([aj]):([+-]):(\d+)$/.exec(s);
-  return m ? `rail:${strips[m[1] + ':' + m[2]]}:${m[3]}` : s;
-}
 
 function ohms(v) {
   const m = /^(\d+(?:\.\d+)?)(k?)$/i.exec(String(v == null ? '' : v).trim());

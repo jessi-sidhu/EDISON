@@ -8,6 +8,10 @@
 //  { id, error: 'AI_TIMEOUT' | 'AI_FAILED' }. It never rejects. `resent`
 //  (items that got a stall resend) and `retries` (calls sent again after a
 //  failure) are for the route's log only.
+//  opts.onItem(entry) (#173) is called once per item as it settles, in
+//  finish order, with the entry `items` will hold (a saved answer standing
+//  in included); replays and the no-key path call it too. The route
+//  streams these as NDJSON lines.
 //
 //  Each item is a raceGemini (photo-reader.js, #172): a call that fails at
 //  once is retried 1–2 s later; one with no answer after PHOTO_HEDGE_MS
@@ -17,8 +21,8 @@
 //  flight across the items; the rest wait their turn, first calls in item
 //  order. A stall resend is exempt: it goes out on time, never queued and
 //  never taking a slot (resends queued behind waiting items left 9 of 13
-//  crops unanswered live). At PHOTO_LEADS_TIMEOUT_MS (default 25 s) every
-//  call is aborted and the items unanswered or still waiting are AI_TIMEOUT.
+//  crops unanswered live). At PHOTO_LEADS_TIMEOUT_MS (default 40 s since
+//  #173; the page no longer waits on it) every call is aborted and the items unanswered or still waiting are AI_TIMEOUT.
 //  Gemini only: deepseek can't point. Timers are the global setTimeout, so
 //  fake timers drive them.
 //
@@ -43,7 +47,7 @@ const ROLES          = ['anode', 'cathode', 'none', 'unknown'];
 const CROP_MAX_CALLS = 3;
 
 // Read per request, so a test (or a restart-free tweak) can change them.
-const cutoffMs    = () => (Number(process.env.PHOTO_LEADS_TIMEOUT_MS) > 0 ? Number(process.env.PHOTO_LEADS_TIMEOUT_MS) : 25000);
+const cutoffMs    = () => (Number(process.env.PHOTO_LEADS_TIMEOUT_MS) > 0 ? Number(process.env.PHOTO_LEADS_TIMEOUT_MS) : 40000);
 const concurrency = () => {
   const n = Math.floor(Number(process.env.PHOTO_LEADS_CONCURRENCY));
   return n >= 1 ? n : 16;
@@ -112,13 +116,14 @@ function limiter(cap) {
   };
 }
 
-// Every item live, at most concurrency() first calls and retries at once. Resolves
-// { entries, resent, retries, ok }.
-async function askGemini(items, model, fetch) {
+// Every item live, at most concurrency() first calls and retries at once.
+// settle(entry) takes each item's live entry as it settles and returns the
+// one to keep. Resolves { entries, resent, retries, ok }, ok counting live answers.
+async function askGemini(items, model, fetch, settle) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.warn('photo-leads: GEMINI_API_KEY is not set');
-    return { entries: items.map(it => ({ id: it.id, error: 'AI_FAILED' })), resent: 0, retries: 0, ok: 0 };
+    return { entries: items.map(it => settle({ id: it.id, error: 'AI_FAILED' })), resent: 0, retries: 0, ok: 0 };
   }
   const who = `gemini ${model}`, url = `${GEMINI_BASE}${model}:generateContent`;
   const slot = limiter(concurrency()), hedgeMs = photoHedgeMs(), deadlineAt = Date.now() + cutoffMs();
@@ -135,14 +140,16 @@ async function askGemini(items, model, fetch) {
   });
   const late    = Object.assign(new Error('past the crop round\'s cutoff'), { code: 'AI_TIMEOUT' });
   const cutoff  = setTimeout(() => runs.forEach(r => r.stop(late)), cutoffMs());
-  const entries = await Promise.all(runs.map((r, i) => r.result.catch(e =>
-    ({ id: items[i].id, error: e && e.code === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILED' }))));
+  const lost    = new Set();   // the items with no live answer
+  const entries = await Promise.all(runs.map((r, i) => r.result
+    .catch(e => ({ id: items[i].id, error: e && e.code === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILED' }))
+    .then(e => { if (e.error) lost.add(i); return settle(e); })));
   clearTimeout(cutoff);
 
-  const whys = [...new Set(runs.filter((r, i) => entries[i].error && r.stats.why).map(r => r.stats.why))];
-  if (whys.length) console.warn(`photo-leads: ${entries.filter(e => e.error).length} item(s) unanswered: ${whys.join('; ')}`);
+  const whys = [...new Set(runs.filter((r, i) => lost.has(i) && r.stats.why).map(r => r.stats.why))];
+  if (whys.length) console.warn(`photo-leads: ${lost.size} item(s) unanswered: ${whys.join('; ')}`);
   return { entries, resent: runs.filter(r => r.stats.resent).length, retries: runs.reduce((n, r) => n + r.stats.retries, 0),
-           ok: entries.filter(e => !e.error).length };
+           ok: items.length - lost.size };
 }
 
 function record(dir, key, model, items) {
@@ -155,7 +162,7 @@ function record(dir, key, model, items) {
 }
 
 // body: { key, items: [{ id, kind, type, value, image, window }] }, already
-// checked by the route. opts: { fetch, fixturesDir }.
+// checked by the route. opts: { fetch, fixturesDir, onItem }.
 async function readLeads(body, opts = {}) {
   const started     = Date.now();
   const { key }     = obj(body);
@@ -166,19 +173,25 @@ async function readLeads(body, opts = {}) {
   const replayOnly  = names.length === 1 && names[0] === 'fixture';
   const recording   = process.env.PHOTO_RECORD === '1';
   const done = (out, provider, model, resent = 0, retries = 0) => ({ items: out, provider, model, ms: Date.now() - started, resent, retries });
+  const report = e => {   // the caller's onItem never breaks the round
+    try { if (typeof opts.onItem === 'function') opts.onItem(e); } catch (err) { console.warn('photo-leads: onItem threw:', err.message); }
+    return e;
+  };
 
   if (replayOnly || (file && !IMAGE_HASH.test(key) && !recording)) {
-    return done(items.map(it => savedEntry(file, it.id) || { id: it.id, error: 'AI_FAILED' }), 'fixture', file ? file.model : null);
+    return done(items.map(it => report(savedEntry(file, it.id) || { id: it.id, error: 'AI_FAILED' })), 'fixture', file ? file.model : null);
   }
 
-  const model = photoGeminiModel();
-  const live  = await askGemini(items, model, opts.fetch || globalThis.fetch);
+  // An item that fails live takes its saved answer, when the file has one.
   let fromFile = 0;
-  const out = live.entries.map(e => {
+  const settle = e => {
     const saved = e.error && savedEntry(file, e.id);
     if (saved) fromFile++;
-    return saved || e;
-  });
+    return report(saved || e);
+  };
+  const model = photoGeminiModel();
+  const live  = await askGemini(items, model, opts.fetch || globalThis.fetch, settle);
+  const out   = live.entries;
   if (recording && live.ok && isSafeId(key)) record(fixturesDir, key, model, out.filter(e => !e.error));
   return live.ok === 0 && fromFile ? done(out, 'fixture', file.model, live.resent, live.retries)
     : done(out, 'gemini', model, live.resent, live.retries);

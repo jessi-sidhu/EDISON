@@ -26,18 +26,48 @@
 //   - photo.js, after /api/photo answers 200 with a Reading:
 //       PhotoCrops.items(reading, PhotoCapture.grid) non-empty, the reply
 //       has a `key` and its provider isn't 'deepseek' (#161) →
-//         #photo-status "Found N parts · placing legs…" (the confirm screen
-//         stays hidden meanwhile), then ONE POST /api/photo/leads
+//         ONE POST /api/photo/leads
 //         { key, items: [{ id, kind, type, value, image, window }] }, one
-//         entry per item, window = PhotoCrops.window(grid, item.box);
-//         the answer's `items` → PhotoCrops.merge → PhotoConfirm.open.
-//       It waits at most window.PhotoCapture.leadsTimeoutMs (default 35000,
-//       PHOTO_LEADS_PAGE_TIMEOUT_MS; read when the request starts, so tests
-//       shorten it). A timeout, a non-200 or a network failure opens the
-//       confirm screen with the box round's placeholders, no error message.
+//         entry per item, window = PhotoCrops.window(grid, item.box).
+//         (#173 changed what happens around it; see below.)
+//       It waits at most window.PhotoCapture.leadsTimeoutMs (default 45000
+//       since #173, was 35000; PHOTO_LEADS_PAGE_TIMEOUT_MS; read when the
+//       request starts, so tests shorten it). A timeout, a non-200 or a
+//       network failure keeps the box round's placeholders, no error message.
 //       No items, or no key → no request: straight to the confirm screen.
-//       Cancel while the legs are being placed drops the round (the job
-//       pattern): the confirm screen never opens behind her back.
+//   - #173, the confirm screen opens after the box round and each part's
+//     legs snap in as its crop answers:
+//       PhotoConfirm.open(reading, …) right after /api/photo answers, with
+//       the box round's placeholders ('?' snapped); then the crops go out
+//       with the header `Accept: application/x-ndjson`, and the 200 body
+//       (Content-Type application/x-ndjson) is read line by line as it
+//       arrives (a line may come in pieces): one line per item,
+//       { id, found, leads, conf } or { id, error }, in finish order, then a
+//       last line { done: true, provider, model, ms }. Each item line goes to
+//       PhotoConfirm.place(id, entry).
+//       PhotoConfirm.place(id, entry): unless she has touched that item since
+//       open() (moved one of its dots, ⇄, ×, or changed its value or colour),
+//       merge it (PhotoCrops.merge with that one entry; found false drops the
+//       item), snap its '?' holes, rebuild, relist and redraw. A touched item
+//       ignores its line.
+//       While crops are out: window.PhotoConfirm.placing (a Set or an array)
+//       holds the ids still being placed (every cropped item at first; an id
+//       leaves when its found line arrives); each of their rows in
+//       #photo-parts has the class .photo-placing; #photo-confirm shows
+//       "Placing legs N/M…" (N item lines answered, M crops sent). At
+//       { done: true }, a timeout, a non-200, or a stream or network error:
+//       every placing state and the count are cleared, no message. With no
+//       round (no key, nothing to crop, a deepseek reading) there is no
+//       placing state at all.
+//       Cancel (and Build it, which closes the overlay) while crops are out
+//       aborts the request; nothing is applied after. Build it works at any
+//       time: PhotoImport.build of the Reading as it is (unplaced items keep
+//       their placeholders).
+//       How these tests stub the stream: page.route fulfils the whole NDJSON
+//       body at once (fulfilLines); for lines that arrive one at a time,
+//       streamLeads() replaces window.fetch for /api/photo/leads only with a
+//       Response whose body the test writes chunk by chunk, and which errors
+//       when the page aborts it, as a real fetch does.
 //   - #161, the round never stalls, never oversends, and is Gemini's:
 //       items() leaves out an item whose box lies wholly off the flattened
 //       image (or whose crop would have a 0-px photo area): it is never
@@ -147,6 +177,94 @@ const confirmState = page => page.evaluate(() => {
 });
 const dotOf = (s, id, i) => s.dots.find(d => d.id === id && d.end === i);
 
+// ── The streamed answer (#173) ─────────────────────────────────────────────
+
+const NDJSON = 'application/x-ndjson';
+const DONE   = { done: true, provider: 'gemini', model: 'gemini-robotics-er-2-preview', ms: 9100 };
+// An NDJSON body: one line per entry, then the done line.
+const ndjson      = (entries, done = DONE) => [...entries, done].map(e => `${JSON.stringify(e)}\n`).join('');
+const fulfilLines = (route, entries, done) => route.fulfill({ status: 200, contentType: NDJSON, body: ndjson(entries, done) });
+
+// The placing states: PhotoConfirm.placing and the rows marked .photo-placing
+// (both sorted), and the "Placing legs N/M…" count shown in #photo-confirm
+// ('' when none).
+const placingState = page => page.evaluate(() => ({
+  placing: [...(window.PhotoConfirm.placing || [])].sort(),
+  rows:    [...document.querySelectorAll('#photo-parts li.photo-placing')].map(li => li.dataset.id).sort(),
+  count:   (/Placing legs[^\n]*/i.exec(document.getElementById('photo-confirm').innerText) || [''])[0],
+}));
+const NONE_PLACING = { placing: [], rows: [], count: '' };
+
+// Waits until the confirm screen shows and nothing is still being placed
+// (once `sent` has a request, when given: the round has started).
+async function settled(page, sent) {
+  if (sent) await expect.poll(() => sent.length, { message: 'the crops are sent' }).toBeGreaterThan(0);
+  await expect(page.locator('#photo-confirm')).toBeVisible({ timeout: 10_000 });
+  await expect.poll(() => placingState(page), { message: 'every placing state and the count clear' }).toEqual(NONE_PLACING);
+}
+
+// window.fetch for /api/photo/leads only (anything else, or everything once
+// window.__leads.on is false, goes to the real fetch and so to page.route):
+// a 200 application/x-ndjson Response whose body the test writes, chunk by
+// chunk, with push(page, text). Aborting the request errors the body, as a
+// real fetch does, and is recorded.
+async function streamLeads(page) {
+  await page.evaluate(() => {
+    const real = window.fetch.bind(window);
+    const T = window.__leads = { on: true, calls: [] };
+    window.fetch = (url, opts = {}) => {
+      if (!T.on || !String(url).includes('/api/photo/leads')) return real(url, opts);
+      const call = { accept: new Headers(opts.headers || {}).get('accept') || '', ids: JSON.parse(opts.body).items.map(i => i.id), aborted: false, ctl: null };
+      T.calls.push(call);
+      const body = new ReadableStream({ start(ctl) { call.ctl = ctl; } });
+      const abort = () => {
+        call.aborted = true;
+        try { call.ctl.error(new DOMException('The user aborted a request.', 'AbortError')); } catch { /* already closed */ }
+      };
+      if (opts.signal) {
+        if (opts.signal.aborted) { abort(); return Promise.reject(new DOMException('The user aborted a request.', 'AbortError')); }
+        opts.signal.addEventListener('abort', abort, { once: true });
+      }
+      return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } }));
+    };
+  });
+}
+const leadsCalls = page => page.evaluate(() => window.__leads.calls.map(c => ({ accept: c.accept, ids: c.ids, aborted: c.aborted })));
+// Writes text into the latest stubbed body; false when it is already closed or errored.
+const push = (page, text) => page.evaluate(t => {
+  const c = window.__leads.calls[window.__leads.calls.length - 1];
+  try { c.ctl.enqueue(new TextEncoder().encode(t)); return true; } catch { return false; }
+}, text);
+const endStream = page => page.evaluate(() => {
+  try { window.__leads.calls[window.__leads.calls.length - 1].ctl.close(); } catch { /* already closed */ }
+});
+
+// The points of an item's ends on the confirm screen, or null when it is gone.
+const ptsOf = (page, id) => page.evaluate(id => {
+  const r = window.PhotoConfirm.reading;
+  const e = r && (r.parts.find(p => p.id === id) || r.wires.find(w => w.id === id));
+  return e ? (e.leads || e.ends).map(x => x.pt) : null;
+}, id);
+
+const expectedBuild = (page, reading) => page.evaluate(r => window.PhotoImport.build(r, { components: [] }), reading);
+
+// A tap on flattened pixel (fx, fy) of the confirm canvas.
+async function tapFlat(page, [fx, fy]) {
+  const box  = await page.locator('#photo-confirm-canvas').boundingBox();
+  const size = await page.evaluate(() => ({ w: window.PhotoCapture.grid.width, h: window.PhotoCapture.grid.height }));
+  await page.mouse.click(box.x + fx * box.width / size.w, box.y + fy * box.height / size.h);
+}
+
+// The canvas pixels in a 1-pitch square around a flattened point, for "the
+// drawing changed there".
+const patch = (page, [fx, fy]) => page.evaluate(([fx, fy]) => {
+  const c = document.getElementById('photo-confirm-canvas');
+  const g = window.PhotoCapture.grid;
+  const k = c.width / g.width, r = Math.max(2, Math.round(g.pitch * k / 2));
+  return Array.from(c.getContext('2d').getImageData(Math.round(fx * k) - r, Math.round(fy * k) - r, 2 * r, 2 * r).data);
+}, [fx, fy]);
+const patchDiff = (a, b) => a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0) / a.length;
+
 // The box round's own Reading as the confirm screen shows it: every '?'
 // snapped from its placeholder pt, nothing else changed.
 const placeholdersOf = (page, reading) => page.evaluate(r => {
@@ -223,15 +341,14 @@ test('a box-round Reading → one /api/photo/leads request with a labelled JPEG 
   await page.route('**/api/photo/leads', async route => {
     const body = route.request().postDataJSON();
     leadsSent.push(body);
-    await held;                                        // "placing legs…" shows meanwhile
-    await route.fulfill({ json: { items: body.items.map(i => ANSWERS[i.id] || { id: i.id, error: 'AI_FAILED' }),
-                                  provider: 'gemini', model: 'gemini-robotics-er-2-preview', ms: 9100 } });
+    await held;                                        // the request's checks run meanwhile
+    // #173: the answer is NDJSON lines (the page asks for them).
+    await fulfilLines(route, body.items.map(i => ANSWERS[i.id] || { id: i.id, error: 'AI_FAILED' }));
   });
 
   await openSample(page);
   await expect.poll(() => leadsSent.length, { message: 'the page sends the crops to /api/photo/leads' }).toBe(1);
-  await expect(page.locator('#photo-status')).toContainText(/Found \d+ parts? · placing legs/);
-  await expect(page.locator('#photo-confirm'), 'the confirm screen opens once, after the legs').toBeHidden();
+  // (#173: what the confirm screen shows while the crops are out is the #173 tests'.)
 
   // The request: the key, then one item per resistor, LED and wire, in Reading order.
   const body = leadsSent[0];
@@ -262,9 +379,9 @@ test('a box-round Reading → one /api/photo/leads request with a labelled JPEG 
   expect(check.same, `R1's photo area lines up with the flattened image by the window (mean diff ${check.same.toFixed(1)}, half a pitch off: ${check.shifted.toFixed(1)}, ${check.n} points)`).toBeLessThan(20);
   expect(check.same, 'and clearly better than half a pitch off').toBeLessThan(0.6 * check.shifted);
 
-  // The answers land: the confirm screen opens with the returned legs.
+  // The answers land on the confirm screen.
   release();
-  await expect(page.locator('#photo-confirm'), 'the confirm screen opens after the legs come back').toBeVisible();
+  await settled(page);
   const s = await confirmState(page);
   const pitch = await page.evaluate(() => window.PhotoCapture.grid.pitch);
   for (const [id, holes] of Object.entries(LANDS)) {
@@ -299,17 +416,41 @@ test('a box-round Reading → one /api/photo/leads request with a labelled JPEG 
 
 // ── It never blocks the confirm screen ─────────────────────────────────────
 
-test('a crop round that hangs, fails or can\'t connect still opens the confirm screen with the placeholders, no error; Cancel while placing legs drops it', async ({ page }) => {
+// #173 rewrote this test (#160/#161's version): the confirm screen now opens
+// before the crops answer, so Cancel closes it mid-round, and a failed round
+// only has to clear the placing states.
+test('#173: Cancel while the crops are out closes the overlay and aborts the request, and nothing lands after; a non-200, a network failure, or no answer within PhotoCapture.leadsTimeoutMs (default 45000) each clear every placing state and keep the placeholders, no message', async ({ page }) => {
   test.setTimeout(60_000);
   const errors = watchErrors(page);
   await openEditor(page);
-  expect(await page.evaluate(() => window.PhotoCapture && window.PhotoCapture.leadsTimeoutMs), 'PHOTO_LEADS_PAGE_TIMEOUT_MS').toBe(35000);
-  await page.evaluate(() => { window.PhotoCapture.leadsTimeoutMs = 1000; });
+  expect(await page.evaluate(() => window.PhotoCapture && window.PhotoCapture.leadsTimeoutMs),
+    'PHOTO_LEADS_PAGE_TIMEOUT_MS: 45 s, above the server\'s 40 s cutoff plus the upload').toBe(45000);
 
   const c = await sampleCentres(page, HOLES);
-  const reading = boxRound(c);
+  const reading = boxRound(c), ANSWERS = answers(c);
   await page.route('**/api/photo', route => route.fulfill({ json: { reading, provider: 'gemini', model: 'gemini-robotics-er-2-preview', ms: 8200, key: KEY } }));
-  let mode = 'hang';
+  const line = id => `${JSON.stringify(ANSWERS[id])}\n`;
+
+  // Cancel mid-stream: W1's line has landed, the rest are still out.
+  await streamLeads(page);
+  await openSample(page);
+  await expect.poll(() => leadsCalls(page).then(x => x.length), { message: 'the crops are sent' }).toBe(1);
+  await expect(page.locator('#photo-confirm'), 'the confirm screen is open while the crops are out').toBeVisible();
+  await push(page, line('W1'));
+  await expect.poll(() => ptsOf(page, 'W1'), { message: 'W1\'s line lands' }).toEqual(ANSWERS.W1.leads.map(l => l.pt));
+  const before = await page.evaluate(() => window.PhotoConfirm.reading);
+  await page.locator('#photo-cancel').click();
+  await expect(page.locator('#photo-modal'), 'Cancel closes the overlay mid-round').toBeHidden();
+  await expect.poll(() => leadsCalls(page).then(x => x[0].aborted), { message: 'Cancel aborts the crop request' }).toBe(true);
+  await push(page, line('R1') + line('LED1') + `${JSON.stringify(DONE)}\n`);   // too late
+  await page.waitForTimeout(300);
+  const after = await page.evaluate(() => window.PhotoConfirm.reading);
+  if (after !== null) expect(after, 'nothing lands after Cancel').toEqual(before);
+  await expect(page.locator('#photo-modal'), 'still closed').toBeHidden();
+
+  // A non-200, a network failure, no answer at all: through page.route now.
+  await page.evaluate(() => { window.__leads.on = false; window.PhotoCapture.leadsTimeoutMs = 2500; });
+  let mode = 'error';
   const sentAt = [];
   await page.route('**/api/photo/leads', route => {
     sentAt.push(Date.now());
@@ -317,33 +458,26 @@ test('a crop round that hangs, fails or can\'t connect still opens the confirm s
     if (mode === 'abort') return route.abort('failed');
     // 'hang': never answered
   });
-
-  // Cancel while the legs are being placed: the round is dropped, and the
-  // confirm screen doesn't open behind her back when the timeout fires.
-  await openSample(page);
-  await expect.poll(() => sentAt.length, { message: 'the crops were sent' }).toBe(1);
-  await page.locator('#photo-cancel').click();
-  await expect(page.locator('#photo-modal')).toBeHidden();
-  await page.waitForTimeout(1600);                     // past leadsTimeoutMs
-  await expect(page.locator('#photo-modal'), 'still closed').toBeHidden();
-  expect(await page.evaluate(() => window.PhotoConfirm.reading), 'the confirm screen never opened').toBe(null);
-
   const want = await placeholdersOf(page, reading);
-  for (const m of ['hang', 'error', 'abort']) {
+  for (const m of ['error', 'abort', 'hang']) {
     mode = m;
     const n = sentAt.length;
     if (await page.locator('#photo-modal').isVisible()) await page.locator('#photo-cancel').click();
     await openSample(page);
     await expect.poll(() => sentAt.length, { message: `${m}: the crops were sent` }).toBe(n + 1);
-    await expect(page.locator('#photo-confirm'), `${m}: the confirm screen opens anyway`).toBeVisible({ timeout: 5000 });
-    if (m === 'hang') expect(Date.now() - sentAt[n], 'hang: it waited for leadsTimeoutMs first').toBeGreaterThanOrEqual(900);
+    await expect(page.locator('#photo-confirm'), `${m}: the confirm screen is open`).toBeVisible();
+    if (m === 'hang') {
+      expect((await placingState(page)).placing, 'hang: still placing while it waits').toEqual(['LED1', 'R1', 'R2', 'W1']);
+    }
+    await expect.poll(() => placingState(page), { message: `${m}: every placing state and the count clear`, timeout: 8000 }).toEqual(NONE_PLACING);
+    if (m === 'hang') expect(Date.now() - sentAt[n], 'hang: it waited for leadsTimeoutMs first').toBeGreaterThanOrEqual(2000);
     expect(await page.evaluate(() => window.PhotoConfirm.reading), `${m}: the box round's placeholders, 'leads' flags kept`).toEqual(want);
     await expect(page.locator('#photo-error-sample'), `${m}: no error`).toBeHidden();
     await expect(page.locator('#photo-status'), `${m}: no message`).toHaveText('');
   }
 
-  // Only the failed crop requests may complain.
-  expect(errors.filter(e => !/\/api\/photo\/leads|status of 400|ERR_ABORTED|ERR_FAILED/.test(e))).toEqual([]);
+  // Only the failed or aborted crop requests may complain.
+  expect(errors.filter(e => !/\/api\/photo\/leads|status of 400|ERR_ABORTED|ERR_FAILED/.test(e)), 'an aborted round is caught: no page error').toEqual([]);
 });
 
 // ── No crop round when there is nothing to place ───────────────────────────
@@ -356,14 +490,16 @@ test('a Reading with no \'leads\' flags (the demo board\'s saved reading), or a 
   await page.route('**/api/photo', route => route.fulfill({ json: answer }));
   const leadsSent = [];
   await page.route('**/api/photo/leads', route => {
-    leadsSent.push(route.request().postDataJSON());
-    return route.fulfill({ json: { items: [], provider: 'fixture', model: null, ms: 1 } });
+    const body = route.request().postDataJSON();
+    leadsSent.push(body);
+    return fulfilLines(route, body.items.map(i => ({ id: i.id, error: 'AI_FAILED' })), { done: true, provider: 'fixture', model: null, ms: 1 });
   });
 
   await openSample(page);
   await expect(page.locator('#photo-confirm')).toBeVisible();
   expect(await page.evaluate(() => window.PhotoConfirm.reading), 'the saved reading as it is').toEqual(MOCK_READING);
   expect(leadsSent.length, 'real holes, nothing unsure: no crop round').toBe(0);
+  expect(await placingState(page), '#173 pin: no round, so nothing is "placing…"').toEqual(NONE_PLACING);
 
   // A box round whose reply has no key (a sample that isn't a plain id): no round either.
   const reading = boxRound(c);
@@ -373,6 +509,7 @@ test('a Reading with no \'leads\' flags (the demo board\'s saved reading), or a 
   await expect(page.locator('#photo-confirm')).toBeVisible();
   expect(await page.evaluate(() => window.PhotoConfirm.reading), 'no key: the placeholders').toEqual(await placeholdersOf(page, reading));
   expect(leadsSent.length, 'no key: no crop round').toBe(0);
+  expect(await placingState(page), '#173 pin: no key, no round, so nothing is "placing…"').toEqual(NONE_PLACING);
 
   // The control: the same box round with its key does send its crops, so the
   // two zeros above are the page choosing not to.
@@ -393,15 +530,15 @@ const sampleSize = page => page.evaluate(() => {
   return { width: g.width, height: g.height, pitch: g.pitch };
 });
 
-// /api/photo/leads answers each sent id from `answers` (else AI_FAILED);
-// returns the request bodies, in order.
+// /api/photo/leads answers each sent id from `answers` (else AI_FAILED), as
+// NDJSON lines (#173); returns the request bodies, in order.
 async function answerLeads(page, answers, provider = 'gemini') {
   const sent = [];
   await page.route('**/api/photo/leads', route => {
     const body = route.request().postDataJSON();
     sent.push(body);
-    return route.fulfill({ json: { items: body.items.map(i => answers[i.id] || { id: i.id, error: 'AI_FAILED' }),
-                                   provider, model: 'gemini-robotics-er-2-preview', ms: 900 } });
+    return fulfilLines(route, body.items.map(i => answers[i.id] || { id: i.id, error: 'AI_FAILED' }),
+                       { done: true, provider, model: 'gemini-robotics-er-2-preview', ms: 900 });
   });
   return sent;
 }
@@ -426,6 +563,7 @@ test('#161: a box-round Reading with a wire boxed just off the image (a 0-px cro
 
   await openSample(page);
   await expect(page.locator('#photo-confirm'), 'the confirm screen opens: the page doesn\'t stall on "placing legs…"').toBeVisible({ timeout: 10_000 });
+  await settled(page, leadsSent);   // #173: the legs land after it opens
   await expect(page.locator('#photo-error-sample'), 'no error').toBeHidden();
   await expect(page.locator('#photo-status'), 'the status is cleared').toHaveText('');
   expect(leadsSent.map(b => b.items.map(i => i.id)), 'one request with the other crops, never W2').toEqual([SENT.map(s => s[0])]);
@@ -462,6 +600,7 @@ test('#161: a crop that fails to render (PhotoCrops.render throws) still opens t
 
   await openSample(page);
   await expect(page.locator('#photo-confirm'), 'the confirm screen opens anyway').toBeVisible({ timeout: 10_000 });
+  await settled(page);   // #173: a throw mid-round clears the placing states too
   await expect(page.locator('#photo-error-sample'), 'no error').toBeHidden();
   await expect(page.locator('#photo-status'), 'the status is cleared').toHaveText('');
   const s = await confirmState(page);
@@ -483,7 +622,7 @@ test('#161: the crop round runs after a \'fixture\' reading (a replayed sample\'
   // Pin: a recorded sample replays as 'fixture' with 'leads' flags; its crop
   // round still runs and its saved answers are merged.
   await openSample(page);
-  await expect(page.locator('#photo-confirm')).toBeVisible({ timeout: 10_000 });
+  await settled(page, leadsSent);   // #173: the legs land after it opens
   expect(leadsSent.map(b => b.key), 'fixture: one crop round, with the sample\'s key').toEqual(['demo-board']);
   let s = await confirmState(page);
   expect(endsOf(itemOf(s.reading, 'R1')).map(l => l.pt), 'fixture: R1 takes its saved legs').toEqual(ANSWERS.R1.leads.map(l => l.pt));
@@ -496,6 +635,7 @@ test('#161: the crop round runs after a \'fixture\' reading (a replayed sample\'
   expect(leadsSent.length, 'deepseek: no /api/photo/leads request (still only the fixture round\'s)').toBe(1);
   s = await confirmState(page);
   expect(s.reading, 'deepseek: the box round\'s placeholders, \'leads\' flags kept').toEqual(await placeholdersOf(page, reading));
+  expect(await placingState(page), '#173 pin: deepseek, no round, so nothing is "placing…"').toEqual(NONE_PLACING);
   await expect(page.locator('#photo-error-sample'), 'no error').toBeHidden();
   await expect(page.locator('#photo-status'), 'the status is cleared').toHaveText('');
   expect(errors).toEqual([]);
@@ -537,7 +677,7 @@ test('#161: 30 resistors, LEDs and wires to place → one /api/photo/leads reque
   expect(leadsSent[0].items.length, 'one request of at most 24 crops (the server refuses more: BAD_ITEMS)').toBe(24);
   expect(leadsSent[0].items.map(i => i.id), 'the first 24 in Reading order: every part, then W1 and W2').toEqual(first);
 
-  await expect(page.locator('#photo-confirm')).toBeVisible({ timeout: 10_000 });
+  await settled(page, leadsSent);   // #173: the legs land after it opens
   const s = await confirmState(page);
   for (const id of first) {
     expect(endsOf(itemOf(s.reading, id)).map(e => e.pt), `${id}: sent, its returned legs land`).toEqual(ANSWERS[id].leads.map(l => l.pt));
@@ -549,4 +689,201 @@ test('#161: 30 resistors, LEDs and wires to place → one /api/photo/leads reque
   await expect(page.locator('#photo-error-sample'), 'no error').toBeHidden();
   await expect(page.locator('#photo-status'), 'the status is cleared').toHaveText('');
   expect(errors).toEqual([]);
+});
+
+// ── #173: the confirm screen opens at once; legs snap in as they answer ────
+
+// /api/photo answering a box round, Gemini's, with an image-hash key.
+const fromBoxRound = ({ reading }) => route => route.fulfill({ json: { reading, provider: 'gemini', model: 'gemini-robotics-er-2-preview', ms: 8200, key: KEY } });
+
+test('#173: the confirm screen opens as soon as /api/photo answers, with the crop request still pending: every cropped row "placing…" and "Placing legs 0/4"; a dot she moves first keeps her spot; when the lines arrive the others snap to their returned points and every placing state clears', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = watchErrors(page);
+  await openEditor(page);
+  const c = await sampleCentres(page, [...HOLES, 'i12']);
+  const reading = boxRound(c), ANSWERS = answers(c);
+  await page.route('**/api/photo', fromBoxRound({ reading }));
+  const sent = [];
+  let release;
+  const held = new Promise(r => { release = r; });
+  await page.route('**/api/photo/leads', async route => {
+    sent.push({ ids: route.request().postDataJSON().items.map(i => i.id), accept: route.request().headers().accept || '' });
+    await held;
+    // In finish order: W1, LED1, R2's timeout, then R1, the part she moved first.
+    await fulfilLines(route, ['W1', 'LED1', 'R2', 'R1'].map(id => ANSWERS[id])).catch(() => {});
+  });
+
+  await openSample(page);
+  await expect.poll(() => sent.length, { message: 'the crops are sent' }).toBe(1);
+  expect(sent[0].accept, 'the page asks for the stream').toContain(NDJSON);
+  await expect(page.locator('#photo-confirm'), 'the confirm screen is open while the crop request is still pending').toBeVisible();
+  const kept = await placeholdersOf(page, reading);
+  expect(await page.evaluate(() => window.PhotoConfirm.reading), 'meanwhile: the box round\'s placeholders').toEqual(kept);
+  expect(await placingState(page), 'every cropped item (never the IC) is placing…, and the count is at 0 of the 4 crops sent')
+    .toEqual({ placing: ['LED1', 'R1', 'R2', 'W1'], rows: ['LED1', 'R1', 'R2', 'W1'], count: expect.stringMatching(/^Placing legs 0\/4/) });
+
+  // She moves R1's first leg to i12 before R1's line arrives.
+  const d0 = dotOf(await confirmState(page), 'R1', 0);
+  await tapFlat(page, [d0.x, d0.y]);
+  expect(await page.evaluate(() => window.PhotoConfirm.selected), 'her tap picked R1\'s first dot').toEqual({ id: 'R1', end: 0 });
+  await tapFlat(page, c.i12);
+  const mine = itemOf((await confirmState(page)).reading, 'R1');
+  expect(mine.leads[0].hole, 'R1\'s first leg is now in i12').toBe('i12');
+
+  release();
+  await settled(page);
+  const s = await confirmState(page);
+  expect(itemOf(s.reading, 'R1'), 'R1, moved before its line arrived, keeps her position: its late line is ignored').toEqual(mine);
+  for (const id of ['LED1', 'W1']) {
+    const ends = endsOf(itemOf(s.reading, id));
+    LANDS[id].forEach((hole, i) => {
+      expect(ends[i].pt, `${id} end ${i} takes its returned point`).toEqual(ANSWERS[id].leads[i].pt);
+      expect(ends[i].hole, `${id} end ${i} snaps to ${hole}`).toBe(hole);
+      const d = dotOf(s, id, i);
+      expect(Math.hypot(d.x - c[hole][0], d.y - c[hole][1]), `${id} end ${i}'s dot is drawn at ${hole}'s centre`).toBeLessThan(1);
+    });
+    await expect(page.locator(`#photo-parts [data-id="${id}"]`), `${id}'s row lists its new holes`).toContainText(LANDS[id].join(' → '));
+  }
+  expect(itemOf(s.reading, 'R2'), 'R2 timed out: its placeholders and \'leads\' flag stay').toEqual(itemOf(kept, 'R2'));
+  expect(await page.evaluate(() => window.PhotoConfirm.result), 'the build is redone with the legs').toEqual(await expectedBuild(page, s.reading));
+  await expect(page.locator('#photo-error-sample'), 'no error').toBeHidden();
+  await expect(page.locator('#photo-status'), 'no message').toHaveText('');
+  expect(errors).toEqual([]);
+});
+
+test('#173: streamed lines, delayed: each part\'s dots move when its own line arrives while the rest keep their placeholders; the count goes 1/4, 2/4; a line split across two chunks still lands; { done } clears every placing state', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = watchErrors(page);
+  await openEditor(page);
+  const c = await sampleCentres(page, HOLES);
+  const reading = boxRound(c), ANSWERS = answers(c);
+  await page.route('**/api/photo', fromBoxRound({ reading }));
+  await streamLeads(page);
+  const line = id => `${JSON.stringify(ANSWERS[id])}\n`;
+  const want = id => ANSWERS[id].leads.map(l => l.pt);
+  const now  = () => page.evaluate(() => window.PhotoConfirm.reading);
+
+  await openSample(page);
+  await expect.poll(() => leadsCalls(page).then(x => x.length), { message: 'the crops are sent' }).toBe(1);
+  await expect(page.locator('#photo-confirm'), 'open before any line arrives').toBeVisible();
+  const kept = await placeholdersOf(page, reading);
+  await expect.poll(() => placingState(page).then(p => p.count), { message: 'the count starts at 0 of 4' }).toMatch(/^Placing legs 0\/4/);
+
+  // W1's line: W1's dots move (the list and the canvas follow); nothing else does.
+  const before = await patch(page, c.g15);
+  expect(endsOf(itemOf(kept, 'W1'))[0].hole, 'test check: W1\'s placeholder is not already in g15').not.toBe('g15');
+  await push(page, line('W1'));
+  await expect.poll(() => ptsOf(page, 'W1'), { message: 'W1\'s dots move when its line arrives' }).toEqual(want('W1'));
+  let r = await now();
+  for (const id of ['R1', 'LED1', 'R2']) expect(itemOf(r, id), `${id}: no line yet, its placeholders stay`).toEqual(itemOf(kept, id));
+  expect(await placingState(page), 'W1 is placed; the count is 1 of 4')
+    .toEqual({ placing: ['LED1', 'R1', 'R2'], rows: ['LED1', 'R1', 'R2'], count: expect.stringMatching(/^Placing legs 1\/4/) });
+  await expect(page.locator('#photo-parts [data-id="W1"]'), 'W1\'s row lists its new holes').toContainText(LANDS.W1.join(' → '));
+  expect(patchDiff(before, await patch(page, c.g15)), 'the canvas redrew: W1\'s dot is at g15 now').toBeGreaterThan(1);
+
+  // R1's line in two pieces: nothing until the second piece ends it.
+  const r1 = line('R1'), cut = Math.floor(r1.length / 2);
+  await push(page, r1.slice(0, cut));
+  await page.waitForTimeout(300);
+  expect(await ptsOf(page, 'R1'), 'half a line is not applied').toEqual(endsOf(itemOf(kept, 'R1')).map(e => e.pt));
+  expect((await placingState(page)).count, 'half a line is not counted').toMatch(/^Placing legs 1\/4/);
+  await push(page, r1.slice(cut));
+  await expect.poll(() => ptsOf(page, 'R1'), { message: 'R1 lands once its line is whole' }).toEqual(want('R1'));
+  expect(await placingState(page), 'R1 is placed; the count is 2 of 4')
+    .toEqual({ placing: ['LED1', 'R2'], rows: ['LED1', 'R2'], count: expect.stringMatching(/^Placing legs 2\/4/) });
+
+  // LED1's line and R2's timeout in one chunk; then done, still open.
+  await push(page, line('LED1') + line('R2'));
+  await expect.poll(() => ptsOf(page, 'LED1'), { message: 'LED1 lands' }).toEqual(want('LED1'));
+  r = await now();
+  expect(itemOf(r, 'R2'), 'R2 timed out: its placeholders and \'leads\' flag stay').toEqual(itemOf(kept, 'R2'));
+  expect(itemOf(r, 'R1').leads.map(l => l.pt), 'R1 is left as its own line put it').toEqual(want('R1'));
+  await push(page, `${JSON.stringify(DONE)}\n`);
+  await expect.poll(() => placingState(page), { message: '{ done } clears every placing state and the count' }).toEqual(NONE_PLACING);
+  await endStream(page);
+  await expect(page.locator('#photo-build'), 'LED1 came back with its roles: Build it is ready').toBeEnabled();
+  await expect(page.locator('#photo-error-sample'), 'no error').toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+// A part or wire of the box round, boxed round its holes as boxRound's are.
+function boxedItem(c, id, holes, type) {
+  const { box, pts } = boxed(c, holes);
+  if (type === 'wire') return { id, color: '', ends: pts.map(pt => ({ hole: '?', pt })), box, confidence: 0.9, unsure: ['leads'] };
+  return { id, type, what: type, value: type === 'resistor' ? 1000 : 0, bands: [], color: '', box, confidence: 0.8, unsure: ['leads'],
+           leads: pts.map(pt => ({ hole: '?', pt, role: 'unknown' })) };
+}
+// An answer a px or two off each of its holes.
+const foundAt = (c, id, holes) => ({ id, found: true, conf: 0.9, leads: holes.map((h, i) => ({ pin: String(i + 1), pt: [c[h][0] + 2, c[h][1] - 2], role: 'none' })) });
+
+test('#173: PhotoConfirm.place(id, entry) with the crops still out: two calls at different times each update only their own item; found false drops one; an item she touched first (⇄, a value, a colour, ×) ignores its line; Build it works mid-placing', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = watchErrors(page);
+  await openEditor(page);
+  const MORE = { W2: ['c30', 'c34'], R3: ['f44', 'f48'], W3: ['i56', 'g59'] };
+  const c = await sampleCentres(page, [...HOLES, ...Object.values(MORE).flat()]);
+  const reading = boxRound(c), ANSWERS = answers(c);
+  reading.parts.push(boxedItem(c, 'R3', MORE.R3, 'resistor'));
+  reading.wires.push(boxedItem(c, 'W2', MORE.W2, 'wire'), boxedItem(c, 'W3', MORE.W3, 'wire'));
+  const LINES = { ...ANSWERS, R2: foundAt(c, 'R2', ['d20', 'd24']), W2: foundAt(c, 'W2', MORE.W2), R3: foundAt(c, 'R3', MORE.R3),
+                  W3: { id: 'W3', found: false, leads: [], conf: 0.3 } };
+  await page.route('**/api/photo', fromBoxRound({ reading }));
+  const sent = [];
+  await page.route('**/api/photo/leads', route => { sent.push(route.request().postDataJSON().items.map(i => i.id)); });   // never answered
+
+  await openSample(page);
+  await expect.poll(() => sent.length, { message: 'the crops are sent' }).toBe(1);
+  await expect(page.locator('#photo-confirm'), 'open while the crops are out').toBeVisible();
+  expect(await page.evaluate(() => typeof window.PhotoConfirm.place), 'PhotoConfirm.place(id, entry)').toBe('function');
+  const kept  = await placeholdersOf(page, reading);
+  const now   = () => page.evaluate(() => window.PhotoConfirm.reading);
+  const place = (id, entry) => page.evaluate(([id, e]) => { window.PhotoConfirm.place(id, e); }, [id, entry]);
+  const row   = id => page.locator(`#photo-parts [data-id="${id}"]`);
+  const legs  = (r, id) => endsOf(itemOf(r, id));
+
+  // She touches four items first.
+  await row('LED1').locator('.photo-swap').click();
+  await row('R2').locator('select.photo-value').selectOption('470');
+  await row('W2').locator('select.photo-color').selectOption('green');
+  await row('R3').locator('.photo-del').click();
+  await expect(row('R3'), '× removed R3').toHaveCount(0);
+  const touched = await now();
+
+  // Two lines at different times, each for an untouched item.
+  await place('R1', LINES.R1);
+  let r = await now();
+  expect(legs(r, 'R1').map(e => e.pt), 'R1 takes its returned points').toEqual(LINES.R1.leads.map(l => l.pt));
+  expect(legs(r, 'R1').map(e => e.hole), 'R1\'s holes are snapped').toEqual(LANDS.R1);
+  expect(itemOf(r, 'R1').unsure, 'R1: \'leads\' is no longer unsure').not.toContain('leads');
+  expect(itemOf(r, 'W1'), 'W1 has no line yet: its placeholders stay').toEqual(itemOf(kept, 'W1'));
+  await expect(row('R1'), 'R1\'s row is relisted').toContainText(LANDS.R1.join(' → '));
+  const r1 = itemOf(r, 'R1');
+  await page.waitForTimeout(200);
+  await place('W1', LINES.W1);
+  r = await now();
+  expect(legs(r, 'W1').map(e => e.hole), 'W1 lands, later, on its own').toEqual(LANDS.W1);
+  expect(itemOf(r, 'R1'), 'R1 is left as its own line put it').toEqual(r1);
+  expect(await page.evaluate(() => window.PhotoConfirm.result), 'each line redoes the build').toEqual(await expectedBuild(page, r));
+
+  // The items she touched ignore their lines; the one she deleted stays gone.
+  for (const id of ['LED1', 'R2', 'W2']) {
+    await place(id, LINES[id]);
+    expect(itemOf(await now(), id), `${id}: she touched it first, so its line is ignored`).toEqual(itemOf(touched, id));
+  }
+  await place('R3', LINES.R3);
+  expect(itemOf(await now(), 'R3'), 'R3, deleted, stays deleted').toBeUndefined();
+  await expect(row('R3')).toHaveCount(0);
+
+  // found false drops an untouched item.
+  await place('W3', LINES.W3);
+  expect(itemOf(await now(), 'W3'), 'W3 came back found false: dropped').toBeUndefined();
+  await expect(row('W3'), 'and its row').toHaveCount(0);
+
+  // Build it with the crops still out: what is on screen now.
+  const snap = await now();
+  await expect(page.locator('#photo-build'), 'LED1\'s + was picked with ⇄, so Build it is ready, crops or not').toBeEnabled();
+  await page.locator('#photo-build').click();
+  await expect(page.locator('#photo-modal'), 'Build it closes the overlay').toBeHidden();
+  expect(await page.evaluate(() => window.PhotoConfirm.built), 'Build it builds the Reading as it is').toEqual(await expectedBuild(page, snap));
+  expect(errors.filter(e => !/\/api\/photo\/leads|ERR_ABORTED|ERR_FAILED/.test(e))).toEqual([]);
 });

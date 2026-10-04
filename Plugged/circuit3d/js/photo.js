@@ -12,15 +12,19 @@
 //         a live labelled grid) → Looks right
 //    📷 → Use sample photo → its stored taps (window.PhotoSamples)
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
-//    → the crop round (#160): parts and wires still 'leads' unsure and a
-//      `key` → "Found N parts · placing legs…", a labelled crop of each
-//      (PhotoCrops.render, from the same resized photo) → one
-//      POST /api/photo/leads → PhotoCrops.merge. A timeout (35 s), an
-//      error, a network failure or any throw keeps the placeholders, no
-//      message. Skipped after a 'deepseek' reading (#161); items() leaves
-//      out off-image boxes and sends at most 24.
-//    → the Reading opens the confirm screen (PhotoConfirm.open) on the same
-//      flattened image; Build it hands its result back here: the board
+//    → the Reading opens the confirm screen (PhotoConfirm.open) at once, on
+//      the same flattened image, with the box round's placeholders (#173)
+//    → the crop round (#160, #173): parts and wires still 'leads' unsure
+//      and a `key` → PhotoConfirm.startPlacing(ids) ("Placing legs 0/M…"),
+//      a labelled crop of each (PhotoCrops.render, from the same resized
+//      photo) → one POST /api/photo/leads with Accept application/x-ndjson,
+//      read line by line as it arrives: each item's line →
+//      PhotoConfirm.place(id, entry), which skips an item she has touched.
+//      { done }, a timeout (45 s), an error, a network failure or any throw
+//      → PhotoConfirm.stopPlacing(), the unplaced keep their placeholders,
+//      no message. Cancel or Build it aborts it. Skipped after a 'deepseek'
+//      reading (#161); items() leaves out off-image boxes and sends at most 24.
+//    → Build it (at any time) hands its result back here: the board
 //      (SparkyChat.applyBuild), window.PhotoFlags, the simulation, then her
 //      question to Edison with the photo's context (#143). Or the reply's
 //      friendly text with Use sample photo.
@@ -33,17 +37,16 @@
 //  EXPORTS
 //  ───────
 //  Browser: window.PhotoCapture = { timeoutMs, leadsTimeoutMs, grid, lastReading }
-//  (lastReading: the Reading the confirm screen opened with, crops merged)
+//  (lastReading: the Reading the confirm screen opened with, before the crops answer)
 // ─────────────────────────────────────────────────────────────
 
 (function () {
 
   const PHOTO_PAGE_TIMEOUT_MS = 60000;   // above the server's 45 s PHOTO_TIMEOUT_MS
-  const PHOTO_LEADS_PAGE_TIMEOUT_MS = 35000;   // the server's 25 s PHOTO_LEADS_TIMEOUT_MS plus the upload
+  const PHOTO_LEADS_PAGE_TIMEOUT_MS = 45000;   // the server's 40 s PHOTO_LEADS_TIMEOUT_MS plus the upload
   const MAX_SIDE  = 3000;                // the original is resized to this before flattening
   const SAMPLE    = 'demo-board';
   const READING   = 'Reading your board…';
-  const PLACING   = n => `Found ${n} part${n === 1 ? '' : 's'} · placing legs…`;
   const DEFAULT_Q = "What's wrong with my circuit?";       // Build it with nothing typed
   // docs/API-CONTRACT.md → "POST /api/photo" → Errors
   const BAD_IMAGE  = "I can't read that file. Try a JPEG or PNG photo, or use the sample photo.";
@@ -248,6 +251,37 @@
     return { res, data, timedOut };
   }
 
+  // POST JSON asking for NDJSON (#173), as the request in flight: each line
+  // goes to onLine as it arrives (a line may come in pieces). Returns at
+  // { done: true }, the body's end, a non-200, a network error, an abort
+  // (the next job or close()) or after ms, whichever comes first.
+  async function postLines(url, body, ms, onLine) {
+    const ac = ctrl = new AbortController();
+    const timer = setTimeout(() => ac.abort(), ms);
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+                                     body: JSON.stringify(body), signal: ac.signal });
+      if (!res.ok || !res.body) return;
+      const reader = res.body.getReader(), text = new TextDecoder();
+      let held = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        held += done ? text.decode() : text.decode(value, { stream: true });
+        const lines = held.split('\n');
+        held = done ? '' : lines.pop();                   // a line still coming
+        for (const l of lines) {
+          if (!l.trim() || ac.signal.aborted) continue;
+          let o = null;
+          try { o = JSON.parse(l); } catch { continue; }
+          if (o && o.done === true) return;
+          if (o && typeof o === 'object') onLine(o);
+        }
+        if (done) return;
+      }
+    } catch { /* network error, abort or timeout: the caller clears up */ }
+    finally { clearTimeout(timer); }
+  }
+
   async function send(im, grid, sample) {
     const my = nextJob();
     showStatus(READING, false);
@@ -264,36 +298,40 @@
     if (my !== job) return;                                // closed or replaced meanwhile
     if (!(res && res.ok && data && data.reading)) return showStatus(timedOut ? AI_TIMEOUT : (data && data.reply) || AI_FAILED, true);
 
-    const reading = await placeLegs(my, data, src, grid);
-    if (my !== job) return;                                // Cancel while placing legs drops the round
-    Capture.lastReading = reading;
+    Capture.lastReading = data.reading;
     showStatus('', false);
-    PhotoConfirm.open(reading, flat, grid, built);
+    PhotoConfirm.open(data.reading, flat, grid, built);   // at once: the legs snap in as their crops answer
+    await placeLegs(my, data, src, grid);
   }
 
-  // The crop round (#160): one labelled crop per item → /api/photo/leads →
-  // the legs merged in. Anything short of an answer keeps the placeholders:
-  // a deepseek reading (Gemini failed, #161) gets no round, and any throw
-  // (a crop that won't render, a bad answer) returns the Reading as read.
+  // The crop round (#160, #173): one labelled crop per item → one streamed
+  // /api/photo/leads → each answer to PhotoConfirm.place as it arrives.
+  // Anything short of an answer keeps the placeholders: a deepseek reading
+  // (Gemini failed, #161) gets no round, and any throw (a crop that won't
+  // render, a bad answer) ends the round there.
   async function placeLegs(my, reply, src, grid) {
     const { reading, key } = reply;
-    if (!key || reply.provider === 'deepseek') return reading;
+    if (!key || reply.provider === 'deepseek') return;
     try {
       const items = PhotoCrops.items(reading, grid);
-      if (!items.length) return reading;
-      showStatus(PLACING(items.length), false);
-      await paint();                                       // paint the status before the crops
-      if (my !== job) return reading;
+      if (!items.length) return;
+      PhotoConfirm.startPlacing(items.map(it => it.id));
+      await paint();                                       // paint the confirm screen before the crops
+      if (my !== job) return;
       const rails = reading.board && reading.board.rails;
       const sent  = items.map(it => {
         const win = PhotoCrops.window(grid, it.box);
         return { id: it.id, kind: it.kind, type: it.type, value: it.value, image: PhotoCrops.render(src.pixels, src.H, grid, win, rails), window: win };
       });
-      const { res, data } = await post('/api/photo/leads', { key, items: sent }, Capture.leadsTimeoutMs);
-      return res && res.ok && data && Array.isArray(data.items) ? PhotoCrops.merge(reading, data.items) : reading;
+      if (my !== job) return;
+      await postLines('/api/photo/leads', { key, items: sent }, Capture.leadsTimeoutMs, entry => {
+        if (my !== job || typeof entry.id !== 'string') return;   // closed meanwhile: nothing lands
+        try { PhotoConfirm.place(entry.id, entry); } catch (err) { console.warn('A crop answer did not land:', err && err.message); }
+      });
     } catch (err) {
       console.warn('Crop round failed; the placeholders stay:', err && err.message);
-      return reading;
+    } finally {
+      if (my === job || !isOpen()) PhotoConfirm.stopPlacing();
     }
   }
 

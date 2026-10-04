@@ -1,0 +1,935 @@
+{
+ "e01_preamp": {
+  "notes": "Ultrasound pre-amp, two 63-column boards stacked; only the TOP board is tapped (straight top-down, sharp, printed labels: column 1 at the right, row a on top). Parts on the lower board are off this grid. Eleven resistors (two standing), one SOIC adapter; purple and yellow jumpers run from the top board's j-side rails down to the lower board (their lower ends are off this board).",
+  "rails": {
+   "aOuter": "+",
+   "aInner": "-",
+   "jInner": "+",
+   "jOuter": "-"
+  },
+  "parts": [
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a51",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "a47",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R2",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a42",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "a37",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R3",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "b61",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "b56",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "R4",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "b30",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "b25",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R5",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "e53",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "e48",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R6",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "e37",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "e33",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R7",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "g54",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "g48",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R8",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "h60",
+      "conf": "med"
+     },
+     {
+      "pin": "2",
+      "hole": "h56",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R9",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "j61",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "j56",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R10",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "f45",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "g44",
+      "conf": "med"
+     }
+    ],
+    "note": "standing (vertical) light-blue body; lead g44 is under the body"
+   },
+   {
+    "id": "R11",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "h45",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "i44",
+      "conf": "med"
+     }
+    ],
+    "note": "standing (vertical) blue body; lead i44 is under the body"
+   },
+   {
+    "id": "U1",
+    "type": "ic",
+    "note": "SOIC-on-DIP adapter across the channel, pins e57-e60 and f57-f60"
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "a60",
+      "conf": "high"
+     },
+     {
+      "hole": "a57",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "black",
+    "ends": [
+     {
+      "hole": "rail:aOuter:3",
+      "conf": "high"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W3",
+    "color": "purple",
+    "ends": [
+     {
+      "hole": "rail:jInner:58",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W4",
+    "color": "purple",
+    "ends": [
+     {
+      "hole": "rail:jInner:34",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W5",
+    "color": "purple",
+    "ends": [
+     {
+      "hole": "rail:jInner:27",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W6",
+    "color": "purple",
+    "ends": [
+     {
+      "hole": "rail:jInner:23",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W7",
+    "color": "purple",
+    "ends": [
+     {
+      "hole": "rail:jInner:11",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W8",
+    "color": "yellow",
+    "ends": [
+     {
+      "hole": "rail:jOuter:6",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   }
+  ]
+ },
+ "e02_rectifier": {
+  "notes": "Sample Rectifier Circuit: a 64-column board (840 tie points), near top-down under warm light, no printed labels. Taps on columns 1 and 63 from the left: the unused 64th column at the right end is outside the app's 63-column grid. Column 1 at the left, row a on top. Four small glass diodes (the bridge), one resistor; the red/black twisted pair comes in from off the board.",
+  "rails": {
+   "aOuter": "?",
+   "aInner": "?",
+   "jInner": "?",
+   "jOuter": "?"
+  },
+  "parts": [
+   {
+    "id": "D1",
+    "type": "diode",
+    "note": "bridge diode, leads d27 and b32"
+   },
+   {
+    "id": "D2",
+    "type": "diode",
+    "note": "bridge diode, leads c27 and e23"
+   },
+   {
+    "id": "D3",
+    "type": "diode",
+    "note": "bridge diode, leads i27 and one into the centre channel"
+   },
+   {
+    "id": "D4",
+    "type": "diode",
+    "note": "bridge diode, leads h27 and h32"
+   },
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "d41",
+      "conf": "med"
+     },
+     {
+      "pin": "2",
+      "hole": "f42",
+      "conf": "node"
+     }
+    ]
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "e19",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "black",
+    "ends": [
+     {
+      "hole": "f19",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W3",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "b19",
+      "conf": "med"
+     },
+     {
+      "hole": "a27",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W4",
+    "color": "yellow",
+    "ends": [
+     {
+      "hole": "g20",
+      "conf": "node"
+     },
+     {
+      "hole": null,
+      "why": "bare end near j41/j42, too blurry"
+     }
+    ]
+   },
+   {
+    "id": "W5",
+    "color": "blue",
+    "ends": [
+     {
+      "hole": "h18",
+      "conf": "node"
+     },
+     {
+      "hole": "j27",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W6",
+    "color": "gray",
+    "ends": [
+     {
+      "hole": "c32",
+      "conf": "med"
+     },
+     {
+      "hole": "c41",
+      "conf": "node"
+     }
+    ]
+   },
+   {
+    "id": "W7",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "d32",
+      "conf": "med"
+     },
+     {
+      "hole": "g32",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W8",
+    "color": "red",
+    "ends": [
+     {
+      "hole": null,
+      "why": "d41 vs d42: the end is hidden"
+     },
+     {
+      "hole": "d49",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W9",
+    "color": "blue",
+    "ends": [
+     {
+      "hole": "i41",
+      "conf": "med"
+     },
+     {
+      "hole": null,
+      "why": "j48 vs j49: the end sits between them"
+     }
+    ]
+   }
+  ]
+ },
+ "e03_dimmer": {
+  "notes": "Light dimmer circuit, top-down, 63-column board built from two half strips (the lower one printed upside down; the printed numbers start at 0 on the second column, so they are ignored). Column 1 is the leftmost column, row a on top. a63 is under the right terminal block and j1 under the pot: those taps are where the holes are, from the visible grid. The rail lines break mid-board (rails may be split).",
+  "rails": {
+   "aOuter": "-",
+   "aInner": "+",
+   "jInner": "-",
+   "jOuter": "+"
+  },
+  "parts": [
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "rail:aOuter:3",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "a2",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R2",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "g17",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "g21",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "Q1",
+    "type": "triac",
+    "note": "TO-220, legs under the body near c19-c21"
+   },
+   {
+    "id": "D1",
+    "type": "diac",
+    "note": "blue axial, leads h12 and h17"
+   },
+   {
+    "id": "C1",
+    "type": "capacitor",
+    "note": "red film box, leads j12 and the bottom rail"
+   },
+   {
+    "id": "RV1",
+    "type": "potentiometer",
+    "note": "mostly off the board, pins near j3-j5"
+   },
+   {
+    "id": "J1",
+    "type": "terminal_block",
+    "note": "2-pin, near b51-b53"
+   },
+   {
+    "id": "J2",
+    "type": "terminal_block",
+    "note": "2-pin, near b61-b63"
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "green",
+    "ends": [
+     {
+      "hole": "b2",
+      "conf": "high"
+     },
+     {
+      "hole": "f2",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "brown",
+    "ends": [
+     {
+      "hole": "g5",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "right end hidden under the diac and capacitor, near g11/g12"
+     }
+    ]
+   },
+   {
+    "id": "W3",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "d19",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:jOuter:18",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W4",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "d21",
+      "conf": "high"
+     },
+     {
+      "hole": "f21",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W5",
+    "color": "green",
+    "ends": [
+     {
+      "hole": "rail:aOuter:30",
+      "conf": "high"
+     },
+     {
+      "hole": "e50",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W6",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "e52",
+      "conf": "med"
+     },
+     {
+      "hole": "e60",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W7",
+    "color": "green",
+    "ends": [
+     {
+      "hole": "e62",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:jOuter:27",
+      "conf": "high"
+     }
+    ]
+   }
+  ]
+ },
+ "e04_micro_accel": {
+  "notes": "Arduino Micro and an MMA7361 accelerometer board on a 30-column board, taken from slightly below so the columns lean; printed labels (column 1 at the right, row a on top). Red jumper bridges the + rails and green the - rails round the left end. The LED stands up with one leg in a29 and one in the a-side inner (-) rail. The LDR's upper leg is hidden behind its head.",
+  "rails": {
+   "aOuter": "+",
+   "aInner": "-",
+   "jInner": "+",
+   "jOuter": "-"
+  },
+  "parts": [
+   {
+    "id": "LED1",
+    "type": "led",
+    "value": "green",
+    "leads": [
+     {
+      "pin": "?",
+      "hole": "a29",
+      "conf": "high"
+     },
+     {
+      "pin": "?",
+      "hole": "rail:aInner:29",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "j12",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "rail:jOuter:12",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "U1",
+    "type": "arduino",
+    "note": "Arduino Micro across the channel, header pins in rows b and f/g, columns 30-13"
+   },
+   {
+    "id": "U2",
+    "type": "module",
+    "note": "MMA7361 accelerometer board, pins b4-b8 and f5-f9"
+   },
+   {
+    "id": "LDR1",
+    "type": "photoresistor",
+    "note": "one leg in the j-side inner (+) rail near column 10, the other hidden (j11 or j12)"
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "rail:aOuter:30",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:jInner:30",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "green",
+    "ends": [
+     {
+      "hole": "rail:aInner:30",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:jOuter:30",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W3",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "a18",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:aInner:18",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W4",
+    "color": "yellow",
+    "ends": [
+     {
+      "hole": "a5",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:aOuter:5",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W5",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "j28",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:jInner:28",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W6",
+    "color": "yellow",
+    "ends": [
+     {
+      "hole": "j16",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:jOuter:16",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W7",
+    "color": "yellow",
+    "ends": [
+     {
+      "hole": "j6",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:jOuter:6",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W8",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "j5",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:jInner:5",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W9",
+    "color": "blue",
+    "ends": [
+     {
+      "hole": "i26",
+      "conf": "med"
+     },
+     {
+      "hole": "i9",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W10",
+    "color": "yellow",
+    "ends": [
+     {
+      "hole": "j25",
+      "conf": "med"
+     },
+     {
+      "hole": "j8",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W11",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "j24",
+      "conf": "med"
+     },
+     {
+      "hole": "j7",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W12",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "i21",
+      "conf": "node"
+     },
+     {
+      "hole": "i12",
+      "conf": "node"
+     }
+    ]
+   }
+  ]
+ },
+ "e05_empty30": {
+  "notes": "Empty 30-column half board, straight top-down, printed labels (column 1 at the right, row a on top). A control: no parts or wires, so every part read is invented.",
+  "rails": {
+   "aOuter": "+",
+   "aInner": "-",
+   "jInner": "+",
+   "jOuter": "-"
+  },
+  "parts": [],
+  "wires": []
+ },
+ "e06_empty30_upright": {
+  "notes": "Empty 30-column half board, straight top-down and turned upright in the frame, printed labels (column 1 at the top, row a on the left). A control: no parts or wires. Only one rail sign is printed per side in view, so the signs are left unknown.",
+  "rails": {
+   "aOuter": "?",
+   "aInner": "?",
+   "jInner": "?",
+   "jOuter": "?"
+  },
+  "parts": [],
+  "wires": []
+ },
+ "e07_empty63": {
+  "notes": "Empty 63-column board (830 tie points), straight top-down on white, sharp. Printed numbers run 0-60 from both ends; the taps take the leftmost column as 1 and row A (left-hand letters) on top. A 63-column control: no parts or wires, so every part read is invented. Slight lens barrel: mid-board holes sit up to ~0.3 pitch right of the straight-line grid.",
+  "rails": {
+   "aOuter": "+",
+   "aInner": "-",
+   "jInner": "+",
+   "jOuter": "-"
+  },
+  "parts": [],
+  "wires": []
+ }
+}

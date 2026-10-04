@@ -19,12 +19,26 @@
 //    + Add a part → resistor / LED / wire → tap two holes (snapped)
 //    every edit re-runs PhotoImport.build and redraws; a row is amber
 //    (.photo-flagged) with each flag's why, greyed (.photo-notbuilt) if skipped
-//    Build it → onBuild(PhotoImport.build(reading)) (photo.js hands it on)
+//    Build it → onBuild(PhotoImport.build(reading)) (photo.js hands it on),
+//    at any time, crops out or not
+//
+//  LEGS AS THEY ANSWER (#173)
+//  ──────────────────────────
+//    photo.js opens the screen with the box round's placeholders, then
+//    startPlacing(ids) for the crops it sends: those rows get .photo-placing
+//    and "Placing legs N/M…" shows above the list. Each crop's line →
+//    place(id, entry): the id leaves `placing`; unless she has touched that
+//    item since open() (moved a dot, ⇄, ×, a value, colour or volts), the
+//    entry is merged (PhotoCrops.merge; found false drops the item), its '?'
+//    snapped, rebuilt and redrawn. stopPlacing() clears it all (done, a
+//    timeout, an error, a close).
 //
 //  EXPORTS
 //  ───────
-//  Browser: window.PhotoConfirm = { reading, result, selected, dots(), built,
-//                                   open(reading, image, grid, onBuild), cancelMove() }
+//  Browser: window.PhotoConfirm = { reading, result, selected, dots(), built, placing,
+//                                   open(reading, image, grid, onBuild), cancelMove(),
+//                                   place(id, entry), startPlacing(ids), stopPlacing() }
+//  (placing: a Set of the ids whose crop line hasn't arrived)
 // ─────────────────────────────────────────────────────────────
 
 (function () {
@@ -45,10 +59,12 @@
 
   let image = null, grid = null, onBuild = null;
   let adding = null;   // + Add a part: { type, pts } until its second tap
+  let touched = new Set();   // ids she has edited since open(): their crop lines are ignored
+  let sent = 0;              // crops out this round, for "Placing legs N/M…"
 
   const C = window.PhotoConfirm = {
-    reading: null, result: null, selected: null, built: null,
-    dots, open, cancelMove,
+    reading: null, result: null, selected: null, built: null, placing: new Set(),
+    dots, open, cancelMove, place, startPlacing, stopPlacing,
   };
 
   const isLed   = p => p.type === 'led';
@@ -61,13 +77,48 @@
     C.reading  = JSON.parse(JSON.stringify(reading));
     C.selected = null;
     C.built    = null;
-    image = img;  grid = g;  onBuild = built;  adding = null;
+    C.placing  = new Set();
+    image = img;  grid = g;  onBuild = built;  adding = null;  touched = new Set();  sent = 0;
     picker.hidden = true;
+    snapUnknown();
+    box.hidden = false;
+    sizeCanvas();
+    edited();
+  }
+
+  // Every '?' end to the hole under its point.
+  function snapUnknown() {
     const ends = [...C.reading.parts.flatMap(p => p.leads), ...C.reading.wires.flatMap(w => w.ends),
                   ...C.reading.power.flatMap(s => [s.plus, s.minus])];
     for (const e of ends) if (e.hole === '?') e.hole = grid.snap(e.pt).hole;
-    box.hidden = false;
-    sizeCanvas();
+  }
+
+  // ── Legs as they answer (#173) ─────────────────────────────
+
+  function startPlacing(ids) {
+    C.placing = new Set(ids);
+    sent = C.placing.size;
+    if (C.reading) { mark(); draw(); }
+  }
+
+  function stopPlacing() {
+    C.placing = new Set();
+    sent = 0;
+    if (C.reading) { mark(); draw(); }
+  }
+
+  // One crop's answer. An item she has touched keeps what she made of it.
+  function place(id, entry) {
+    if (!C.reading) return;
+    C.placing.delete(id);
+    if (touched.has(id) || !entry) {
+      mark();
+      draw();
+      return;
+    }
+    C.reading = PhotoCrops.merge(C.reading, [Object.assign({}, entry, { id })]);
+    snapUnknown();
+    if (C.selected && !dots().some(q => q.id === C.selected.id)) C.selected = null;   // found false dropped it
     edited();
   }
 
@@ -144,6 +195,7 @@
       const [x, y] = at([q.x, q.y]);
       const sel = C.selected && C.selected.id === q.id && C.selected.end === q.end;
       const bat = powerAt(q.id), glyph = q.plus || (bat && !q.end) ? '+' : bat ? '−' : '';
+      ctx.globalAlpha = C.placing.has(q.id) && !sel ? 0.5 : 1;   // a placeholder still being placed
       ctx.beginPath();
       ctx.arc(x, y, sel ? r * 1.5 : r, 0, 2 * Math.PI);
       ctx.fillStyle = sel ? '#facc15' : glyph === '+' ? '#ef4444' : glyph ? '#1f2937' : '#0ea5e9';
@@ -151,6 +203,7 @@
       ctx.lineWidth = 1.5 * d;
       ctx.strokeStyle = '#fff';
       ctx.stroke();
+      ctx.globalAlpha = 1;
       if (glyph) {
         ctx.font = `800 ${15 * d}px sans-serif`;
         text(ctx, glyph, x + r + 5 * d, y - r - 4 * d, d);
@@ -231,6 +284,7 @@
       return add(adding.type, adding.pts);
     }
     if (C.selected) {
+      touched.add(C.selected.id);
       Object.assign(endOf(C.selected), { hole: grid.snap(pt).hole, pt: pt.map(Math.round) });
       C.selected = null;
       return edited();
@@ -264,11 +318,12 @@
       list.appendChild(row(p.id, note, isLed(p) && (() => swapLegs(p)), pick));
     }
     for (const w of C.reading.wires) list.appendChild(row(w.id, holes(w.ends), null, colorSelect(w, WIRE_COLORS)));
-    C.reading.power.forEach((s, i) => list.appendChild(row('power:' + i, s.kind === 'bench_supply' ? 'bench supply' : 'battery', null, voltsInput(s))));
+    C.reading.power.forEach((s, i) => list.appendChild(row('power:' + i, s.kind === 'bench_supply' ? 'bench supply' : 'battery', null, voltsInput(s, 'power:' + i))));
     mark();
   }
 
-  // Every row's amber (flagged, with each why) and grey (not built), from C.result.
+  // Every row's amber (flagged, with each why), grey (not built) and
+  // placing (its crop still out), from C.result and C.placing; the count.
   function mark() {
     for (const li of list.querySelectorAll('li[data-id]')) {
       const id = li.dataset.id, skip = C.result.skipped.find(x => x.id === id);
@@ -276,8 +331,11 @@
       if (skip) why.unshift(why.includes(skip.why) ? 'not built' : `not built: ${skip.why}`);
       li.classList.toggle('photo-flagged', C.result.flags.some(f => f.id === id));
       li.classList.toggle('photo-notbuilt', !!skip);
+      li.classList.toggle('photo-placing', C.placing.has(id));
       li.querySelector('.photo-why').textContent = why.join('\n');
     }
+    note.hidden = !C.placing.size;
+    note.textContent = C.placing.size ? `Placing legs ${sent - C.placing.size}/${sent}…` : '';
   }
 
   function row(id, note, swap, pick) {
@@ -317,7 +375,7 @@
     for (let k = -6; k <= 6; k++) vals.push(Parts.nearestKit(mid * Math.pow(10, k / 12), 'E12'));
     const opts = [...new Set(vals.filter(v => v != null && ok(v)))].sort((a, b) => a - b).map(v => [String(v), Parts.withUnit(v, 'Ω')]);
     if (read == null) opts.unshift(['', '? Ω']);
-    return select('photo-value', 'Resistance', opts, read == null ? '' : String(read), v => { p.value = Number(v); edited(); });
+    return select('photo-value', 'Resistance', opts, read == null ? '' : String(read), v => { touched.add(p.id); p.value = Number(v); edited(); });
   }
 
   // ['yellow', 'violet', 'brown', 'gold'] → 470: two digits (three on a
@@ -334,18 +392,18 @@
   function colorSelect(item, colors) {
     const opts = colors.map(c => [c, c]);
     if (!colors.includes(item.color)) opts.unshift(['', item.color || '?']);
-    return select('photo-color', 'Colour', opts, colors.includes(item.color) ? item.color : '', v => { item.color = v; edited(); });
+    return select('photo-color', 'Colour', opts, colors.includes(item.color) ? item.color : '', v => { touched.add(item.id); item.color = v; edited(); });
   }
 
   // The volts built (9 when unread or out of range). Typing re-runs the
   // build in place (the input keeps focus); change redraws the list.
-  function voltsInput(s) {
+  function voltsInput(s, id) {
     const input = document.createElement('input');
     Object.assign(input, { type: 'number', className: 'photo-volts', min: '1', max: '24', step: 'any', title: 'Volts' });
     input.setAttribute('aria-label', 'Volts');
     input.value = String(Parts.checkValue('battery', 'voltage', s.volts).ok ? s.volts : 9);
-    input.addEventListener('input', () => { s.volts = Number(input.value); rebuild(); mark(); draw(); });
-    input.addEventListener('change', () => { s.volts = Number(input.value); edited(); });
+    input.addEventListener('input', () => { touched.add(id); s.volts = Number(input.value); rebuild(); mark(); draw(); });
+    input.addEventListener('change', () => { touched.add(id); s.volts = Number(input.value); edited(); });
     const unit = document.createElement('i');
     unit.textContent = 'V';
     return [input, unit];
@@ -369,10 +427,12 @@
     const known = a >= 0 && c >= 0;
     const plus = known ? c : a >= 0 ? a : c >= 0 ? 1 - c : 0;
     p.leads.forEach((l, i) => { l.role = i === plus ? 'anode' : 'cathode'; });
+    touched.add(p.id);
     edited();
   }
 
   function remove(id) {
+    touched.add(id);
     const m = powerAt(id);
     if (m) C.reading.power.splice(+m[1], 1);
     C.reading.parts = C.reading.parts.filter(p => p.id !== id);
@@ -390,6 +450,7 @@
     let n = 1;
     while (taken.has(pre + n)) n++;
     const id = pre + n;
+    touched.add(id);   // hers: a late crop line under the same id never moves it
     if (type === 'wire') C.reading.wires.push({ id, color: 'yellow', ends: pts, confidence: 1, unsure: [] });
     else {
       const roles = type === 'led' ? ['anode', 'cathode'] : ['none', 'none'];
@@ -424,6 +485,12 @@
   }
   addBar.append(addB, picker);
   list.after(addBar);
+
+  // "Placing legs N/M…" above the list while crops are out (#173).
+  const note = document.createElement('div');
+  note.id = 'photo-placing-note';
+  note.hidden = true;
+  list.before(note);
 
   $('photo-rails-a').addEventListener('click', () => swapRails('aOuter', 'aInner'));
   $('photo-rails-j').addEventListener('click', () => swapRails('jInner', 'jOuter'));
