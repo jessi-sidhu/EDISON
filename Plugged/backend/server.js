@@ -5,6 +5,7 @@
  * Run from backend/:  node server.js
  *
  * POST /api/ask            { markdown, message, history }  →  { reply, actions[] }
+ * POST /api/photo          { image, grid, sample? }        →  { reading, provider, model, ms }
  * GET  /api/health
  * GET  anything else       the app's static files
  */
@@ -13,6 +14,7 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 const { makeAsk, isFixRequest } = require('./ai-providers');
+const { readPhoto, isSafeId } = require('./photo-reader');
 // The board's size: the same file the 3D editor builds the board from.
 const { COLS, TOTAL_HOLES, BODY_ROWS } = require('../circuit3d/js/board-geometry.js');
 // The parts registry: every part's tool, prompt lines and circuit behaviour.
@@ -1366,11 +1368,14 @@ function sendJSON(res, status, obj) {
 }
 
 // /api/ask spends the Gemini key, so cap it per IP or it is an open proxy.
-const MAX_BODY_BYTES = 256 * 1024;
+const MAX_BODY_BYTES  = 256 * 1024;
+const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 
-const ASK_WINDOW_MS = 60000;
-const ASK_MAX_PER_WINDOW = 20;
-const askHits = new Map();
+const RATE_WINDOW_MS       = 60000;
+const ASK_MAX_PER_WINDOW   = 20;
+const PHOTO_MAX_PER_WINDOW = 6;
+const askHits   = new Map();
+const photoHits = new Map();
 
 // Behind a proxy (Render and similar) every request arrives from the proxy,
 // so the limit would be shared by every visitor. Only trust the header when
@@ -1384,14 +1389,94 @@ function clientKey(req) {
   return req.socket.remoteAddress || 'unknown';
 }
 
-function askRateLimited(req) {
+// Counts this request in `hits` (one map per route) and says whether the
+// client is over `max` a minute.
+function rateLimited(req, hits, max) {
   const ip = clientKey(req);
   const now = Date.now();
-  if (askHits.size > 5000) askHits.clear();
-  const hits = (askHits.get(ip) || []).filter(t => now - t < ASK_WINDOW_MS);
-  hits.push(now);
-  askHits.set(ip, hits);
-  return hits.length > ASK_MAX_PER_WINDOW;
+  if (hits.size > 5000) hits.clear();
+  const recent = (hits.get(ip) || []).filter(t => now - t < RATE_WINDOW_MS);
+  recent.push(now);
+  hits.set(ip, recent);
+  return recent.length > max;
+}
+
+// Resolves the body as a string, or null once it passes `max` bytes: then
+// it has answered 413 with `tooLarge` and drops the rest unbuffered (an
+// unbounded body is a memory DoS).
+function readBody(req, res, max, tooLarge) {
+  return new Promise(resolve => {
+    const chunks = [];
+    let size = 0, tooBig = false;
+    req.on('data', chunk => {
+      if (tooBig) return;
+      size += chunk.length;
+      if (size > max) {
+        tooBig = true;
+        sendJSON(res, 413, tooLarge);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(tooBig ? null : Buffer.concat(chunks).toString('utf8')));
+  });
+}
+
+// ── /api/photo ───────────────────────────────────────────────
+// The contract's replies, word for word (docs/API-CONTRACT.md).
+const PHOTO_REPLY = {
+  BAD_IMAGE:  "I can't read that file. Try a JPEG or PNG photo, or use the sample photo.",
+  BAD_GRID:   'Something went wrong lining up the board. Tap the four corners again, or use the sample photo.',
+  TOO_LARGE:  'That photo is too large. Try a smaller one, or use the sample photo.',
+  NO_BOARD:   "I couldn't find a breadboard in that photo. Try one from straight above with the whole board in view, or use the sample photo.",
+  RATE:       'Too many photos at once. Wait a minute and try again, or use the sample photo.',
+  AI_FAILED:  "I couldn't read the photo just now. Try again, or use the sample photo.",
+  AI_TIMEOUT: 'Reading the photo took too long. Try again, or use the sample photo.',
+};
+const PHOTO_STATUS = { BAD_IMAGE: 400, BAD_GRID: 400, TOO_LARGE: 413, NO_BOARD: 422, AI_FAILED: 502, AI_TIMEOUT: 504 };
+const photoError = (res, code) => sendJSON(res, PHOTO_STATUS[code], { reply: PHOTO_REPLY[code], code });
+
+// Only the prefix is checked; the image itself is never decoded here.
+const isPhotoDataUrl = s => typeof s === 'string' && /^data:image\/(jpeg|png|webp);base64,/.test(s);
+const isPositive     = v => typeof v === 'number' && Number.isFinite(v) && v > 0;
+const isPhotoGrid    = g => !!g && typeof g === 'object' && (g.cols === 30 || g.cols === 63) &&
+  ['pitch', 'x0', 'y0', 'width', 'height'].every(k => isPositive(g[k]));
+
+// The one [photo] line per request. Never the image or an upstream body;
+// a sample that isn't a plain id is shown as '?'.
+function logPhoto({ sample, out, error, started, bytes }) {
+  const id = sample === undefined || sample === null ? '-' : isSafeId(sample) ? sample : '?';
+  const r  = out && out.reading;
+  console.log(`[photo] sample=${id} provider=${out ? out.provider : '-'} model=${out ? out.model : '-'} ` +
+    `${((Date.now() - started) / 1000).toFixed(1)}s parts=${r ? r.parts.length : 0} wires=${r ? r.wires.length : 0} ` +
+    `fallback=${out && out.fallback ? 'yes' : 'no'} ${Math.round(bytes / 1024)}KB${error ? ` error=${error}` : ''}`);
+}
+
+async function handlePhoto(req, res) {
+  const started = Date.now();
+  if (rateLimited(req, photoHits, PHOTO_MAX_PER_WINDOW)) {
+    logPhoto({ error: 'RATE', started, bytes: 0 });
+    return sendJSON(res, 429, { reply: PHOTO_REPLY.RATE });
+  }
+  const body = await readBody(req, res, MAX_PHOTO_BYTES, { reply: PHOTO_REPLY.TOO_LARGE, code: 'TOO_LARGE' });
+  if (body === null) return logPhoto({ error: 'TOO_LARGE', started, bytes: MAX_PHOTO_BYTES });
+  const bytes = Buffer.byteLength(body);
+  let input;
+  try { input = JSON.parse(body || '{}'); } catch { input = {}; }
+  const { image, grid, sample } = input && typeof input === 'object' ? input : {};
+  const fail = (code, out) => { logPhoto({ sample, out, error: code, started, bytes }); return photoError(res, code); };
+  if (!isPhotoDataUrl(image)) return fail('BAD_IMAGE');
+  if (!isPhotoGrid(grid))     return fail('BAD_GRID');
+
+  let out;
+  try {
+    out = await readPhoto({ image, grid, sample });
+  } catch (e) {
+    return fail(e.code === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILED');
+  }
+  if (out.reading.board.visible === false) return fail('NO_BOARD', out);
+  logPhoto({ sample, out, started, bytes });
+  return sendJSON(res, 200, { reading: out.reading, provider: out.provider, model: out.model, ms: Date.now() - started });
 }
 
 // A sent board in the board-model shape; anything else is ignored, as
@@ -1407,38 +1492,26 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && req.url === '/api/ask') {
-    if (askRateLimited(req)) {
+    if (rateLimited(req, askHits, ASK_MAX_PER_WINDOW)) {
       return sendJSON(res, 429, { reply: 'Too many requests. Give Sparky a moment and try again.', actions: [] });
     }
-    // Stop buffering past MAX_BODY_BYTES: an unbounded body is a memory DoS.
-    let body = '', size = 0, tooBig = false;
-    req.on('data', chunk => {
-      if (tooBig) return;
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        tooBig = true;
-        sendJSON(res, 413, { reply: 'That request is too large.', actions: [] });
-        return;
-      }
-      body += chunk;
-    });
-    req.on('end', async () => {
-      if (tooBig) return;
-      try {
-        const { markdown = '', message = '', history = [], board } = JSON.parse(body || '{}');
-        const result = await ask(markdown, message, history, isBoard(board) ? board : undefined);
-        const { reply, actions } = result;
-        console.log(`[ask] "${message.slice(0,60)}" → ${actions.length} action(s)${result.fallbackModel ? ` (fallback ${result.fallbackModel})` : ''}`);
-        return sendJSON(res, 200, { reply, actions });
-      } catch (e) {
-        // Upstream body can contain key/quota detail, so it stays in the log.
-        console.error('[ask] failed:', e.message);
-        if (e.code === 'AI_TIMEOUT') return sendJSON(res, 504, { reply: 'The AI took too long — try again.', actions: [], code: 'AI_TIMEOUT' });
-        return sendJSON(res, 502, { reply: 'Sparky could not reach the AI service. Please try again in a moment.', actions: [] });
-      }
-    });
-    return;
+    const body = await readBody(req, res, MAX_BODY_BYTES, { reply: 'That request is too large.', actions: [] });
+    if (body === null) return;
+    try {
+      const { markdown = '', message = '', history = [], board } = JSON.parse(body || '{}');
+      const result = await ask(markdown, message, history, isBoard(board) ? board : undefined);
+      const { reply, actions } = result;
+      console.log(`[ask] "${message.slice(0,60)}" → ${actions.length} action(s)${result.fallbackModel ? ` (fallback ${result.fallbackModel})` : ''}`);
+      return sendJSON(res, 200, { reply, actions });
+    } catch (e) {
+      // Upstream body can contain key/quota detail, so it stays in the log.
+      console.error('[ask] failed:', e.message);
+      if (e.code === 'AI_TIMEOUT') return sendJSON(res, 504, { reply: 'The AI took too long — try again.', actions: [], code: 'AI_TIMEOUT' });
+      return sendJSON(res, 502, { reply: 'Sparky could not reach the AI service. Please try again in a moment.', actions: [] });
+    }
   }
+
+  if (req.method === 'POST' && req.url === '/api/photo') return handlePhoto(req, res);
 
   // ── Static file serving ───────────────────────────────────
   const STATIC_ROOT = path.join(__dirname, '..');

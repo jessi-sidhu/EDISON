@@ -1,0 +1,139 @@
+{
+  "sample": "demo-board",
+  "sha256": null,
+  "reading": {
+    "board": {
+      "visible": true,
+      "cols": 63,
+      "rails": {
+        "aOuter": "+",
+        "aInner": "-",
+        "jInner": "+",
+        "jOuter": "-"
+      },
+      "split": false
+    },
+    "parts": [
+      {
+        "id": "R1",
+        "type": "resistor",
+        "what": "470 Ω resistor",
+        "value": 470,
+        "bands": [
+          "yellow",
+          "violet",
+          "brown",
+          "gold"
+        ],
+        "color": "",
+        "leads": [
+          {
+            "hole": "rail:aOuter:10",
+            "pt": [
+              360,
+              73
+            ],
+            "role": "none"
+          },
+          {
+            "hole": "a14",
+            "pt": [
+              480,
+              190
+            ],
+            "role": "none"
+          }
+        ],
+        "box": [
+          345,
+          58,
+          495,
+          205
+        ],
+        "confidence": 0.8,
+        "unsure": []
+      },
+      {
+        "id": "LED1",
+        "type": "led",
+        "what": "red 5 mm LED",
+        "value": 0,
+        "bands": [],
+        "color": "red",
+        "leads": [
+          {
+            "hole": "c14",
+            "pt": [
+              480,
+              250
+            ],
+            "role": "cathode"
+          },
+          {
+            "hole": "c17",
+            "pt": [
+              570,
+              250
+            ],
+            "role": "anode"
+          }
+        ],
+        "box": [
+          465,
+          225,
+          585,
+          275
+        ],
+        "confidence": 0.7,
+        "unsure": []
+      }
+    ],
+    "wires": [
+      {
+        "id": "W1",
+        "color": "black",
+        "ends": [
+          {
+            "hole": "b17",
+            "pt": [
+              570,
+              220
+            ]
+          },
+          {
+            "hole": "rail:aInner:19",
+            "pt": [
+              630,
+              103
+            ]
+          }
+        ],
+        "confidence": 0.9,
+        "unsure": []
+      }
+    ],
+    "power": [
+      {
+        "kind": "battery_9v",
+        "volts": 9,
+        "plus": {
+          "hole": "rail:aOuter:3",
+          "pt": [
+            150,
+            73
+          ]
+        },
+        "minus": {
+          "hole": "rail:aInner:3",
+          "pt": [
+            150,
+            103
+          ]
+        },
+        "unsure": []
+      }
+    ]
+  },
+  "provider": "fixture",
+  "model": "deepseek-flash"
+}

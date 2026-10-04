@@ -572,6 +572,7 @@ A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `
 
 - **Rail fallback:** when a side's two signs are `?` or the same, outer → + and inner → − (our model's position default), flagged `rails`.
 - **`labels`:** Reading id → app label. Each part → its `Ids.nextLabel` label (a skipped part shifts later numbers); each power entry, keyed `power:<i>`, → its battery label; each Reading wire → its wire id `W<n>`, counted over **every** `add_wire` in output order (battery leads and bridge jumpers take W1, W2… first), so it matches `nextWireId` on an empty board.
+- **Keys** in `labels`, `flags` and `skipped`: the entry's Reading id; a missing or blank id → `part<n>` / `wire<n>` (1-based within `parts` / `wires`); a different entry reusing an id → `<id>#2`, `<id>#3`…. Only exact copies are dropped (a part with the same type, value and lead holes; a wire with the same two ends), listed in `skipped` under their own key.
 - **`flags`:** `[{ kind, id, why }]`. `id` is the Reading id (`power:<i>` for power, `null` for the whole board); `why` is plain English for the confirm screen (e.g. `"drawn with a jumper: on your board it runs from the + rail to column 14"`).
 
 | `kind` | When |
