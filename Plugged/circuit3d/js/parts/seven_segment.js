@@ -74,12 +74,13 @@
 
   const line = (r, m) => (shown(m) ? { text: `  🔢 7-SEGMENT DISPLAY ${shown(m)}`, cls: 'sim-on' } : null);
 
-  // ── The model: ten short leads, a black body across the gap, and the
-  //  digit on its top face (facing up, so the default camera reads it).
+  // ── The model: ten pins under a deep grey body across the gap, and the
+  //  digit on its inset black top face (facing up, so the default camera
+  //  reads it): pointed, slanted segments and a round decimal point.
   //  The digit's top is toward pins 6–10 and its left toward pin 1, as on
   //  the real part. Each bar is a mesh named 'seg-<segment>'. ──
   const LEGS = [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [4, -1], [3, -1], [2, -1], [1, -1], [0, -1]];
-  const LEAD_H = 0.22, BODY_H = 0.36;
+  const LEAD_H = 0.06, BODY_H = 0.62;
   const DIGIT_W = 0.78, DIGIT_H = 1.26, BAR = 0.13, GAP = 0.05;
   const DARK_HEX = 0x3a1010, GLOW_HEX = 0xff2a14, GLOW = 1.6;
 
@@ -106,7 +107,8 @@
     const at = legPoints(ctx, legs);
     const mid = at.reduce((s, p) => s.clone().add(p), new THREE.Vector3()).multiplyScalar(1 / at.length);
 
-    for (const p of at) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z), 0.022));
+    // Ten pins straight down under the body
+    for (const p of at) group.add(ctx.bentLead([new THREE.Vector3(p.x, LEAD_H + 0.02, p.z), new THREE.Vector3(p.x, -0.05, p.z)], 0.024));
 
     // The face turns with the part: local +x runs pin 1 → pin 5, local +z from pins 6–10 toward pins 1–5.
     const right = new THREE.Vector3().subVectors(at[4], at[0]).normalize();
@@ -115,30 +117,51 @@
     face.rotation.y = Math.atan2(-right.z, right.x);
     group.add(face);
 
+    // The body: a deep grey block, its top an inset black face
     const pitch = at[0].distanceTo(at[4]) / 4;
     const bodyW = pitch * 4 + 0.34;
     const bodyD = at[0].distanceTo(at[9]) + 0.64;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(bodyW, BODY_H, bodyD), ctx.mat.body(0x141414));
+    const body = new THREE.Mesh(ctx.roundBox(bodyW, BODY_H, bodyD, 0.03), ctx.mat.surface(0x2b2b2e, { roughness: 0.6 }));
     body.position.y = LEAD_H + BODY_H / 2;
     body.castShadow = true;
     face.add(body);
-
     const top = LEAD_H + BODY_H;
-    const bar = (name, w, d, x, z) => {
-      const m = ctx.mat.label(DARK_HEX);
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(bodyW - 0.1, 0.01, bodyD - 0.1),
+                                 ctx.mat.surface(0x0b0b0c, { roughness: 0.3, clearcoat: 0.6 }));
+    plate.position.y = top + 0.003;
+    face.add(plate);
+
+    // A segment: a flat bar with pointed ends, `len` long, along x or z,
+    // slanted like a real display's digit (its bottom leans left).
+    const SLANT = 0.1;
+    const bar = (name, len, alongX, x, z) => {
+      const t = BAR / 2, h = len / 2;
+      const s = new THREE.Shape([new THREE.Vector2(-h, 0), new THREE.Vector2(-h + t, -t), new THREE.Vector2(h - t, -t),
+                                 new THREE.Vector2(h, 0), new THREE.Vector2(h - t, t), new THREE.Vector2(-h + t, t)]);
+      const geo = new THREE.ExtrudeGeometry(s, { depth: 0.02, bevelEnabled: false });
+      geo.rotateX(-Math.PI / 2);
+      if (!alongX) geo.rotateY(Math.PI / 2 - Math.atan(SLANT));
+      const m = ctx.mat.surface(DARK_HEX, { roughness: 0.35 });
       m.emissive.setHex(GLOW_HEX);
       m.emissiveIntensity = 0;
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 0.03, d), m);
-      mesh.position.set(x, top + 0.015, z);
+      const mesh = new THREE.Mesh(geo, m);
+      mesh.position.set(x - z * SLANT, top + 0.008, z);
       mesh.name = 'seg-' + name;
       face.add(mesh);
     };
     const shift = -0.1;   // the digit sits left of centre, leaving room for the dot
     for (const [s, [x, z, flat]] of Object.entries(BARS)) {
-      if (flat) bar(s, DIGIT_W - 2 * GAP, BAR, x + shift, z);
-      else bar(s, BAR, DIGIT_H / 2 - 2 * GAP, x + shift, z);
+      if (flat) bar(s, DIGIT_W - 2 * GAP, true, x + shift, z);
+      else bar(s, DIGIT_H / 2 - 2 * GAP, false, x + shift, z);
     }
-    bar('dp', BAR * 1.1, BAR * 1.1, W2 + shift + 0.2, H2);
+    // The decimal point: a round dot
+    const dpMat = ctx.mat.surface(DARK_HEX, { roughness: 0.35 });
+    dpMat.emissive.setHex(GLOW_HEX);
+    dpMat.emissiveIntensity = 0;
+    const dp = new THREE.Mesh(new THREE.CylinderGeometry(BAR * 0.6, BAR * 0.6, 0.02, 20), dpMat);
+    dp.position.set(W2 + shift + 0.2 - H2 * SLANT, top + 0.018, H2);
+    dp.name = 'seg-dp';
+    face.add(dp);
 
     return { group, pinPositions: at.map(p => new THREE.Vector3(p.x, 0, p.z)) };
   }

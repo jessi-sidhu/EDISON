@@ -32,9 +32,12 @@
 
   const NUB_SHIFT = 0.36;   // how far the nub sits from the middle, toward the joined side
 
-  // ── The model: three leads, a dark body with a slot, a slider nub ──
-  //  The nub is marked userData.slideNub, with the world points of pins a
-  //  and b and the middle, for update().
+  // ── The model: an SS-12D07 slide switch. A black base under a pressed-
+  //  steel cover with a slot, the black ridged actuator riding in it, and
+  //  three flat pins down into the holes. The actuator is marked
+  //  userData.slideNub, with the world points of pins a and b and the
+  //  middle, for update(). It stands only 0.08 proud of the cover, so a
+  //  click on the middle of the model's top lands on the switch. ──
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
@@ -43,33 +46,62 @@
     const len = Math.hypot(B.x - A.x, B.z - A.z);
     const dx = len ? (B.x - A.x) / len : 1, dz = len ? (B.z - A.z) / len : 0;   // unit a → b
     const yaw = Math.atan2(-dz, dx);   // a box's long side along a → b
-    const long = Math.max(len, 1.4) + 0.3;
-    const LEAD_H = 0.30;
+    const long = Math.max(len, 1.2) + 0.3;
+    const BASE = 0.06, BODY_H = 0.3, DEEP = 0.5;
 
-    // Upright leads from each hole to the body
-    for (const p of at) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z), 0.025));
+    const frame = new THREE.Group();
+    frame.position.set(M.x, 0, M.z);
+    frame.rotation.y = yaw;
+    group.add(frame);
 
-    // Body, with a darker slot along its top
-    const body = new THREE.Mesh(new THREE.BoxGeometry(long, 0.30, 0.56), ctx.mat.body(0x2a2d33));
-    body.position.set(M.x, LEAD_H + 0.15, M.z);
-    body.rotation.y = yaw;
-    body.castShadow = true;
-    group.add(body);
-    const slot = new THREE.Mesh(new THREE.BoxGeometry(long - 0.3, 0.02, 0.16), ctx.mat.body(0x111214));
-    slot.position.set(M.x, LEAD_H + 0.31, M.z);
-    slot.rotation.y = yaw;
-    group.add(slot);
+    // Three flat pins
+    for (const p of at) {
+      const pin = new THREE.Mesh(new THREE.BoxGeometry(0.07, BASE + 0.12, 0.022), ctx.mat.metal());
+      pin.position.set(p.x, (BASE + 0.12) / 2 - 0.06, p.z);
+      pin.rotation.y = yaw;
+      group.add(pin);
+    }
 
-    // The slider nub, toward a (as placed) or b. Kept low (0.06 above the
-    // body), so a click on the middle of the model's top lands on the body.
-    const nub = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.22), ctx.mat.body(0xe8e8e8));
-    nub.rotation.y = yaw;
-    nub.castShadow = true;
+    // The black base and the steel cover: a top plate with its slot and two side skirts
+    const base = new THREE.Mesh(ctx.roundBox(long - 0.04, BODY_H, DEEP - 0.04, 0.02), ctx.mat.surface(0x19191b, { roughness: 0.6 }));
+    base.position.y = BASE + BODY_H / 2;
+    base.castShadow = true;
+    frame.add(base);
+    const steel = ctx.mat.surface(0xc0c3c8, { metalness: 0.9, roughness: 0.3 });
+    const top = BASE + BODY_H;
+    const slotW = 0.16, slotL = long - 0.42;
+    for (const s of [-1, 1]) {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(long, 0.025, (DEEP - slotW) / 2), steel);
+      strip.position.set(0, top + 0.012, s * (slotW / 2 + (DEEP - slotW) / 4));
+      frame.add(strip);
+      const end = new THREE.Mesh(new THREE.BoxGeometry((long - slotL) / 2, 0.025, slotW), steel);
+      end.position.set(s * (slotL / 2 + (long - slotL) / 4), top + 0.012, 0);
+      frame.add(end);
+      const skirt = new THREE.Mesh(new THREE.BoxGeometry(long, BODY_H * 0.75, 0.02), steel);
+      skirt.position.set(0, top - BODY_H * 0.375, s * DEEP / 2);
+      frame.add(skirt);
+    }
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(slotL, 0.01, slotW), ctx.mat.surface(0x050505, { roughness: 0.9 }));
+    slot.position.y = top + 0.002;
+    frame.add(slot);
+
+    // The actuator: a black block with ridges across its top
+    const nub = new THREE.Group();
     nub.userData.slideNub = true;
     nub.userData.mid = { x: M.x, z: M.z };
     nub.userData.dir = { x: dx, z: dz };
+    nub.rotation.y = yaw;
     const s = (isB(controls) ? 1 : -1) * NUB_SHIFT;
-    nub.position.set(M.x + dx * s, LEAD_H + 0.29, M.z + dz * s);
+    nub.position.set(M.x + dx * s, top, M.z + dz * s);
+    const knob = new THREE.Mesh(ctx.roundBox(0.3, 0.12, slotW - 0.02, 0.02), ctx.mat.surface(0x232325, { roughness: 0.45 }));
+    knob.position.y = 0.02;
+    knob.castShadow = true;
+    nub.add(knob);
+    for (let i = -2; i <= 2; i++) {
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.025, slotW - 0.03), ctx.mat.surface(0x2f2f32, { roughness: 0.4 }));
+      ridge.position.set(i * 0.055, 0.085, 0);
+      nub.add(ridge);
+    }
     group.add(nub);
 
     return { group, pinPositions: at.map(p => new THREE.Vector3(p.x, 0, p.z)) };

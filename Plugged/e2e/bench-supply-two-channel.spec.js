@@ -326,10 +326,11 @@ test('inspector: CH2\'s rows are greyed "tracks CH1" in series, editable after t
 
 const HEX = { red: '#ef4444', black: '#000000', white: '#ffffff', blue: '#2563eb', green: '#22c55e' };
 
-// Each wire's colours, one entry per wire: the distinct colours of its meshes.
+// Each wire's colours, one entry per wire: the distinct colours of its
+// insulated meshes (not its bare metal tips, userData.wireTip).
 const wireColours = page => page.evaluate(() => App.state.wires.map(w => {
   const hexes = new Set();
-  w.group.traverse(o => { if (o.isMesh) hexes.add('#' + o.material.color.getHex().toString(16).padStart(6, '0')); });
+  w.group.traverse(o => { if (o.isMesh && !o.userData.wireTip) hexes.add('#' + o.material.color.getHex().toString(16).padStart(6, '0')); });
   return [...hexes].join(' ');
 }));
 

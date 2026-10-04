@@ -176,21 +176,22 @@ const holeX = (page, h) => page.evaluate(h => {
   return { x: o.x, z: o.z };
 }, h);
 
-test('a placed 470 Ω resistor is the same model as before: 9 meshes, tan body, yellow-violet-brown-gold', async ({ page }) => {
+test('a placed 470 Ω resistor: one tan carbon-film body, yellow-violet-brown-gold bands, two bent leads in the holes', async ({ page }) => {
   const errors = watchErrors(page);
   await openEditor(page);
   const r = await placeResistorAt(page, 'a10', 'a14');
   const [A, B] = [await holeX(page, 'a10'), await holeX(page, 'a14')];
 
   expect(r.values.resistance).toBe(470);
-  expect(r.model.meshes).toBe(9);
+  expect(r.model.meshes).toBe(7);                                     // body, 4 bands, 2 leads
   expect(r.model.colours.filter(c => c === BODY)).toHaveLength(1);
-  expect(r.model.colours.filter(c => c === LEAD)).toHaveLength(4);
+  expect(r.model.colours.filter(c => c === LEAD)).toHaveLength(2);
   expect(r.model.bands).toEqual([YELLOW, VIOLET, BROWN, GOLD]);
-  expect(r.model.max[1]).toBeCloseTo(0.824, 2);                      // lead height + band radius
-  expect(r.model.min[0]).toBeCloseTo(Math.min(A.x, B.x) - 0.022, 2);  // leads stand in the holes
-  expect(r.model.max[0]).toBeCloseTo(Math.max(A.x, B.x) + 0.022, 2);
-  expect(r.model.max[2] - r.model.min[2]).toBeCloseTo(0.208, 2);
+  expect(r.model.max[1]).toBeCloseTo(0.463, 2);                      // axis height + end-cap radius + band
+  expect(r.model.min[1]).toBeCloseTo(-0.05, 2);                       // the leads go down into the holes
+  expect(r.model.min[0]).toBeCloseTo(Math.min(A.x, B.x) - 0.026, 2);  // leads stand in the holes
+  expect(r.model.max[0]).toBeCloseTo(Math.max(A.x, B.x) + 0.026, 2);
+  expect(r.model.max[2] - r.model.min[2]).toBeCloseTo(0.326, 2);     // the end caps' diameter
   expect(errors).toEqual([]);
 });
 
@@ -203,9 +204,9 @@ test('a resistor keeps its value on the bands (1 kΩ brown-black-red) and draws 
 
   const v = await placeResistorAt(page, 'e40', 'f40');
   const [E, F] = [await holeX(page, 'e40'), await holeX(page, 'f40')];
-  expect(v.model.meshes).toBe(9);
-  expect(v.model.min[2]).toBeCloseTo(Math.min(E.z, F.z) - 0.022, 2);
-  expect(v.model.max[2]).toBeCloseTo(Math.max(E.z, F.z) + 0.022, 2);
+  expect(v.model.meshes).toBe(7);
+  expect(v.model.min[2]).toBeCloseTo(Math.min(E.z, F.z) - 0.026, 2);
+  expect(v.model.max[2]).toBeCloseTo(Math.max(E.z, F.z) + 0.026, 2);
   expect(errors).toEqual([]);
 });
 

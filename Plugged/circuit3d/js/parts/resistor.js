@@ -43,62 +43,69 @@
     return [DIGIT_COLORS[Math.floor(sig / 10)], DIGIT_COLORS[sig % 10], multiplierColor(exp), GOLD];
   }
 
-  // ── The model: two upright leads, two stubs, a tan body, four bands ──
+  // ── The model: a carbon-film dog-bone (bulged end caps, a slimmer waist)
+  //  lying just above the board, its four colour bands following the
+  //  body's curve, and two tinned leads bent down into the holes. ──
+  const AXIS_H = 0.3;                    // the body's centre line above the board
+  const END_R = 0.16, WAIST_R = 0.134;   // radius at the end caps and the waist
+  // Where each band sits along the body (0 → 1 from pin 0): three on the
+  // first cap and the waist, the tolerance band on the far cap.
+  const BAND_AT = [[0.14, 0.21], [0.30, 0.36], [0.42, 0.48], [0.77, 0.84]];
+
+  const smooth = x => { const t = Math.min(1, Math.max(0, x)); return t * t * (3 - 2 * t); };
+  // The body's radius at t (0 → 1 along it): a rounded end, the cap's bulge, then the waist.
+  function radiusAt(t) {
+    const e = Math.min(t, 1 - t);
+    const end = e < 0.07 ? Math.sqrt(1 - Math.pow(1 - e / 0.07, 2)) : 1;
+    return (WAIST_R + (END_R - WAIST_R) * (1 - smooth((e - 0.2) / 0.09))) * end;
+  }
+
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);
     const B = ctx.holeWorld(legs[1].col, legs[1].row);
-    const ax = A.x, az = A.z, bx = B.x, bz = B.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
+    const along = new THREE.Vector3().subVectors(B, A);
+    const len = Math.min(1.0, Math.max(0.5, along.length() - 0.42));   // room left for the bends
+    along.normalize();
+    const mid = A.clone().add(B).multiplyScalar(0.5);
 
-    // Horizontal (same z) or vertical (same x)
-    const isHoriz = Math.abs(az - bz) < 0.01;
-    const LEAD_H  = 0.72;
-    const BODY_R  = 0.10;
-
-    // Body length = distance minus a bit so it doesn't reach the hole edges
-    const bodyLen = Math.max(0.4, isHoriz ? Math.abs(bx - ax) * 0.56 : Math.abs(bz - az) * 0.56);
-
-    // Upright leads from the holes to body height
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z)));
-
-    // Stubs from the lead tops to the body ends
-    const hOff = bodyLen / 2 + 0.01;
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to)); };
-    if (isHoriz) {
-      stub(new THREE.Vector3(ax, LEAD_H, midZ), new THREE.Vector3(midX - hOff, LEAD_H, midZ));
-      stub(new THREE.Vector3(midX + hOff, LEAD_H, midZ), new THREE.Vector3(bx, LEAD_H, midZ));
-    } else {
-      stub(new THREE.Vector3(midX, LEAD_H, az), new THREE.Vector3(midX, LEAD_H, midZ - hOff));
-      stub(new THREE.Vector3(midX, LEAD_H, midZ + hOff), new THREE.Vector3(midX, LEAD_H, bz));
-    }
-
-    // Body
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R, BODY_R, bodyLen, 14), ctx.mat.body(BODY));
-    body.castShadow = true;
-    if (isHoriz) body.rotation.z = Math.PI / 2;
-    else         body.rotation.x = Math.PI / 2;
-    body.position.set(midX, LEAD_H, midZ);
+    // The body is drawn along +y, then laid along the leads.
+    const body = new THREE.Group();
+    body.position.set(mid.x, AXIS_H, mid.z);
+    body.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), along);
     group.add(body);
+    // The outline from t0 to t1, its y measured from `at` (a band's own centre, so it sorts by position).
+    const profile = (t0, t1, grow, n, at = 0.5) => {
+      const pts = [];
+      for (let i = 0; i <= n; i++) {
+        const t = t0 + (t1 - t0) * i / n;
+        pts.push([radiusAt(t) + grow, (t - at) * len]);
+      }
+      return pts;
+    };
+    const shell = new THREE.Mesh(ctx.lathe(profile(0, 1, 0, 64), 36),
+                                 ctx.mat.surface(BODY, { roughness: 0.5, clearcoat: 0.35, clearcoatRoughness: 0.35 }));
+    shell.castShadow = true;
+    body.add(shell);
 
     // Colour bands: the real 4-band code for this resistor's value
-    const bands  = bandsFor(values.resistance);
-    const bSpace = bodyLen / (bands.length + 1);
-    bands.forEach((hex, i) => {
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R + 0.004, BODY_R + 0.004, bodyLen * 0.1, 14), ctx.mat.body(hex));
-      if (isHoriz) {
-        band.rotation.z = Math.PI / 2;
-        band.position.set(midX - bodyLen / 2 + bSpace * (i + 1), LEAD_H, midZ);
-      } else {
-        band.rotation.x = Math.PI / 2;
-        band.position.set(midX, LEAD_H, midZ - bodyLen / 2 + bSpace * (i + 1));
-      }
-      group.add(band);
+    bandsFor(values.resistance).forEach((hex, i) => {
+      const metal = hex === GOLD || hex === SILVER;
+      const paint = ctx.mat.surface(hex, metal ? { metalness: 0.75, roughness: 0.35 } : { roughness: 0.45, clearcoat: 0.3 });
+      const [t0, t1] = BAND_AT[i], tc = (t0 + t1) / 2;
+      const band = new THREE.Mesh(ctx.lathe(profile(t0, t1, 0.003, 8, tc), 36), paint);
+      band.position.y = (tc - 0.5) * len;
+      body.add(band);
     });
 
-    return { group, pinPositions: [new THREE.Vector3(ax, 0, az), new THREE.Vector3(bx, 0, bz)] };
+    // Leads: out of each end cap, a rounded bend, straight down into the hole.
+    for (const [hole, sign] of [[A, -1], [B, 1]]) {
+      const cap = mid.clone().addScaledVector(along, sign * (len / 2 - 0.03)).setY(AXIS_H);
+      group.add(ctx.bentLead([cap, new THREE.Vector3(hole.x, AXIS_H, hole.z), new THREE.Vector3(hole.x, -0.05, hole.z)], 0.026, 0.09));
+    }
+
+    return { group, pinPositions: [new THREE.Vector3(A.x, 0, A.z), new THREE.Vector3(B.x, 0, B.z)] };
   }
 
   // The one current through the part, in mA, from pin 0 to pin 1.

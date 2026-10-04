@@ -46,58 +46,31 @@
     return [`Diode is over its ${rating(max)} rating at ${m.current.toFixed(1)} mA. Put a bigger resistor in series.`];
   }
 
-  // ── The model: two leads, two stubs, a black glass body, a cathode band ──
-  //  legs[0] = cathode, legs[1] = anode. The band sits at the cathode end.
+  // ── The model: a DO-41 body, glossy black epoxy with rounded ends and a
+  //  grey band at the cathode end, and two tinned leads bent down into the
+  //  holes. legs[0] = cathode, legs[1] = anode. ──
+  const AXIS_H = 0.26, BODY_R = 0.13;
+
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);   // cathode
     const B = ctx.holeWorld(legs[1].col, legs[1].row);   // anode
-    const ax = A.x, az = A.z, bx = B.x, bz = B.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
+    const len = Math.min(0.78, Math.max(0.42, A.distanceTo(B) - 0.46));
+    const { body, leads } = ctx.axial(A, B, len, AXIS_H);
+    group.add(body, ...leads);
 
-    const isHoriz = Math.abs(az - bz) < 0.01;
-    const LEAD_H  = 0.6;
-    const BODY_R  = 0.09;
-    const bodyLen = Math.max(0.36, (isHoriz ? Math.abs(bx - ax) : Math.abs(bz - az)) * 0.46);
+    const shell = new THREE.Mesh(ctx.lathe(ctx.capsule(BODY_R, len, 0.07), 36),
+                                 ctx.mat.surface(0x131315, { roughness: 0.35, clearcoat: 0.45, clearcoatRoughness: 0.25 }));
+    shell.castShadow = true;
+    body.add(shell);
+    // The cathode band, near the cathode (−y) end
+    const b0 = -len / 2 + 0.07, b1 = b0 + len * 0.17;
+    const band = new THREE.Mesh(ctx.lathe([[BODY_R + 0.003, b0], [BODY_R + 0.003, b1]], 36),
+                                ctx.mat.surface(0xc3c6cb, { roughness: 0.5 }));
+    body.add(band);
 
-    // Upright leads from the holes to body height
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z)));
-
-    // Stubs from the lead tops to the body ends
-    const hOff = bodyLen / 2 + 0.01;
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to)); };
-    if (isHoriz) {
-      stub(new THREE.Vector3(ax, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(ax - midX) * hOff, LEAD_H, midZ));
-      stub(new THREE.Vector3(bx, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(bx - midX) * hOff, LEAD_H, midZ));
-    } else {
-      stub(new THREE.Vector3(midX, LEAD_H, az), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(az - midZ) * hOff));
-      stub(new THREE.Vector3(midX, LEAD_H, bz), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(bz - midZ) * hOff));
-    }
-
-    // Body: black glass
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R, BODY_R, bodyLen, 16), ctx.mat.glass(0x161616, 0.92));
-    body.castShadow = true;
-    if (isHoriz) body.rotation.z = Math.PI / 2;
-    else         body.rotation.x = Math.PI / 2;
-    body.position.set(midX, LEAD_H, midZ);
-    group.add(body);
-
-    // Cathode band: a silver ring near the cathode end
-    const bandW = bodyLen * 0.14;
-    const band  = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R + 0.005, BODY_R + 0.005, bandW, 16), ctx.mat.body(0xd0d0d0));
-    const bandOff = bodyLen / 2 - bandW;
-    if (isHoriz) {
-      band.rotation.z = Math.PI / 2;
-      band.position.set(midX + Math.sign(ax - midX) * bandOff, LEAD_H, midZ);
-    } else {
-      band.rotation.x = Math.PI / 2;
-      band.position.set(midX, LEAD_H, midZ + Math.sign(az - midZ) * bandOff);
-    }
-    group.add(band);
-
-    return { group, pinPositions: [new THREE.Vector3(ax, 0, az), new THREE.Vector3(bx, 0, bz)] };
+    return { group, pinPositions: [new THREE.Vector3(A.x, 0, A.z), new THREE.Vector3(B.x, 0, B.z)] };
   }
 
   return {

@@ -33,43 +33,50 @@
     return { sounding: current >= SOUND_MA, current };
   }
 
-  // ── The model: two leads, stubs, a dark cylinder, +/− marks ──
-  //  legs[0] = lead1 (−), legs[1] = lead2 (+).
+  // ── The model: a 12 mm active buzzer. A glossy black can with a rounded
+  //  top edge, the sound port in the middle of its top, a "+" moulded by
+  //  the + pin, and two pins down into the holes; small +/− marks on the
+  //  board by the leads. legs[0] = lead1 (−), legs[1] = lead2 (+). ──
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);
     const B = ctx.holeWorld(legs[1].col, legs[1].row);
     const ax = A.x, az = A.z, bx = B.x, bz = B.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
-    const LEAD_H  = 0.70;
-    const BODY_R  = 0.28;
-    const isHoriz = Math.abs(az - bz) < 0.01;
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    const toPlus = new THREE.Vector3(bx - ax, 0, bz - az).normalize();
+    const FOOT = 0.12, R = 0.4, H = 0.52;
 
-    // Upright leads
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z)));
-
-    // Stubs from the lead tops to the body edge
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to)); };
-    if (isHoriz) {
-      stub(new THREE.Vector3(ax, LEAD_H, az), new THREE.Vector3(midX + Math.sign(ax - midX) * BODY_R, LEAD_H, az));
-      stub(new THREE.Vector3(bx, LEAD_H, bz), new THREE.Vector3(midX + Math.sign(bx - midX) * BODY_R, LEAD_H, bz));
-    } else {
-      stub(new THREE.Vector3(ax, LEAD_H, az), new THREE.Vector3(ax, LEAD_H, midZ + Math.sign(az - midZ) * BODY_R));
-      stub(new THREE.Vector3(bx, LEAD_H, bz), new THREE.Vector3(bx, LEAD_H, midZ + Math.sign(bz - midZ) * BODY_R));
+    // The can, its top rounded over, with the port's dark well
+    const can = new THREE.Group();
+    can.position.set(mid.x, FOOT, mid.z);
+    can.rotation.y = Math.atan2(-toPlus.z, toPlus.x);   // local +x toward the + pin
+    group.add(can);
+    const shell = new THREE.Mesh(ctx.lathe([[R * 0.9, 0], [R, 0.02], [R, H - 0.06], [R * 0.97, H - 0.02], [R * 0.9, H], [0.08, H], [0.08, H - 0.12], [0, H - 0.12]], 48),
+                                 ctx.mat.surface(0x151517, { roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.2 }));
+    shell.castShadow = true;
+    can.add(shell);
+    const well = new THREE.Mesh(new THREE.CylinderGeometry(0.079, 0.079, 0.11, 24, 1, true),
+                                ctx.mat.surface(0x050505, { roughness: 1, side: THREE.BackSide }));
+    well.position.y = H - 0.06;
+    can.add(well);
+    // The moulded "+" on the top, toward the + pin
+    for (const [w, d] of [[0.03, 0.12], [0.12, 0.03]]) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.012, d), ctx.mat.surface(0x2a2a2d, { roughness: 0.4 }));
+      m.position.set(R * 0.6, H + 0.004, 0);
+      can.add(m);
     }
 
-    // Body and the dark membrane on top
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R, BODY_R, 0.45, 18), ctx.mat.body(0x222222));
-    body.position.set(midX, LEAD_H + 0.225, midZ);
-    body.castShadow = true;
-    group.add(body);
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.27, 0.27, 0.06, 18), ctx.mat.body(0x111111));
-    top.position.set(midX, LEAD_H + 0.48, midZ);
-    group.add(top);
+    // Pins straight down under the can, 7.6 mm apart where they can be
+    for (const [hole, sign] of [[A, -1], [B, 1]]) {
+      const top = mid.clone().addScaledVector(toPlus, sign * 0.2).setY(FOOT + 0.02);
+      const end = new THREE.Vector3(hole.x, -0.05, hole.z);
+      const path = Math.hypot(top.x - end.x, top.z - end.z) < 0.02 ? [top, end]
+        : [top, new THREE.Vector3(hole.x, FOOT * 0.4, hole.z), end];
+      group.add(ctx.bentLead(path, 0.026, 0.04));
+    }
 
-    // "+" by lead2, "−" by lead1
+    // "+" by lead2, "−" by lead1, on the board
     for (const [w, d] of [[0.04, 0.16], [0.16, 0.04]]) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.01, d), ctx.mat.label(0xff4444));
       m.position.set(bx, 0.03, bz);

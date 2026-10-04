@@ -89,11 +89,12 @@
   const line = (r, m) => (unpowered(m) ? null
     : { text: `  🔺 TL072 ${r.label}: op-amp 1 ${state(m.vout1, m.mode1, m.unused1)} · op-amp 2 ${state(m.vout2, m.mode2, m.unused2)}`, cls: 'sim-on' });
 
-  // ── The model: eight short leads, a black DIP-8 body across the gap,
-  //  a pin-1 notch and dot, and "TL072" on top. ──
+  // ── The model: a DIP-8 across the gap. A matte black epoxy body that
+  //  tapers to its top and bottom from the parting line, the pin-1 notch
+  //  and dimple, "TL072" printed on top, and eight flat tinned legs that
+  //  leave the parting line, bend down and narrow into the holes. ──
   const LEGS = [[0, 0], [1, 0], [2, 0], [3, 0], [3, -1], [2, -1], [1, -1], [0, -1]];
-  const LEAD_H = 0.18, BODY_H = 0.3;
-  const CANVAS_W = 256, CANVAS_H = 64;
+  const STANDOFF = 0.12, BODY_H = 0.44, DRAFT = 0.03;
 
   // Hole centres for the legs; legs without holes (a preview with no
   // anchor) are drawn as if at f0, centred on (0, 0, 0).
@@ -105,76 +106,79 @@
     return pts.map(p => p.sub(mid));
   }
 
-  // "TL072" in light grey on the body's black, for the top face.
-  function marking(ctx) {
-    if (typeof OffscreenCanvas === 'undefined') return null;
-    const THREE = ctx.THREE;
-    const canvas = new OffscreenCanvas(CANVAS_W, CANVAS_H);
-    const g = canvas.getContext('2d');
-    g.fillStyle = '#141414';
-    g.fillRect(0, 0, CANVAS_W, CANVAS_H);
-    g.fillStyle = '#d0d0d0';
-    g.font = 'bold 44px monospace';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText('TL072', CANVAS_W / 2, CANVAS_H / 2 + 2);
-    const texture = new THREE.CanvasTexture(canvas);
-    const m = ctx.mat.label(0xffffff);   // a label material, so the ghost treats it like the rest
-    m.map = texture;
-    return m;
-  }
-
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const at = legPoints(ctx, legs);
     const mid = at.reduce((s, p) => s.clone().add(p), new THREE.Vector3()).multiplyScalar(1 / at.length);
-
     // The face turns with the part: local +x runs pin 1 → pin 4, local +z from pins 5–8 toward pins 1–4.
     const right = new THREE.Vector3().subVectors(at[3], at[0]).normalize();
     const face = new THREE.Group();
     face.position.set(mid.x, 0, mid.z);
     face.rotation.y = Math.atan2(-right.z, right.x);
     group.add(face);
+    const ahead = new THREE.Vector3(Math.sin(face.rotation.y), 0, Math.cos(face.rotation.y));   // local +z
 
     const pitch = at[0].distanceTo(at[3]) / 3;
     const span  = at[0].distanceTo(at[7]);
-    const bodyW = pitch * 3 + 0.4;
-    const bodyD = span * 0.62;
-    const top   = LEAD_H + BODY_H;
+    const bodyW = pitch * 3 + 0.36;
+    const bodyD = Math.min(0.92, span - 0.2);
+    const waist = STANDOFF + BODY_H / 2;   // the parting line, where the legs leave
+    const top   = STANDOFF + BODY_H;
 
-    // Each lead rises from its hole and turns in under the body's edge.
-    for (const p of at) {
-      const foot = new THREE.Vector3(p.x, 0, p.z);
-      const knee = new THREE.Vector3(p.x, LEAD_H + BODY_H * 0.4, p.z);
-      group.add(ctx.lead(foot, knee, 0.024));
-      const toward = new THREE.Vector3(mid.x - p.x, 0, mid.z - p.z);
-      const inset = Math.max(0, toward.length() - bodyD / 2) + 0.02;
-      group.add(ctx.lead(knee, knee.clone().add(toward.normalize().multiplyScalar(inset)), 0.024));
+    // The body: a rounded box drawn in toward its top and bottom faces.
+    const geo = ctx.roundBox(bodyW, BODY_H, bodyD, 0.035);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const pull = DRAFT * Math.abs(pos.getY(i)) / (BODY_H / 2);
+      pos.setX(i, pos.getX(i) - Math.sign(pos.getX(i)) * pull);
+      pos.setZ(i, pos.getZ(i) - Math.sign(pos.getZ(i)) * pull);
     }
-
-    const body = new THREE.Mesh(new THREE.BoxGeometry(bodyW, BODY_H, bodyD), ctx.mat.body(0x141414));
-    body.position.y = LEAD_H + BODY_H / 2;
+    const body = new THREE.Mesh(geo, ctx.mat.surface(0x1b1b1d, { roughness: 0.72, clearcoat: 0.08 }));
+    body.position.y = waist;
     body.castShadow = true;
     face.add(body);
+    const half = bodyW / 2 - DRAFT;   // the top face's half-length
 
-    // The pin-1 notch: a half-round dip in the pin-1 end of the top face.
-    const notch = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.02, 16, 1, false, 0, Math.PI),
-                                 ctx.mat.label(0x050505));
-    notch.position.set(-bodyW / 2, top + 0.005, 0);
+    // The pin-1 notch: a dark half-round dip in the pin-1 end of the top face.
+    const notch = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.008, 20, 1, false, 0, Math.PI),
+                                 ctx.mat.surface(0x070707, { roughness: 0.9 }));
+    notch.position.set(-half, top + 0.002, 0);
     face.add(notch);
-    // The pin-1 dot, beside pin 1's corner.
-    const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.02, 12), ctx.mat.label(0x9a9a9a));
-    dot.position.set(-bodyW / 2 + 0.17, top + 0.005, bodyD / 2 - 0.13);
-    face.add(dot);
 
-    const ink = marking(ctx);
-    if (ink) {
-      const label = new THREE.Mesh(new THREE.PlaneGeometry(bodyW * 0.62, bodyW * 0.62 * CANVAS_H / CANVAS_W), ink);
-      label.rotation.x = -Math.PI / 2;
-      label.position.set(0.06, top + 0.004, 0);
-      label.name = 'marking';
-      face.add(label);
+    // The pin-1 dimple: a polished round spot by pin 1's corner.
+    const dimple = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.006, 20),
+                                  ctx.mat.surface(0x2a2a2c, { roughness: 0.25, clearcoat: 0.6 }));
+    dimple.position.set(-half + 0.2, top + 0.002, bodyD / 2 - DRAFT - 0.16);
+    face.add(dimple);
+
+    // "TL072" printed in light grey along the top.
+    const label = ctx.print(bodyW * 0.62, 0.2, (g, W, H) => {
+      g.fillStyle = '#c4c4c4';
+      g.font = `600 ${Math.round(H * 0.78)}px "Helvetica Neue", Arial, sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('TL072', W / 2, H / 2 + 1);
+    }, 700);
+    label.position.set(0.05, top + 0.004, -0.02);
+    label.name = 'marking';
+    face.add(label);
+
+    // Each leg, in the face's frame: a wide shoulder out of the parting
+    // line, a wide drop, then the narrow pin into its hole.
+    for (const p of at) {
+      const off = new THREE.Vector3().subVectors(p, mid);
+      const x = off.dot(right), z = off.dot(ahead), s = Math.sign(z) || 1;
+      const strip = (w, h, d, cx, cy, cz) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), ctx.mat.metal());
+        m.position.set(cx, cy, cz);
+        m.castShadow = true;
+        face.add(m);
+      };
+      const out = Math.abs(z), from = bodyD / 2 - 0.02;
+      strip(0.11, 0.024, out - from + 0.012, x, waist, s * (from + out + 0.012) / 2);
+      strip(0.11, waist - 0.11, 0.024, x, (waist + 0.11) / 2, s * out);
+      strip(0.045, 0.17, 0.024, x, 0.035, s * out);
     }
 
     return { group, pinPositions: at.map(p => new THREE.Vector3(p.x, 0, p.z)) };

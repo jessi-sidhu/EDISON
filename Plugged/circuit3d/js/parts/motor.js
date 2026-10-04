@@ -54,48 +54,78 @@
     return `${r.values.resistance} ohm motor ${m.spinning ? 'spinning' : 'not spinning'}, ${m.current.toFixed(1)} mA`;
   }
 
-  // ── The model: two leads, an upright silver can, a shaft with a blade ──
-  //  The shaft and blade sit on a pivot marked userData.motorShaft, which
-  //  update() turns about the vertical.
+  // ── The model: a 130-size DC motor lying on its side. A steel can with
+  //  its two flats, the black end cap at the front with its brass tabs,
+  //  leads from the tabs down into the holes, and the shaft out of the
+  //  back carrying a small red propeller. The shaft and propeller sit on a
+  //  pivot marked userData.motorShaft, which update() turns about its own
+  //  y: the shaft's axis. ──
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);
     const B = ctx.holeWorld(legs[1].col, legs[1].row);
-    const midX = (A.x + B.x) / 2;
-    const midZ = (A.z + B.z) / 2;
-    const CAN_R = 0.30, CAN_H = 0.60, CAN_Y = 0.14, LEAD_H = 0.30;
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    const along = new THREE.Vector3().subVectors(B, A).setY(0).normalize();
+    const R = 0.34, LEN = 0.92, AXIS_H = 0.42;
 
-    // Upright leads, then stubs in to the can's wall
-    for (const p of [A, B]) {
-      group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z)));
-      const dx = p.x - midX, dz = p.z - midZ, d = Math.hypot(dx, dz);
-      if (d > CAN_R + 0.01) {
-        const k = CAN_R / d;
-        group.add(ctx.lead(new THREE.Vector3(p.x, LEAD_H, p.z), new THREE.Vector3(midX + dx * k, LEAD_H, midZ + dz * k)));
-      }
+    // The motor's frame: its axis (local +y) points away from the front of
+    // the board, square to the leads; the end cap faces the front.
+    let back = new THREE.Vector3(-along.z, 0, along.x);
+    if (back.z > 1e-6 || (Math.abs(back.z) < 1e-6 && back.x < 0)) back = back.negate();
+    const frame = new THREE.Group();
+    frame.position.set(mid.x, AXIS_H, mid.z);
+    frame.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), back);
+    group.add(frame);
+
+    // The can: a steel cylinder with two flats (squashed across)
+    const can = new THREE.Mesh(ctx.lathe([[R * 0.92, -LEN / 2], [R, -LEN / 2 + 0.04], [R, LEN / 2 - 0.05], [R * 0.9, LEN / 2],
+                                          [0.12, LEN / 2], [0.1, LEN / 2 + 0.05], [0, LEN / 2 + 0.05]], 40),
+                               ctx.mat.surface(0xbcc0c6, { metalness: 0.85, roughness: 0.32 }));
+    can.scale.set(1, 1, 0.82);
+    can.castShadow = true;
+    frame.add(can);
+    // The black end cap and its brass tabs
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.97, R * 0.97, 0.14, 40), ctx.mat.surface(0x1d1d1f, { roughness: 0.5 }));
+    cap.scale.set(1, 1, 0.82);
+    cap.position.y = -LEN / 2 - 0.06;
+    frame.add(cap);
+    const brass = ctx.mat.surface(0xc9a24a, { metalness: 0.85, roughness: 0.35 });
+    const tabs = [];
+    for (const s of [-1, 1]) {
+      const tab = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.14, 0.02), brass);
+      tab.position.set(s * R * 0.62, -LEN / 2 - 0.18, 0);
+      frame.add(tab);
+      tabs.push(tab);
     }
 
-    // The can and its dark end cap
-    const can = new THREE.Mesh(new THREE.CylinderGeometry(CAN_R, CAN_R, CAN_H, 20), ctx.mat.body(0xb8bcc4));
-    can.position.set(midX, CAN_Y + CAN_H / 2, midZ);
-    can.castShadow = true;
-    group.add(can);
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(CAN_R * 0.7, CAN_R * 0.7, 0.04, 20), ctx.mat.body(0x2a2a2a));
-    cap.position.set(midX, CAN_Y + CAN_H + 0.02, midZ);
-    group.add(cap);
-
-    // The shaft and a two-blade fan on a pivot above the can
+    // The shaft out of the back and its propeller, on the spinning pivot
     const pivot = new THREE.Group();
-    pivot.position.set(midX, CAN_Y + CAN_H + 0.04, midZ);
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.22, 8), ctx.mat.metal());
-    shaft.position.y = 0.11;
+    pivot.position.y = LEN / 2 + 0.05;
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.34, 10), ctx.mat.metal());
+    shaft.position.y = 0.17;
     pivot.add(shaft);
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.03, 0.10), ctx.mat.body(0xe04e39));
-    blade.position.y = 0.21;
-    pivot.add(blade);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.06, 16), ctx.mat.surface(0xd8402e, { roughness: 0.45 }));
+    hub.position.y = 0.3;
+    pivot.add(hub);
+    for (const s of [-1, 1]) {
+      const blade = new THREE.Mesh(ctx.roundBox(0.34, 0.03, 0.11, 0.012), ctx.mat.surface(0xe04e39, { roughness: 0.45 }));
+      blade.position.set(s * 0.19, 0.3, 0);
+      blade.rotation.x = s * 0.35;   // the pitch
+      pivot.add(blade);
+    }
     pivot.userData.motorShaft = true;
-    group.add(pivot);
+    frame.add(pivot);
+
+    // Leads from the tabs, down and out to the holes
+    group.updateMatrixWorld(true);
+    const ends = tabs.map(tab => tab.getWorldPosition(new THREE.Vector3()));
+    if (ends[0].distanceTo(A) > ends[1].distanceTo(A)) ends.reverse();   // each hole takes the tab on its side
+    [A, B].forEach((hole, i) => {
+      const p = ends[i];
+      group.add(ctx.bentLead([p, new THREE.Vector3(p.x, 0.2, p.z), new THREE.Vector3(hole.x, 0.2, hole.z),
+                              new THREE.Vector3(hole.x, -0.05, hole.z)], 0.022, 0.06));
+    });
 
     return { group, pinPositions: [new THREE.Vector3(A.x, 0, A.z), new THREE.Vector3(B.x, 0, B.z)] };
   }

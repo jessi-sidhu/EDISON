@@ -14,7 +14,7 @@
 //
 //  The definition half is pure: no THREE, no page. The view half
 //  (view.build) runs only in the browser; tools/meter-display.js (#97)
-//  is its screen.
+//  is its screen, and the model's LCD shows the same reading (view.update).
 //
 //  LOADING
 //  ───────
@@ -107,41 +107,329 @@
     return { reading: m.voltage / TEST_AMPS, unit: 'Ω' };
   }
 
-  // ── The model: a yellow meter lying flat beside the board ──
-  //  A dark LCD at the back, a dial whose pointer shows the mode, and the
-  //  red and black probe sockets at the front. The probes are the wires
-  //  drawn from those sockets (MM1.red / MM1.black).
+  // ── The model: a yellow handheld meter propped on its stand beside the board ──
+  //  A rubber holster round a charcoal face: the LCD at the top end, the
+  //  rotary dial in the middle with its positions printed round it (the
+  //  pointer sits on V, A or Ω), and the red and black probe sockets at
+  //  the bottom end, whose tops are the pins. The probes are the wires
+  //  drawn from those sockets (MM1.red / MM1.black). The meter is drawn
+  //  face up in `frame`, tipped back on its stand, then every piece is
+  //  moved to the model's own group: the dial is its only nested group
+  //  (tools/meter-display.js turns the mode on a click inside it), every
+  //  other piece a direct child. While simulating the LCD shows the
+  //  meter's own reading (update).
   const DIAL = { V: -0.6, A: 0, 'Ω': 0.6 };   // pointer angle per mode, radians
+
+  const W = 2.5, D = 3.6, T = 0.6;     // the holster: width, length (top end at −z), thickness
+  const RIM = 0.2;                     // the holster's lip round the face
+  const FACE = T - 0.07;               // the face, recessed below the lip
+  const TILT = 0.26;                   // tipped back on the stand, the LCD end up
+  const LCD = { z: -1.02, w: 1.62, d: 0.74 };
+  const DIAL_Z = 0.36, KNOB_R = 0.44, MARKS_R = 0.7;
+  const SOCKET_Z = 1.26;
+  const SOCKETS = [[0.36, 0xc8161d], [0.8, 0x141416]];   // red, black: x, colour
+  const HOLD_X = -0.74;
+
+  // A rounded rectangle's outline (x, z), each corner a quarter circle, no point repeated.
+  function outline(THREE, w, d, r) {
+    const x = w / 2 - r, z = d / 2 - r, pts = [];
+    for (const [cx, cz, a0] of [[x, -z, -Math.PI / 2], [x, z, 0], [-x, z, Math.PI / 2], [-x, -z, Math.PI]]) {
+      for (let i = 0; i <= 6; i++) {
+        const a = a0 + (i / 6) * Math.PI / 2;
+        pts.push(new THREE.Vector2(cx + r * Math.cos(a), cz + r * Math.sin(a)));
+      }
+    }
+    return pts;
+  }
+
+  // ── The LCD: seven-segment digits on a grey-green ground ──
+  const SEGS = { 0: 0x3f, 1: 0x06, 2: 0x5b, 3: 0x4f, 4: 0x66, 5: 0x6d, 6: 0x7d, 7: 0x07, 8: 0x7f, 9: 0x6f,
+                 '-': 0x40, O: 0x3f, L: 0x38, F: 0x71, U: 0x3e, S: 0x6d, E: 0x79 };
+  const LCD_UNIT = { V: 'V', A: 'mA', 'Ω': 'Ω' };
+
+  // What the LCD shows: the same reading as meter-display's panel. m is
+  // measure()'s ({} when not simulating: dashes), o is ohms()'s in Ω mode.
+  function screen(mode, m, o) {
+    const unit = LCD_UNIT[mode] || 'V', dc = mode !== 'Ω';
+    if (m && m.fuse) return { text: 'FUSE', unit: '', dc: false };
+    if (mode === 'Ω' && o && typeof o.reading === 'number') {
+      const r = o.reading;
+      if (r >= 1e6) return { text: (r / 1e6).toFixed(2), unit: 'MΩ', dc };
+      if (r >= 1e3) return { text: (r / 1e3).toFixed(2), unit: 'kΩ', dc };
+      return { text: r.toFixed(1), unit: 'Ω', dc };
+    }
+    if (mode === 'Ω' && o && o.reading === 'OL') return { text: 'OL', unit, dc };
+    if (mode !== 'Ω' && m && typeof m.reading === 'number') return { text: m.reading.toFixed(mode === 'A' ? 1 : 2), unit, dc };
+    return { text: '----', unit, dc };
+  }
+
+  // A pointed bar from (x1, y1) to (x2, y2), level or upright, slanted by k.
+  function segment(g, x1, y1, x2, y2, th, base, k) {
+    const e = th / 2;
+    const pts = y1 === y2
+      ? [[x1, y1], [x1 + e, y1 - e], [x2 - e, y1 - e], [x2, y1], [x2 - e, y1 + e], [x1 + e, y1 + e]]
+      : [[x1, y1], [x1 + e, y1 + e], [x1 + e, y2 - e], [x1, y2], [x1 - e, y2 - e], [x1 - e, y1 + e]];
+    g.beginPath();
+    pts.forEach(([x, y], i) => (i ? g.lineTo(x + (base - y) * k, y) : g.moveTo(x + (base - y) * k, y)));
+    g.closePath();
+    g.fill();
+  }
+
+  function drawLcd(g, Wc, Hc, s) {
+    g.clearRect(0, 0, Wc, Hc);
+    const ground = g.createLinearGradient(0, 0, 0, Hc);
+    ground.addColorStop(0, '#525b4c');
+    ground.addColorStop(0.1, '#717b69');
+    ground.addColorStop(1, '#7b8572');
+    g.fillStyle = ground;
+    g.fillRect(0, 0, Wc, Hc);
+    const ink = '#0e120f';
+    const font = (wt, px) => `${wt} ${Math.round(px)}px "Helvetica Neue", Arial, sans-serif`;
+
+    // Annunciators: AUTO, and DC (a bar over three dashes) in V and A
+    g.fillStyle = ink;
+    g.font = font(700, Hc * 0.12);
+    g.textBaseline = 'top';
+    g.fillText('AUTO', Wc * 0.04, Hc * 0.08);
+    if (s.dc) {
+      const x = Wc * 0.045, y = Hc * 0.3, w = Wc * 0.075, t = Hc * 0.025;
+      g.fillRect(x, y, w, t);
+      for (let i = 0; i < 3; i++) g.fillRect(x + i * w * 0.38, y + t * 2.2, w * 0.24, t);
+    }
+
+    // The digits, right-aligned in four (or more) cells; a minus sits left of them
+    let text = s.text, neg = false;
+    if (/^-\d/.test(text)) { neg = true; text = text.slice(1); }
+    const cells = [];
+    for (const ch of text) {
+      if (ch === '.' && cells.length) cells[cells.length - 1].dp = true;
+      else cells.push({ bits: SEGS[ch] || 0, dp: false });
+    }
+    while (cells.length < 4) cells.unshift({ bits: 0, dp: false });
+    const x0 = Wc * 0.15, x1 = Wc * 0.8, p = (x1 - x0) / cells.length;
+    const w = p * 0.66, h = Hc * 0.52, y0 = Hc * 0.26, th = Math.min(h * 0.12, w * 0.21), gap = th * 0.28, k = 0.08, base = y0 + h;
+    const mid = y0 + h / 2;
+    const bars = dx => [
+      [dx + gap, y0, dx + w - gap, y0], [dx + w, y0 + gap, dx + w, mid - gap], [dx + w, mid + gap, dx + w, base - gap],
+      [dx + gap, base, dx + w - gap, base], [dx, mid + gap, dx, base - gap], [dx, y0 + gap, dx, mid - gap],
+      [dx + gap, mid, dx + w - gap, mid],
+    ];
+    cells.forEach((c, i) => {
+      const dx = x0 + i * p;
+      bars(dx).forEach((b, bit) => {
+        g.fillStyle = c.bits & (1 << bit) ? ink : 'rgba(14, 18, 15, 0.08)';   // unlit segments show faintly
+        segment(g, b[0], b[1], b[2], b[3], th, base, k);
+      });
+      g.fillStyle = c.dp ? ink : 'rgba(14, 18, 15, 0.08)';
+      g.fillRect(dx + w + th * 0.8, base - th, th, th);
+    });
+    if (neg) { g.fillStyle = ink; segment(g, x0 - p * 0.55, mid, x0 - p * 0.12, mid, th, base, k); }
+
+    // The unit
+    g.fillStyle = ink;
+    g.textBaseline = 'alphabetic';
+    let px = Hc * 0.42;
+    g.font = font(600, px);
+    const room = Wc * 0.97 - (x1 + p * 0.1);
+    const wide = g.measureText(s.unit).width;
+    if (wide > room) { px *= room / wide; g.font = font(600, px); }
+    g.fillText(s.unit, x1 + p * 0.1, base);
+  }
+
+  // The dial's positions round the knob: [angle (as DIAL), what]. Only V, A
+  // and Ω are this meter's modes; the rest are printed, as on a real dial.
+  const STOPS = [[-1.95, 'beep'], [-1.27, 'V~'], [DIAL.V, 'V'], [DIAL.A, 'A'], [DIAL['Ω'], 'Ω'], [1.27, 'diode'], [1.95, 'Hz'],
+                 [Math.PI, 'OFF']];
+
+  // The face's printing: the dial's positions and the labels by the sockets
+  // and the hold button. The print spans x ±pw/2 and z from z0 to z0 + pd.
+  function drawFace(g, Wc, Hc, mode, pw, z0) {
+    const s = Wc / pw, X = x => (x + pw / 2) * s, Z = z => (z - z0) * s;
+    const cx = X(0), cz = Z(DIAL_Z);
+    const font = (wt, u) => `${wt} ${Math.round(u * s)}px "Helvetica Neue", Arial, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.lineCap = 'round';
+    for (const [a, what] of STOPS) {
+      const ours = Object.hasOwn(DIAL, what), on = what === mode;
+      const colour = on ? '#f4c21a' : ours ? '#eef0f2' : '#8c9096';
+      const at = r => [cx + Math.sin(a) * r * s, cz - Math.cos(a) * r * s];
+      g.strokeStyle = colour;
+      g.lineWidth = 0.018 * s;
+      g.beginPath();
+      g.moveTo(...at(KNOB_R + 0.07));
+      g.lineTo(...at(KNOB_R + 0.13));
+      g.stroke();
+      const [lx, lz] = at(MARKS_R + (ours ? 0.04 : 0));
+      g.fillStyle = colour;
+      g.strokeStyle = colour;
+      g.lineWidth = 0.014 * s;
+      if (what === 'beep') {
+        g.beginPath();
+        g.arc(lx - 0.05 * s, lz, 0.016 * s, 0, Math.PI * 2);
+        g.fill();
+        for (const r of [0.04, 0.07]) { g.beginPath(); g.arc(lx - 0.05 * s, lz, r * s, -0.7, 0.7); g.stroke(); }
+      } else if (what === 'diode') {
+        const u = 0.05 * s;
+        g.beginPath();
+        g.moveTo(lx - u, lz - u); g.lineTo(lx - u, lz + u); g.lineTo(lx + u * 0.6, lz); g.closePath();
+        g.fill();
+        g.fillRect(lx + u * 0.6, lz - u, 0.014 * s, 2 * u);
+      } else if (what === 'V') {
+        g.font = font(700, ours ? 0.17 : 0.11);
+        g.fillText('V', lx - 0.04 * s, lz);
+        g.fillRect(lx + 0.03 * s, lz - 0.05 * s, 0.09 * s, 0.014 * s);            // DC: a bar over dashes
+        for (let i = 0; i < 3; i++) g.fillRect(lx + (0.03 + i * 0.034) * s, lz - 0.015 * s, 0.022 * s, 0.014 * s);
+      } else {
+        g.font = font(700, ours ? 0.17 : what === 'OFF' ? 0.09 : 0.11);
+        g.fillText(what, lx, lz);
+      }
+    }
+    g.fillStyle = '#c9ccd0';
+    g.font = font(600, 0.07);
+    g.fillText('VΩmA', X(SOCKETS[0][0]), Z(SOCKET_Z + 0.215));
+    g.fillText('COM', X(SOCKETS[1][0]), Z(SOCKET_Z + 0.215));
+    g.fillText('HOLD', X(HOLD_X), Z(SOCKET_Z + 0.215));
+  }
 
   function build(ctx, values) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
-    const W = 2.2, H = 0.45, D = 3.2;
-    const add = (geo, hex, x, y, z) => {
-      const m = new THREE.Mesh(geo, ctx.mat.label(hex));
+    const frame = new THREE.Group();       // face up, then tipped back
+    const mode = values && values.mode;
+    const put = (geo, mat, x, y, z, parent) => {
+      const m = new THREE.Mesh(geo, mat);
       m.position.set(x, y, z);
-      group.add(m);
+      (parent || frame).add(m);
       return m;
     };
 
-    const body = add(new THREE.BoxGeometry(W, H, D), 0xf2b400, 0, H / 2, 0);
+    // The holster: a yellow rubber ring, its lip standing proud of the face,
+    // with a yellow back under the meter
+    const BEV = 0.07;
+    const ring = new THREE.Shape(outline(THREE, W - 2 * BEV, D - 2 * BEV, 0.36));
+    ring.holes.push(new THREE.Path(outline(THREE, W - 2 * RIM + 2 * BEV, D - 2 * RIM + 2 * BEV, 0.2)));
+    const ringGeo = new THREE.ExtrudeGeometry(ring, { depth: T - 2 * BEV, bevelEnabled: true, bevelThickness: BEV, bevelSize: BEV,
+                                                      bevelSegments: 4, curveSegments: 6 });
+    ringGeo.rotateX(-Math.PI / 2);
+    ringGeo.translate(0, BEV, 0);
+    const yellow = ctx.mat.surface(0x9c6800, { roughness: 0.6, clearcoat: 0.2, clearcoatRoughness: 0.45 });
+    put(ringGeo, yellow, 0, 0, 0).castShadow = true;
+    put(ctx.roundBox(W - 2 * RIM - 0.04, 0.08, D - 2 * RIM - 0.04, 0.03), yellow, 0, 0.04, 0);
+
+    // The meter itself: a charcoal case whose top is the face
+    const body = put(ctx.roundBox(W - 2 * RIM + 0.06, FACE - 0.06, D - 2 * RIM + 0.06, 0.08),
+                     ctx.mat.surface(0x161719, { roughness: 0.7, clearcoat: 0.1 }), 0, 0.06 + (FACE - 0.06) / 2, 0);
     body.castShadow = true;
-    add(new THREE.BoxGeometry(W - 0.2, 0.04, D - 0.2), 0x2b2b2b, 0, H + 0.02, 0);      // face plate
-    add(new THREE.BoxGeometry(1.6, 0.05, 0.8), 0x3d4a3c, 0, H + 0.05, -0.95);           // LCD
 
+    // The LCD: a dark bezel, the reading (a canvas update() repaints) and a glass sheen
+    put(ctx.roundBox(LCD.w + 0.2, 0.05, LCD.d + 0.2, 0.06), ctx.mat.surface(0x1d1e21, { roughness: 0.4, clearcoat: 0.5 }),
+        0, FACE + 0.015, LCD.z);
+    const shows = screen(mode, {}, null);
+    const lcd = put(new THREE.PlaneGeometry(LCD.w, LCD.d),
+                    ctx.ghost ? ctx.mat.surface(0x7b8572)
+                              : ctx.mat.surface(0xc4cabd, { map: ctx.paint(680, 310, (g, Wc, Hc) => drawLcd(g, Wc, Hc, shows)), roughness: 0.5 }),
+                    0, FACE + 0.042, LCD.z);
+    lcd.rotation.x = -Math.PI / 2;
+    if (!ctx.ghost) {
+      lcd.userData.meterLcd = JSON.stringify(shows);   // what it shows: update() repaints it
+      const glass = put(new THREE.PlaneGeometry(LCD.w, LCD.d),
+                        ctx.mat.surface(0xffffff, { roughness: 0.06, clearcoat: 1, opacity: 0.1, depthWrite: false }), 0, FACE + 0.046, LCD.z);
+      glass.rotation.x = -Math.PI / 2;
+    }
+
+    // The face's printing round the dial and by the sockets
+    const PW = W - 2 * RIM - 0.02, Z0 = LCD.z + LCD.d / 2 + 0.12, PD = D / 2 - RIM - Z0;
+    if (!ctx.ghost) {
+      const marks = ctx.print(PW, PD, (g, Wc, Hc) => drawFace(g, Wc, Hc, mode, PW, Z0), 480);
+      marks.position.set(0, FACE + 0.002, Z0 + PD / 2);
+      frame.add(marks);
+    }
+
+    // The dial: a black well, and in it the knob (a disc with a grip bar
+    // across it, its white end the pointer) turned to the mode
+    put(new THREE.CylinderGeometry(KNOB_R + 0.05, KNOB_R + 0.06, 0.02, 64), ctx.mat.surface(0x151618, { roughness: 0.5 }),
+        0, FACE + 0.008, DIAL_Z);
     const dial = new THREE.Group();
-    dial.position.set(0, H + 0.04, 0.15);
-    const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.18, 24), ctx.mat.label(0x111111));
-    knob.position.y = 0.09;
-    const pointer = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.42), ctx.mat.label(0xffffff));
-    pointer.position.set(0, 0.2, -0.22);
-    dial.add(knob, pointer);
-    dial.rotation.y = -(DIAL[values && values.mode] || 0);
-    group.add(dial);
+    dial.position.set(0, FACE, DIAL_Z);
+    const black = ctx.mat.surface(0x17181a, { roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.35 });
+    const disc = put(ctx.lathe([[0, 0], [KNOB_R, 0], [KNOB_R, 0.09], [KNOB_R - 0.02, 0.115], [KNOB_R - 0.05, 0.125], [0, 0.125]], 72),
+                     black, 0, 0.012, 0, dial);
+    disc.castShadow = true;
+    const grip = put(ctx.roundBox(0.3, 0.11, KNOB_R * 2 - 0.04, 0.05), ctx.mat.surface(0x1e1f22, { roughness: 0.38, clearcoat: 0.45 }),
+                     0, 0.17, 0, dial);
+    grip.castShadow = true;
+    put(ctx.roundBox(0.06, 0.012, KNOB_R * 0.62, 0.005), ctx.mat.surface(0xf1f2f3, { roughness: 0.4 }), 0, 0.226, -KNOB_R * 0.55, dial);
+    dial.rotation.y = -(DIAL[mode] || 0);
+    frame.add(dial);
 
-    const sockets = [[-0.45, 0xdd2222], [0.45, 0x111111]];   // red, black
-    for (const [x, hex] of sockets) add(new THREE.CylinderGeometry(0.13, 0.13, 0.16, 14), hex, x, H + 0.08, 1.1);
-    return { group, pinPositions: sockets.map(([x]) => new THREE.Vector3(x, H + 0.18, 1.1)) };
+    // The probe sockets: a coloured shroud round a dark hole with a bright metal contact
+    const metal = ctx.mat.surface(0xc9ccd1, { metalness: 0.9, roughness: 0.28 });
+    const dark  = ctx.mat.surface(0x060606, { roughness: 0.9 });
+    for (const [x, hex] of SOCKETS) {
+      put(ctx.lathe([[0.155, 0], [0.16, 0.05], [0.15, 0.1], [0.135, 0.11], [0.095, 0.11], [0.088, 0.09], [0.088, 0.02]], 40),
+          ctx.mat.surface(hex, { roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25, side: THREE.DoubleSide }), x, FACE, SOCKET_Z)
+        .castShadow = true;
+      put(new THREE.CylinderGeometry(0.09, 0.09, 0.05, 32), dark, x, FACE + 0.045, SOCKET_Z);
+      put(ctx.lathe([[0.036, 0], [0.052, 0], [0.052, 0.085], [0.036, 0.085]], 24), metal, x, FACE, SOCKET_Z);
+    }
+
+    // The hold button: orange, in a dark collar
+    put(new THREE.CylinderGeometry(0.13, 0.13, 0.03, 36), ctx.mat.surface(0x1b1c1e, { roughness: 0.5 }), HOLD_X, FACE + 0.015, SOCKET_Z);
+    put(ctx.lathe([[0.1, 0], [0.1, 0.05], [0.085, 0.075], [0, 0.08]], 32),
+        ctx.mat.surface(0xe0640c, { roughness: 0.35, clearcoat: 0.5 }), HOLD_X, FACE + 0.02, SOCKET_Z);
+
+    // Tip it back: the bottom end on the table, centred where it stands
+    frame.rotation.x = TILT;
+    frame.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(frame);
+    frame.position.set(0, -box.min.y, -(box.min.z + box.max.z) / 2);
+    frame.updateMatrixWorld(true);
+    const pinPositions = SOCKETS.map(([x]) => new THREE.Vector3(x, FACE + 0.13, SOCKET_Z).applyMatrix4(frame.matrixWorld));
+    for (const o of frame.children.slice()) group.attach(o);
+
+    // The stand: a dark bail, two struts from a pivot on the back near the
+    // top end down to a bar on the table
+    const bail = ctx.mat.surface(0x232427, { roughness: 0.55, clearcoat: 0.2 });
+    const hinge = new THREE.Vector3(0, 0.02, -D / 2 + 0.75).applyMatrix4(frame.matrixWorld);
+    const foot = new THREE.Vector3(0, 0.05, hinge.z - 0.45);
+    const along = foot.clone().sub(hinge);
+    const turn = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), along.clone().normalize());
+    for (const x of [-0.66, 0.66]) {
+      const strut = put(ctx.roundBox(0.12, 0.05, along.length(), 0.02), bail, x, (hinge.y + foot.y) / 2, (hinge.z + foot.z) / 2, group);
+      strut.quaternion.copy(turn);
+      strut.castShadow = true;
+    }
+    put(ctx.roundBox(1.44, 0.1, 0.12, 0.04), bail, 0, foot.y, foot.z, group).castShadow = true;
+    put(new THREE.CylinderGeometry(0.045, 0.045, 1.44, 12), bail, 0, hinge.y, hinge.z, group).rotation.z = Math.PI / 2;
+
+    return { group, pinPositions };
+  }
+
+  // While simulating the LCD shows the meter's reading, as meter-display's
+  // panel does; with {} (stopped, or no reading) it shows dashes. A canvas
+  // is repainted only when what it shows changes.
+  function update(obj, m) {
+    const group = obj && obj.group;
+    if (!group) return;
+    const mode = (m && m.mode) || (obj.values && obj.values.mode) || 'V';
+    const s = screen(mode, m, mode === 'Ω' && m && m.mode ? ohmsNow(obj.label) : null);
+    const key = JSON.stringify(s);
+    group.traverse(o => {
+      if (typeof o.userData.meterLcd !== 'string' || o.userData.meterLcd === key) return;
+      const tex = o.material && o.material.map;
+      if (!tex || !tex.image) return;
+      drawLcd(tex.image.getContext('2d'), tex.image.width, tex.image.height, s);
+      tex.needsUpdate = true;
+      o.userData.meterLcd = key;
+    });
+  }
+
+  // Ω mode's reading, as meter-display gets it: ohms() on the board as it stands.
+  function ohmsNow(label) {
+    const App = typeof window !== 'undefined' ? window.App : null;
+    if (!App || !App.state) return null;
+    try { return ohms(App.state.components, App.state.wires, label); } catch { return null; }
   }
 
   const def = {
@@ -187,7 +475,7 @@
       },
     },
 
-    view: { build },
+    view: { build, update },
 
     examples: [
       {

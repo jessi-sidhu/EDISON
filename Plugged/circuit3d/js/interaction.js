@@ -228,7 +228,7 @@
         scene.remove(fpGhost);
         fpGhost.traverse(o => {
           if (o.geometry) o.geometry.dispose();
-          for (const m of [].concat(o.material || [])) m.dispose();
+          for (const m of [].concat(o.material || [])) { if (m.map) m.map.dispose(); m.dispose(); }
         });
       }
       fpGhost = fpGhostKey = null;

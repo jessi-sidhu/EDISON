@@ -69,6 +69,38 @@
   fill.position.set(-12, 8, -8);
   scene.add(fill);
 
+  // ── Studio reflections ─────────────────────────────────────
+  // The parts' metal and glossy plastic (components.js mat.surface and
+  // mat.metal, MeshStandard/Physical) reflect a soft studio: a dim room with
+  // a big overhead softbox and two strip lights, prefiltered once by PMREM.
+  // Lambert materials (the board, wires, the classic parts) ignore it.
+  function studio() {
+    const room = new THREE.Scene();
+    const geo  = new THREE.BoxGeometry(1, 1, 1);
+    const wall = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x2c2c2e, side: THREE.BackSide }));
+    wall.scale.set(40, 20, 40);
+    wall.position.y = 8;
+    room.add(wall);
+    const floor = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x5a5854 }));
+    floor.scale.set(40, 0.2, 40);
+    floor.position.y = -1.9;
+    room.add(floor);
+    // [width, height, depth, x, y, z, brightness]
+    for (const [w, h, d, x, y, z, k] of [[14, 0.2, 10, 0, 17, 2, 7], [0.2, 8, 16, -19, 9, 0, 3.2],
+                                          [0.2, 6, 12, 19, 8, -4, 2.2], [16, 6, 0.2, 0, 7, 19, 1.6]]) {
+      const panel = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(k, k, k * 0.96) }));
+      panel.scale.set(w, h, d);
+      panel.position.set(x, y, z);
+      room.add(panel);
+    }
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const map   = pmrem.fromScene(room, 0.04).texture;
+    pmrem.dispose();
+    geo.dispose();
+    return map;
+  }
+  scene.environment = studio();
+
   // ── Ground / Workbench ─────────────────────────────────────
   // Edison sets --scene-ground on <html> so the bench reads as the bezel; classic leaves it unset.
   const sceneGround = getComputedStyle(document.documentElement).getPropertyValue('--scene-ground').trim();

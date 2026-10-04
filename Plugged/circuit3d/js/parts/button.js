@@ -29,43 +29,59 @@
   const number  = label => String(label || '').replace(/^\D+/, '');
   const isDown  = r => !!(r && r.controls && r.controls.pressed);
 
-  // ── The model: leads, a metal bridge, a green body, a round cap ──
-  //  The cap is marked userData.isButtonCap, with its rest and pressed
-  //  heights, for update().
+  // ── The model: a 12 mm tactile switch. A black base, its pressed-steel
+  //  frame with the corner tabs, a round actuator cap, and two legs down
+  //  into the holes. The cap is marked userData.isButtonCap, with its rest
+  //  and pressed heights, for update(): black at rest, green while pressed. ──
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);
     const B = ctx.holeWorld(legs[1].col, legs[1].row);
-    const midX = (A.x + B.x) / 2;
-    const midZ = (A.z + B.z) / 2;
-    const LEAD_H = 0.42;   // the body sits right on top of the leads
-    const cylinder = (r, h, segs, m) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, segs), m);
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    const along = new THREE.Vector3().subVectors(B, A).setY(0).normalize();
+    const SIZE = Math.min(1.0, Math.max(0.78, A.distanceTo(B) - 0.24));   // the square's side
+    const BASE = 0.05, BODY_H = 0.3;
 
-    // Upright leads, and the bridge bar joining their tops
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z), 0.025));
-    group.add(ctx.lead(new THREE.Vector3(A.x, LEAD_H, A.z), new THREE.Vector3(B.x, LEAD_H, B.z), 0.025));
+    const frame = new THREE.Group();
+    frame.position.set(mid.x, 0, mid.z);
+    frame.rotation.y = Math.atan2(-along.z, along.x);
+    group.add(frame);
 
-    // Square body
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.30, 0.50), ctx.mat.body(0x2d6a2d));
-    body.position.set(midX, LEAD_H + 0.15, midZ);
-    body.castShadow = true;
-    group.add(body);
+    // Two legs, straight down from the base into the holes
+    for (const p of [A, B]) group.add(ctx.bentLead([new THREE.Vector3(p.x, BASE + 0.05, p.z), new THREE.Vector3(p.x, -0.05, p.z)], 0.032));
 
-    // Stem, cap and the ring at the cap's base
-    const stem = cylinder(0.09, 0.10, 10, ctx.mat.body(0xdddddd));
-    stem.position.set(midX, LEAD_H + 0.36, midZ);
-    group.add(stem);
-    const cap = cylinder(0.19, 0.10, 18, ctx.mat.body(0xe5e5e5));
-    cap.position.set(midX, LEAD_H + 0.47, midZ);
+    // The black base and the steel frame over it, with its four corner tabs
+    const base = new THREE.Mesh(ctx.roundBox(SIZE, BODY_H, SIZE, 0.03), ctx.mat.surface(0x1b1b1d, { roughness: 0.55 }));
+    base.position.y = BASE + BODY_H / 2;
+    base.castShadow = true;
+    frame.add(base);
+    const top = BASE + BODY_H;
+    const steel = ctx.mat.surface(0xc2c5ca, { metalness: 0.9, roughness: 0.32 });
+    const plate = new THREE.Mesh(ctx.roundBox(SIZE + 0.02, 0.035, SIZE + 0.02, 0.012), steel);
+    plate.position.y = top + 0.0175;
+    frame.add(plate);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const tab = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.2, 0.02), steel);
+      tab.position.set(sx * SIZE * 0.3, top - 0.08, sz * (SIZE / 2 + 0.012));
+      frame.add(tab);
+    }
+    // The collar round the cap
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(SIZE * 0.36, SIZE * 0.38, 0.05, 32), ctx.mat.surface(0x232325, { roughness: 0.5 }));
+    collar.position.y = top + 0.06;
+    frame.add(collar);
+
+    // The cap: a round black actuator with a soft top edge
+    const R = SIZE * 0.3;
+    const outline = [[0, 0], [R, 0], [R, 0.15], [R * 0.94, 0.19], [R * 0.8, 0.205], [0, 0.205]];
+    const cap = new THREE.Mesh(ctx.lathe(outline, 40), ctx.mat.surface(REST.color, { roughness: 0.4, clearcoat: 0.3 }));
+    const restY = top + 0.07;
+    cap.position.set(0, restY, 0);
+    cap.castShadow = true;
     cap.userData.isButtonCap = true;
-    cap.userData.capRestY    = LEAD_H + 0.47;
-    cap.userData.capPressY   = LEAD_H + 0.40;   // only 0.07 down: subtle
-    group.add(cap);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.20, 0.022, 6, 18), ctx.mat.body(0x999999));
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(midX, LEAD_H + 0.42, midZ);
-    group.add(ring);
+    cap.userData.capRestY    = restY;
+    cap.userData.capPressY   = restY - 0.07;   // only 0.07 down: subtle
+    frame.add(cap);
 
     return { group, pinPositions: [new THREE.Vector3(A.x, 0, A.z), new THREE.Vector3(B.x, 0, B.z)] };
   }
@@ -73,7 +89,7 @@
   // Cap down and green while pressed, up and white otherwise, eased over
   // 80 ms. The state is r.controls, or the record's own controls when
   // there is no result (Stop, or a circuit with no readings).
-  const REST  = { y: 'capRestY',  color: 0xe5e5e5, emissive: 0x000000, glow: 0 };
+  const REST  = { y: 'capRestY',  color: 0x1c1c1e, emissive: 0x000000, glow: 0 };
   const PRESS = { y: 'capPressY', color: 0x44cc44, emissive: 0x115511, glow: 0.6 };
 
   function update(obj, m, r) {

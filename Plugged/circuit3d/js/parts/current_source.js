@@ -40,59 +40,175 @@
     return { text: '  CURRENT SOURCE ' + report(r, m), cls: 'sim-info' };
   }
 
-  // ── The model: two leads, stubs to a round body, an arrow from → to ──
-  //  legs[0] = from, legs[1] = to. The arrow points to `to`, where the
-  //  current leaves.
+  // ── The model: a little blue bench box standing over its two holes ──
+  //  legs[0] = from, legs[1] = to. The box is drawn at full size (L × D ×
+  //  BOX_H, on rubber feet FEET high) and scaled to the span: a short span
+  //  gets a smaller box. Its front (+z along a row, +x down a column) has
+  //  the black FROM jack over the from lead, the red TO jack over the to
+  //  lead and, between them, the source's symbol: a circle with an arrow
+  //  pointing to TO, where the current leaves. The grey knob on top sits
+  //  at the set current on a log dial (0.1 mA at −135°, 1 A at +135°).
+  //  A lead runs from under the box down into each hole; a hole past the
+  //  box's end gets a lead out of the end wall.
+  const L = 1.6, D = 0.92, BOX_H = 0.56, FEET = 0.12;
+  const JACK_X = 0.56;                         // each jack's distance from the middle
+  const KNOB_R = 0.2, KNOB_H = 0.24, KNOB_Z = -0.03;
+  const KNOB_SWEEP = Math.PI * 1.5;
+  const knobAngle = amps => {
+    const t = (Math.log10(Math.min(1, Math.max(1e-4, amps || 0.01))) + 4) / 4;   // 0 at 0.1 mA, 1 at 1 A
+    return -(t - 0.5) * KNOB_SWEEP;
+  };
+
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);   // from
     const B = ctx.holeWorld(legs[1].col, legs[1].row);   // to
     const ax = A.x, az = A.z, bx = B.x, bz = B.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
+    const mid = A.clone().add(B).multiplyScalar(0.5);
 
-    const isHoriz = Math.abs(az - bz) < 0.01;
-    const LEAD_H  = 0.4;
-    const BODY_R  = 0.3;
-    const BODY_H  = 0.16;
+    // The frame: local +x runs along the span (world +x on a row, world −z
+    // down a column), so the front, local +z, faces the camera or the right.
+    const alongRow = Math.abs(bx - ax) >= Math.abs(bz - az);
+    const frame = new THREE.Group();
+    frame.position.set(mid.x, 0, mid.z);
+    frame.rotation.y = alongRow ? 0 : Math.PI / 2;
+    group.add(frame);
+    const localX = p => (alongRow ? p.x - mid.x : mid.z - p.z);
+    const fromX = localX(A), toX = localX(B);
+    const fromSide = Math.sign(fromX) || -1;           // −1: FROM on the left of the front
 
-    // Upright leads from the holes to body height
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z)));
+    // The box, at full size, scaled to the span
+    const s = Math.min(1, Math.max(0.75, (A.distanceTo(B) + 0.36) / L));
+    const box = new THREE.Group();
+    box.scale.setScalar(s);
+    frame.add(box);
+    const add = (geo, mat, x, y, z, parent) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.castShadow = true;
+      (parent || box).add(m);
+      return m;
+    };
+    const blue = ctx.mat.surface(0x113a94, { roughness: 0.42, clearcoat: 0.3, clearcoatRoughness: 0.3 });
+    const rubber = ctx.mat.surface(0x161618, { roughness: 0.85 });
+    const chrome = ctx.mat.surface(0xc8cbd0, { metalness: 1, roughness: 0.25, side: THREE.DoubleSide });
 
-    // Stubs from the lead tops to the body's edge
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to)); };
-    if (isHoriz) {
-      stub(new THREE.Vector3(ax, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(ax - midX) * BODY_R, LEAD_H, midZ));
-      stub(new THREE.Vector3(bx, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(bx - midX) * BODY_R, LEAD_H, midZ));
-    } else {
-      stub(new THREE.Vector3(midX, LEAD_H, az), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(az - midZ) * BODY_R));
-      stub(new THREE.Vector3(midX, LEAD_H, bz), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(bz - midZ) * BODY_R));
+    // The case: a base and a lid a hair proud of it (the seam between
+    // them runs round the box), on four rubber feet
+    const SPLIT = 0.42;
+    add(ctx.roundBox(L - 0.014, BOX_H * SPLIT + 0.04, D - 0.014, 0.05), blue, 0, FEET + (BOX_H * SPLIT + 0.04) / 2, 0);
+    add(ctx.roundBox(L, BOX_H * (1 - SPLIT), D, 0.07), blue, 0, FEET + BOX_H * (1 + SPLIT) / 2, 0);
+    for (const x of [-1, 1]) {
+      for (const z of [-1, 1]) {
+        add(new THREE.CylinderGeometry(0.075, 0.085, FEET + 0.01, 20), rubber, x * (L / 2 - 0.15), (FEET + 0.01) / 2, z * (D / 2 - 0.13));
+      }
+    }
+    const top = FEET + BOX_H;
+
+    // The jacks: a plastic collar round a chrome socket, out of the front
+    const JACK_Y = FEET + BOX_H * 0.36;
+    const jack = (x, hex) => {
+      const collar = add(ctx.lathe([[0.13, 0], [0.13, 0.03], [0.112, 0.045], [0.106, 0.11], [0.098, 0.126],
+                                    [0.07, 0.132], [0.054, 0.126]], 36),
+                         ctx.mat.surface(hex, { roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.2 }), x, JACK_Y, D / 2 - 0.005);
+      collar.rotation.x = Math.PI / 2;
+      const socket = add(ctx.lathe([[0.056, 0.128], [0.046, 0.13], [0.04, 0.12], [0.038, 0.06], [0, 0.06]], 28),
+                         chrome, x, JACK_Y, D / 2 - 0.005);
+      socket.rotation.x = Math.PI / 2;
+    };
+    jack(fromSide * JACK_X, 0x18181a);    // FROM, black
+    jack(-fromSide * JACK_X, 0xc41a1c);   // TO, red
+
+    // The knob: grey, knurled, a skirt at its foot and a line on its crown
+    const knob = new THREE.Group();
+    knob.position.set(0, top, KNOB_Z);
+    knob.rotation.y = knobAngle(values && values.current);
+    box.add(knob);
+    const grey = ctx.mat.surface(0x5d6166, { roughness: 0.5, clearcoat: 0.15, clearcoatRoughness: 0.35 });
+    add(new THREE.CylinderGeometry(KNOB_R * 1.12, KNOB_R * 1.16, 0.05, 48), ctx.mat.surface(0x585b60, { roughness: 0.5 }), 0, 0.025, 0, knob);
+    const knurl = new THREE.CylinderGeometry(KNOB_R, KNOB_R, KNOB_H - 0.05, 60, 1);
+    const pos = knurl.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i);
+      if (Math.hypot(x, z) < KNOB_R * 0.99) continue;   // the caps' centres
+      const k = (Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 60) % 2) ? 1 : 0.95;
+      pos.setX(i, x * k);
+      pos.setZ(i, z * k);
+    }
+    knurl.computeVertexNormals();
+    add(knurl, grey, 0, 0.05 + (KNOB_H - 0.05) / 2, 0, knob);
+    add(ctx.lathe([[KNOB_R * 0.97, 0], [KNOB_R * 0.9, 0.025], [KNOB_R * 0.6, 0.04], [0, 0.045]], 48), grey, 0, KNOB_H, 0, knob);
+    add(new THREE.BoxGeometry(0.03, 0.012, KNOB_R * 0.75), ctx.mat.surface(0x2c2d30, { roughness: 0.5 }),
+        0, KNOB_H + 0.04, -KNOB_R * 0.5, knob);
+
+    // The print: the dial's ticks round the knob, and the front's FROM, TO
+    // and symbol (white on the blue)
+    if (!ctx.ghost) {
+      const dial = ctx.print(D - 0.1, D - 0.1, (g, w, h) => {
+        const k = w / (D - 0.1), cx = w / 2, cy = h / 2 + KNOB_Z * k;
+        g.strokeStyle = '#eef2f8';
+        g.lineCap = 'round';
+        for (let i = 0; i <= 10; i++) {
+          const a = -Math.PI / 2 + (i / 10 - 0.5) * KNOB_SWEEP, long = i % 5 === 0;
+          g.lineWidth = (long ? 0.022 : 0.016) * k;
+          g.beginPath();
+          g.moveTo(cx + Math.cos(a) * KNOB_R * 1.3 * k, cy + Math.sin(a) * KNOB_R * 1.3 * k);
+          g.lineTo(cx + Math.cos(a) * KNOB_R * (long ? 1.78 : 1.62) * k, cy + Math.sin(a) * KNOB_R * (long ? 1.78 : 1.62) * k);
+          g.stroke();
+        }
+      }, 600);
+      dial.position.set(0, top + 0.003, 0);
+      box.add(dial);
+
+      const FW = L - 0.16, FH = BOX_H - 0.08;
+      const face = ctx.print(FW, FH, (g, w, h) => {
+        const k = w / FW, u = x => w / 2 + x * k, v = y => h / 2 - (y - (FEET + BOX_H / 2)) * k;
+        g.fillStyle = g.strokeStyle = '#f2f5fa';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.font = `700 ${Math.round(0.1 * k)}px "Helvetica Neue", Arial, sans-serif`;
+        g.fillText('FROM', u(fromSide * JACK_X), v(top - 0.11));
+        g.fillText('TO', u(-fromSide * JACK_X), v(top - 0.11));
+        // The symbol: a circle with its leads' stubs, an arrow to TO
+        const r = 0.17 * k, cx = u(0), cy = v(FEET + BOX_H * 0.5), dir = -fromSide;
+        g.lineWidth = 0.022 * k;
+        g.beginPath();
+        g.arc(cx, cy, r, 0, Math.PI * 2);
+        g.stroke();
+        for (const side of [-1, 1]) {
+          g.beginPath();
+          g.moveTo(cx + side * r * 0.86, cy);
+          g.lineTo(cx + side * r * 1.18, cy);
+          g.stroke();
+        }
+        g.beginPath();
+        g.moveTo(cx - dir * r * 0.6, cy);
+        g.lineTo(cx + dir * r * 0.25, cy);
+        g.stroke();
+        g.beginPath();
+        g.moveTo(cx + dir * r * 0.62, cy);
+        g.lineTo(cx + dir * r * 0.12, cy - r * 0.3);
+        g.lineTo(cx + dir * r * 0.12, cy + r * 0.3);
+        g.closePath();
+        g.fill();
+      }, 600);
+      face.rotation.set(0, 0, 0);
+      face.position.set(0, FEET + BOX_H / 2, D / 2 + 0.004);
+      box.add(face);
     }
 
-    // Body: a flat round disc
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R, BODY_R, BODY_H, 28), ctx.mat.body(0x2e5c8a));
-    body.position.set(midX, LEAD_H, midZ);
-    body.castShadow = true;
-    group.add(body);
-
-    // Arrow on top, from `from` toward `to`: a shaft and a cone head
-    const dir = new THREE.Vector3(bx - ax, 0, bz - az).normalize();
-    const top = LEAD_H + BODY_H / 2 + 0.02;
-    const SHAFT = BODY_R * 0.9, HEAD = BODY_R * 0.5;
-    const arrowMat = ctx.mat.body(0xf2f2f2);
-    const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, SHAFT), arrowMat);
-    const head  = new THREE.Mesh(new THREE.ConeGeometry(0.1, HEAD, 3), arrowMat);
-    const yaw = Math.atan2(dir.x, dir.z);
-    shaft.rotation.y = yaw;
-    shaft.position.set(midX - dir.x * HEAD / 2, top, midZ - dir.z * HEAD / 2);
-    head.rotation.set(Math.PI / 2, 0, 0);   // point along +z, then turn with yaw
-    const headWrap = new THREE.Group();
-    headWrap.add(head);
-    headWrap.rotation.y = yaw;
-    headWrap.position.set(midX + dir.x * (SHAFT - HEAD) / 2, top, midZ + dir.z * (SHAFT - HEAD) / 2);
-    head.scale.set(1, 1, 0.2);
-    group.add(shaft, headWrap);
+    // The leads: straight down from under the box, or out of its end wall
+    // and down when the hole is past the box's end
+    const under = FEET * s, end = (L / 2) * s;
+    for (const hx of [fromX, toX]) {
+      const at = new THREE.Vector3(hx, -0.05, 0);
+      const pts = Math.abs(hx) <= end - 0.1
+        ? [new THREE.Vector3(hx, under + 0.02, 0), at]
+        : [new THREE.Vector3(Math.sign(hx) * (end - 0.05), under + 0.12 * s, 0),
+           new THREE.Vector3(hx, under + 0.12 * s, 0), at];
+      frame.add(ctx.bentLead(pts, 0.026, 0.06));
+    }
 
     return { group, pinPositions: [new THREE.Vector3(ax, 0, az), new THREE.Vector3(bx, 0, bz)] };
   }

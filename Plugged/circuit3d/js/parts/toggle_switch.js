@@ -31,14 +31,15 @@
   const number   = label => String(label || '').replace(/^\D+/, '');
   const isClosed = r => !!(r && r.controls && r.controls.closed);
 
-  const TILT = 0.16;   // the rocker's lean, in radians: pin 2's end down when on
-  const OFF  = { color: 0x3a3d44, emissive: 0x000000, glow: 0 };
+  const TILT = 0.38;   // the lever's lean, in radians: toward pin 2 when on
+  const OFF  = { color: 0xc9ccd1, emissive: 0x000000, glow: 0 };
   const ON   = { color: 0x33cc55, emissive: 0x115522, glow: 0.7 };
 
-  // ── The model: leads, a dark housing, a rocker on a pivot ──
-  //  A flat rocker, so a click on the middle of its top always lands on
-  //  it. The pivot is marked userData.isSwitchRocker, with its tilt axis
-  //  and the rocker mesh, for update().
+  // ── The model: an MS-1 bat-handle toggle. A black body, a threaded steel
+  //  bushing with its nut, and a chrome lever on a pivot at the bushing's
+  //  top, leaning toward pin 2 when on. The pivot is marked
+  //  userData.isSwitchRocker, with its tilt axis and the lever's tip (the
+  //  part whose colour shows on or off), for update(). ──
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
@@ -50,34 +51,60 @@
     const dx = len ? (B.x - A.x) / len : 1, dz = len ? (B.z - A.z) / len : 0;   // unit A → B
     const yaw = Math.atan2(-dz, dx);   // a box's long side along A → B
     const long = Math.max(len, 0.8) + 0.12;
-    const LEAD_H = 0.30;
+    const BASE = 0.06, BODY_H = 0.42;
 
-    // Upright leads
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z), 0.025));
+    // Two pins, flat, straight down
+    for (const p of [A, B]) {
+      const pin = new THREE.Mesh(new THREE.BoxGeometry(0.08, BASE + 0.12, 0.024), ctx.mat.metal());
+      pin.position.set(p.x, (BASE + 0.12) / 2 - 0.06, p.z);
+      pin.rotation.y = yaw;
+      group.add(pin);
+    }
 
-    // Housing
-    const body = new THREE.Mesh(new THREE.BoxGeometry(long, 0.26, 0.40), ctx.mat.body(0x222428));
-    body.position.set(midX, LEAD_H + 0.13, midZ);
+    // The body
+    const body = new THREE.Mesh(ctx.roundBox(long, BODY_H, 0.5, 0.03), ctx.mat.surface(0x1c1c1e, { roughness: 0.5, clearcoat: 0.2 }));
+    body.position.set(midX, BASE + BODY_H / 2, midZ);
     body.rotation.y = yaw;
     body.castShadow = true;
     group.add(body);
+    const top = BASE + BODY_H;
 
-    // The rocker, on a pivot just above the housing; pin 2's end goes down when on
+    // The threaded bushing and its hex nut
+    const steel = ctx.mat.surface(0xc6c9ce, { metalness: 0.9, roughness: 0.28 });
+    const bushing = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.24, 28), steel);
+    bushing.position.set(midX, top + 0.12, midZ);
+    group.add(bushing);
+    for (let i = 0; i < 6; i++) {   // the thread, as rings
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.132, 0.008, 6, 28), steel);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(midX, top + 0.1 + i * 0.024, midZ);
+      group.add(ring);
+    }
+    const nut = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.06, 6), steel);
+    nut.position.set(midX, top + 0.03, midZ);
+    nut.rotation.y = yaw;
+    group.add(nut);
+
+    // The lever on its pivot: a tapered chrome bat; its tip shows on (green) or off
     const on = !!(controls && controls.closed);
     const look = on ? ON : OFF;
     const pivot = new THREE.Group();
-    pivot.position.set(midX, LEAD_H + 0.30, midZ);
-    const rocker = new THREE.Mesh(new THREE.BoxGeometry(long - 0.16, 0.10, 0.30),
-                                  ctx.mat.body(look.color));
-    rocker.rotation.y = yaw;
-    if (rocker.material.emissive) {
-      rocker.material.emissive.setHex(look.emissive);
-      rocker.material.emissiveIntensity = look.glow;
+    pivot.position.set(midX, top + 0.24, midZ);
+    const bat = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.045, 0.46, 20), ctx.mat.surface(0xd4d7dc, { metalness: 1, roughness: 0.18 }));
+    bat.position.y = 0.23;
+    bat.castShadow = true;
+    pivot.add(bat);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 20, 14), ctx.mat.surface(look.color, { metalness: 0.85, roughness: 0.2 }));
+    tip.position.y = 0.47;
+    tip.scale.set(1, 1.2, 1);
+    if (tip.material.emissive) {
+      tip.material.emissive.setHex(look.emissive);
+      tip.material.emissiveIntensity = look.glow;
     }
-    pivot.add(rocker);
+    pivot.add(tip);
     pivot.userData.isSwitchRocker = true;
-    pivot.userData.axis   = new THREE.Vector3(dz, 0, -dx);   // +angle sinks B's end, −angle lifts it
-    pivot.userData.rocker = rocker;
+    pivot.userData.axis   = new THREE.Vector3(dz, 0, -dx);   // +angle leans the lever toward B, −angle toward A
+    pivot.userData.rocker = tip;
     pivot.userData.angle  = on ? TILT : -TILT;
     pivot.quaternion.setFromAxisAngle(pivot.userData.axis, pivot.userData.angle);
     group.add(pivot);

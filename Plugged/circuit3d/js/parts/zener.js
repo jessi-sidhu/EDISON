@@ -64,58 +64,41 @@
     return `${r.values.model} Zener ${state}, ${m.voltage.toFixed(2)} V across, ${m.current.toFixed(1)} mA`;
   }
 
-  // ── The model: two leads, two stubs, an orange glass body, a black band ──
-  //  legs[0] = cathode, legs[1] = anode. The band sits at the cathode end.
+  // ── The model: a DO-35 glass body, see-through orange, with the two metal
+  //  slugs and the die between them showing inside, a black band at the
+  //  cathode end, and two tinned leads bent down into the holes.
+  //  legs[0] = cathode, legs[1] = anode. ──
+  const AXIS_H = 0.24, BODY_R = 0.11;
+
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);   // cathode
     const B = ctx.holeWorld(legs[1].col, legs[1].row);   // anode
-    const ax = A.x, az = A.z, bx = B.x, bz = B.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
+    const len = Math.min(0.66, Math.max(0.4, A.distanceTo(B) - 0.5));
+    const { body, leads } = ctx.axial(A, B, len, AXIS_H, 0.022);
+    group.add(body, ...leads);
 
-    const isHoriz = Math.abs(az - bz) < 0.01;
-    const LEAD_H  = 0.6;
-    const BODY_R  = 0.09;
-    const bodyLen = Math.max(0.36, (isHoriz ? Math.abs(bx - ax) : Math.abs(bz - az)) * 0.46);
-
-    // Upright leads from the holes to body height
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z)));
-
-    // Stubs from the lead tops to the body ends
-    const hOff = bodyLen / 2 + 0.01;
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to)); };
-    if (isHoriz) {
-      stub(new THREE.Vector3(ax, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(ax - midX) * hOff, LEAD_H, midZ));
-      stub(new THREE.Vector3(bx, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(bx - midX) * hOff, LEAD_H, midZ));
-    } else {
-      stub(new THREE.Vector3(midX, LEAD_H, az), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(az - midZ) * hOff));
-      stub(new THREE.Vector3(midX, LEAD_H, bz), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(bz - midZ) * hOff));
+    const glass = new THREE.Mesh(ctx.lathe(ctx.capsule(BODY_R, len, 0.06), 36),
+                                 ctx.mat.surface(0xe0702a, { opacity: 0.72, roughness: 0.08, clearcoat: 1, clearcoatRoughness: 0.05,
+                                                             depthWrite: false }));
+    glass.castShadow = true;
+    body.add(glass);
+    // Inside: a slug from each end and the die between them
+    for (const s of [-1, 1]) {
+      const slug = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, len * 0.3, 16), ctx.mat.metal());
+      slug.position.y = s * len * 0.22;
+      body.add(slug);
     }
+    const die = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, len * 0.07, 12), ctx.mat.surface(0x3a3a3c, { roughness: 0.6 }));
+    body.add(die);
+    // The cathode band, near the cathode (−y) end
+    const b0 = -len / 2 + 0.06, b1 = b0 + len * 0.16;
+    const band = new THREE.Mesh(ctx.lathe([[BODY_R + 0.003, b0], [BODY_R + 0.003, b1]], 36),
+                                ctx.mat.surface(0x141416, { roughness: 0.45 }));
+    body.add(band);
 
-    // Body: orange glass (the diode's is black)
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R, BODY_R, bodyLen, 16), ctx.mat.glass(0xd2691e, 0.85));
-    body.castShadow = true;
-    if (isHoriz) body.rotation.z = Math.PI / 2;
-    else         body.rotation.x = Math.PI / 2;
-    body.position.set(midX, LEAD_H, midZ);
-    group.add(body);
-
-    // Cathode band: a black ring near the cathode end
-    const bandW = bodyLen * 0.14;
-    const band  = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R + 0.005, BODY_R + 0.005, bandW, 16), ctx.mat.body(0x1a1a1a));
-    const bandOff = bodyLen / 2 - bandW;
-    if (isHoriz) {
-      band.rotation.z = Math.PI / 2;
-      band.position.set(midX + Math.sign(ax - midX) * bandOff, LEAD_H, midZ);
-    } else {
-      band.rotation.x = Math.PI / 2;
-      band.position.set(midX, LEAD_H, midZ + Math.sign(az - midZ) * bandOff);
-    }
-    group.add(band);
-
-    return { group, pinPositions: [new THREE.Vector3(ax, 0, az), new THREE.Vector3(bx, 0, bz)] };
+    return { group, pinPositions: [new THREE.Vector3(A.x, 0, A.z), new THREE.Vector3(B.x, 0, B.z)] };
   }
 
   return {

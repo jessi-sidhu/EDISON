@@ -84,12 +84,12 @@ async function clickHole(page, where) {
   await page.mouse.click(at.x, at.y);
 }
 
-// Clicks the top centre of a part's model, the way a person selects it.
+// Clicks the middle of a part's model, the way a person selects it.
 async function clickPart(page, label) {
   const at = await page.evaluate(l => {
     const c = App.state.components.find(x => x.label === l);
     const box = new THREE.Box3().setFromObject(c.group);
-    const p = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+    const p = box.getCenter(new THREE.Vector3());
     App.camera.updateMatrixWorld();
     p.project(App.camera);
     const r = App.renderer.domElement.getBoundingClientRect();

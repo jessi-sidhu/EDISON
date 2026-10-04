@@ -742,6 +742,14 @@
       for (const { halo } of glows) halo.visible = true;
       App.renderer.compile(App.scene, App.camera);
       draw();
+      // The cross-fade's two states as well (colour on and blended, then as
+      // built): a GL builds a pipeline per state the first time it draws one,
+      // and the solid parts' many shaders would otherwise all build on the
+      // fade's first frame. The canvas is still hidden, so none of it shows.
+      for (const [m] of built) { m.colorWrite = true; m.opacity = 0.5; }
+      draw();
+      for (const [m, { was }] of built) Object.assign(m, was);
+      draw();
       const gl = App.renderer.getContext();   // wait for the GPU to finish it (a one-pixel read), so the cost lands here, not in the first frames shown
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
       for (const item of items) paint(item);
@@ -848,7 +856,10 @@
         if (!label) return;
         group.updateMatrixWorld(true);
         const b = new THREE.Box3().setFromObject(group), at = b.getCenter(new THREE.Vector3());
-        if (dome) dome.localToWorld(at.set(0, dome.geometry.parameters.radius, 0));
+        if (dome) {
+          if (!dome.geometry.boundingBox) dome.geometry.computeBoundingBox();
+          dome.localToWorld(at.set(0, dome.geometry.boundingBox.max.y, 0));
+        }
         else if (!onBoard) at.z = Math.cos((first === 'empty' ? AZIMUTH_EMPTY : AZIMUTH) * Math.PI / 180) >= 0 ? b.max.z : b.min.z;
         marks.set(label, { at, item });
       },

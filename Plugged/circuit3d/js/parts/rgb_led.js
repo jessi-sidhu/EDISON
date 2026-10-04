@@ -63,7 +63,8 @@
     return m.lit && m.lit.length ? `RGB LED ON: ${litList(m)}` : 'RGB LED OFF (dark)';
   }
 
-  // ── The model: four leads, a dark collar and a milky dome ──
+  // ── The model: a 5 mm diffused LED, a milky dome on a flanged base, its
+  //  four leads splayed out to their holes ──
   //  The dome is a mesh named 'rgb-dome'; the glow light is marked
   //  userData.rgbLight. update() colours both from m.color.
   const DARK_EMISSIVE = 0x333333, DARK_GLOW = 0.3, LIT_GLOW = 2.5;
@@ -72,37 +73,66 @@
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const at = legs.map(l => ctx.holeWorld(l.col, l.row));
-    const midX = (at[1].x + at[2].x) / 2;
-    const midZ = (at[1].z + at[2].z) / 2;
-    const LEAD_H = 0.88, COLLAR_R = 0.26;
+    const mid = at[1].clone().add(at[2]).multiplyScalar(0.5);
+    const right = new THREE.Vector3().subVectors(at[3], at[0]).setY(0).normalize();   // red → blue
+    const BASE = 0.26, DOME_R = 0.31, FLANGE_R = 0.36, FLANGE_H = 0.09, BARREL_H = 0.46;
 
-    // Upright leads, the cathode a little taller, then stubs in to the collar
-    at.forEach((p, i) => {
-      const h = i === 1 ? LEAD_H + 0.02 : LEAD_H;
-      group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, h, p.z), 0.023));
-      const dx = p.x - midX, dz = p.z - midZ, d = Math.hypot(dx, dz);
-      if (d > COLLAR_R + 0.01) {
-        const k = COLLAR_R / d;
-        group.add(ctx.lead(new THREE.Vector3(p.x, h, p.z), new THREE.Vector3(midX + dx * k, LEAD_H, midZ + dz * k), 0.018));
-      }
-    });
+    // The body is drawn with local +x from the red lead toward the blue.
+    const body = new THREE.Group();
+    body.position.set(mid.x, 0, mid.z);
+    body.rotation.y = Math.atan2(-right.z, right.x);
+    group.add(body);
 
-    const collar = new THREE.Mesh(new THREE.CylinderGeometry(COLLAR_R, COLLAR_R, 0.11, 20), ctx.mat.body(0x2a2a2a));
-    collar.position.set(midX, LEAD_H - 0.04, midZ);
-    group.add(collar);
-
-    // Dome: milky and dim until a die lights it
-    const glass = ctx.mat.glass(0xf2f2f2, 0.88);
+    // Diffused epoxy: milky and dim until a die lights it (the flange shares it, so it glows too)
+    const glass = ctx.mat.surface(0xd2d6dc, { opacity: 0.88, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1 });
     glass.emissive.setHex(DARK_EMISSIVE);
     glass.emissiveIntensity = DARK_GLOW;
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(COLLAR_R, 22, 11, 0, Math.PI * 2, 0, Math.PI * 0.55), glass);
+
+    // The flange, its flat on the red lead's side
+    const a = Math.acos(0.8);
+    const rim = new THREE.Shape();
+    rim.absarc(0, 0, FLANGE_R, Math.PI + a, Math.PI * 3 - a, false);
+    rim.closePath();
+    const flangeGeo = new THREE.ExtrudeGeometry(rim, { depth: FLANGE_H, bevelEnabled: true, bevelThickness: 0.012,
+                                                       bevelSize: 0.012, bevelSegments: 2, curveSegments: 28 });
+    flangeGeo.rotateX(-Math.PI / 2);
+    const flange = new THREE.Mesh(flangeGeo, glass);
+    flange.position.y = BASE;
+    flange.castShadow = true;
+    body.add(flange);
+
+    // The dome: a short barrel and a hemisphere
+    const outline = [[DOME_R * 0.97, 0], [DOME_R, 0.015], [DOME_R, BARREL_H]];
+    for (let i = 1; i <= 14; i++) {
+      const t = (i / 14) * Math.PI / 2;
+      outline.push([DOME_R * Math.cos(t), BARREL_H + DOME_R * Math.sin(t)]);
+    }
+    const dome = new THREE.Mesh(ctx.lathe(outline, 40), glass);
     dome.name = 'rgb-dome';
-    dome.position.set(midX, LEAD_H + 0.04, midZ);
+    dome.position.y = BASE + FLANGE_H;
     dome.castShadow = true;
-    group.add(dome);
+    body.add(dome);
+
+    // The lead frame inside: four posts up into the dome, the common cathode's the tallest
+    const frameMat = ctx.mat.surface(0xe2e4e8, { metalness: 0.55, roughness: 0.3 });
+    for (let i = 0; i < 4; i++) {
+      const h = i === 1 ? 0.4 : 0.3;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.035, h, 0.025), frameMat);
+      post.position.set((i - 1.5) * 0.12, BASE + FLANGE_H + h / 2, 0);
+      body.add(post);
+    }
+
+    // Four leads out of the flange 1.27 mm apart, splayed out to their holes
+    at.forEach((hole, i) => {
+      const top = mid.clone().addScaledVector(right, (i - 1.5) * 0.12).setY(BASE + 0.02);
+      const end = new THREE.Vector3(hole.x, -0.05, hole.z);
+      const path = Math.hypot(top.x - end.x, top.z - end.z) < 0.02 ? [top, end]
+        : [top, top.clone().setY(BASE * 0.62), new THREE.Vector3(hole.x, BASE * 0.3, hole.z), end];
+      group.add(ctx.bentLead(path, 0.022, 0.05));
+    });
 
     const light = new THREE.PointLight(0xffffff, 8.0, 10);
-    light.position.set(midX, 3.0, midZ);
+    light.position.set(mid.x, 3.0, mid.z);
     light.visible = false;
     light.userData.rgbLight = true;
     group.add(light);

@@ -57,28 +57,55 @@
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);
     const B = ctx.holeWorld(legs[1].col, legs[1].row);
-    const midX = (A.x + B.x) / 2;
-    const midZ = (A.z + B.z) / 2;
-    const LEAD_H = 0.45;
-    const BEAD_R = 0.22;
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    const along = new THREE.Vector3().subVectors(B, A).setY(0).normalize();
+    const FOOT = 0.42;                   // the epoxy drip's foot above the board
+    const R = 0.27, T = 0.085;           // the disc's radius and half-thickness
 
-    // Upright leads, then two leads leaning in to the bead
-    const top = new THREE.Vector3(midX, LEAD_H + BEAD_R * 0.6, midZ);
-    for (const p of [A, B]) {
-      group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z), 0.025));
-      const from = new THREE.Vector3(p.x, LEAD_H, p.z);
-      const to   = from.clone().lerp(top, 0.8);
-      if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to, 0.025));
-    }
+    // The disc stands up across the leads, its printed face toward the
+    // front of the board (+z), or toward +x when the leads run front to back.
+    const head = new THREE.Group();
+    head.position.set(mid.x, FOOT + R * 0.92, mid.z);
+    const toward = new THREE.Vector3(-along.z, 0, along.x);
+    if (toward.z < -1e-6 || (Math.abs(toward.z) < 1e-6 && toward.x < 0)) toward.negate();
+    head.rotation.y = Math.atan2(toward.x, toward.z);   // local +z is the face
+    group.add(head);
 
-    // The bead, a slightly squashed sphere of epoxy
-    const bead = new THREE.Mesh(new THREE.SphereGeometry(BEAD_R, 20, 14), ctx.mat.body(0x2f5d7c));
-    bead.scale.set(1, 1.15, 1);
-    bead.position.copy(top);
+    // The dipped disc: a lens of black epoxy with a drip where the leads go in
+    const bead = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 24),
+                                ctx.mat.surface(0x161617, { roughness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.25 }));
+    bead.scale.set(R, R * 0.96, T);
     bead.castShadow = true;
     bead.userData.thBead = true;
-    group.add(bead);
+    head.add(bead);
     setBead(bead, tempOf(controls));
+    const drip = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.32, R * 0.14, R * 0.4, 24), bead.material);
+    drip.scale.z = 0.55;
+    drip.position.y = -R * 0.86;
+    head.add(drip);
+
+    // "NTC" and its value printed in white on the face
+    const k = values.r25 >= 1000 ? `${+(values.r25 / 1000).toFixed(1)}K` : `${values.r25}`;
+    const label = ctx.print(R * 1.15, R * 0.8, (g, W, H) => {
+      g.fillStyle = '#e9e9e9';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.font = `700 ${Math.round(H * 0.36)}px "Helvetica Neue", Arial, sans-serif`;
+      g.fillText('NTC', W / 2, H * 0.3);
+      g.fillText(k, W / 2, H * 0.72);
+    }, 900);
+    label.rotation.x = 0;
+    label.position.z = T + 0.004;
+    head.add(label);
+
+    // Leads: out of the drip together, then apart and down into the holes
+    const legPath = (hole, sign) => {
+      const top = mid.clone().addScaledVector(along, sign * 0.05).setY(FOOT + 0.06);
+      const end = new THREE.Vector3(hole.x, -0.05, hole.z);
+      return [top, new THREE.Vector3(hole.x, FOOT * 0.45, hole.z), end];
+    };
+    group.add(ctx.bentLead(legPath(A, -1), 0.024, 0.08));
+    group.add(ctx.bentLead(legPath(B, 1), 0.024, 0.08));
 
     return { group, pinPositions: [new THREE.Vector3(A.x, 0, A.z), new THREE.Vector3(B.x, 0, B.z)] };
   }

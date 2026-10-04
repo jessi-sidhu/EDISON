@@ -70,12 +70,12 @@ function holePoint(page, where) {
   }, where);
 }
 
-// The top centre of a part's model on screen, where a person clicks it.
+// The middle of a part's model on screen, where a person clicks it.
 function partPoint(page, type) {
   return page.evaluate(t => {
     const c = App.state.components.find(x => x.type === t);
     const box = new THREE.Box3().setFromObject(c.group);
-    const p = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+    const p = box.getCenter(new THREE.Vector3());
     App.camera.updateMatrixWorld();
     p.project(App.camera);
     const r = App.renderer.domElement.getBoundingClientRect();

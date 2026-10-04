@@ -80,47 +80,85 @@
   // ── The model: a radial can standing on two leads ─────────────
   //  legs[0] = plus, legs[1] = minus. A pale stripe runs down the minus
   //  side of the can, and a red + sits on the board by the plus lead.
+  // The can's radius and height by value: a bigger capacitance is a bigger can.
+  const CAN_SIZES = { '1µF': [0.2, 0.62], '10µF': [0.22, 0.7], '47µF': [0.25, 0.78], '100µF': [0.27, 0.86],
+                      '220µF': [0.3, 0.92], '470µF': [0.33, 1.0], '1000µF': [0.37, 1.1], '4700µF': [0.45, 1.3] };
+
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);   // plus
     const B = ctx.holeWorld(legs[1].col, legs[1].row);   // minus
     const ax = A.x, az = A.z, bx = B.x, bz = B.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    const [R, H] = CAN_SIZES[values.capacitance] || [0.3, 0.92];
+    const BASE = 0.22;                                    // the can's foot above the board
+    const toMinus = new THREE.Vector3(bx - ax, 0, bz - az).normalize();
 
-    const LEAD_H = 0.3;
-    const CAN_H  = 0.9;
-    const CAN_R  = 0.28;
+    // The can: a glossy black sleeve with its crimp groove near the foot and
+    // a rolled top edge, an aluminium lid scored with the vent's cross.
+    const can = new THREE.Group();
+    can.position.set(mid.x, BASE, mid.z);
+    can.rotation.y = Math.atan2(-toMinus.x, -toMinus.z);   // local −z faces the minus lead
+    group.add(can);
+    const outline = [[R * 0.8, 0], [R * 0.95, 0.012], [R, 0.04], [R, 0.1], [R * 0.95, 0.125], [R, 0.15],
+                     [R, H - 0.05], [R * 0.985, H - 0.02], [R * 0.93, H], [R * 0.88, H - 0.008]];
+    const sleeve = new THREE.Mesh(ctx.lathe(outline, 48),
+                                  ctx.mat.surface(0x161618, { roughness: 0.32, clearcoat: 0.7, clearcoatRoughness: 0.2 }));
+    sleeve.castShadow = true;
+    can.add(sleeve);
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.89, R * 0.89, 0.012, 40),
+                               ctx.mat.surface(0xa4a8ae, { metalness: 0.8, roughness: 0.42 }));
+    lid.position.y = H - 0.012;
+    can.add(lid);
+    for (const turn of [0, Math.PI / 2]) {
+      const score = new THREE.Mesh(new THREE.BoxGeometry(R * 1.2, 0.006, 0.022), ctx.mat.surface(0x6c7076, { metalness: 0.7, roughness: 0.5 }));
+      score.position.y = H - 0.004;
+      score.rotation.y = turn + Math.PI / 4;
+      can.add(score);
+    }
+    // The rubber bung under the can
+    const bung = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.82, R * 0.82, 0.02, 32), ctx.mat.surface(0x3a3a3c, { roughness: 0.9 }));
+    bung.position.y = 0.006;
+    can.add(bung);
 
-    // Upright leads, then stubs in to the can's foot
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z)));
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to)); };
-    const toward = (x, z) => {
-      const d = new THREE.Vector3(x - midX, 0, z - midZ);
-      const len = d.length();
-      return len > CAN_R ? d.multiplyScalar(CAN_R * 0.6 / len) : d;
-    };
-    for (const p of [A, B]) {
-      const t = toward(p.x, p.z);
-      stub(new THREE.Vector3(p.x, LEAD_H, p.z), new THREE.Vector3(midX + t.x, LEAD_H, midZ + t.z));
+    // The print: a grey minus stripe down the side facing the minus lead,
+    // its − marks, and the value and voltage up the sleeve beside it.
+    if (!ctx.ghost) {
+      const W = 1024, Hpx = 512;
+      const print = ctx.paint(W, Hpx, (g) => {
+        const stripe = W * 0.16, cx = W / 2;
+        g.fillStyle = '#7f858d';
+        g.fillRect(cx - stripe / 2, 0, stripe, Hpx);
+        g.fillStyle = '#161618';
+        for (let y = Hpx * 0.18; y < Hpx * 0.9; y += Hpx * 0.2) g.fillRect(cx - stripe * 0.22, y, stripe * 0.44, Hpx * 0.035);
+        for (const u of [cx - stripe * 1.35, cx + stripe * 1.35, 0.04 * W, 0.96 * W]) {
+          g.save();
+          g.translate(u, Hpx / 2);
+          g.rotate(-Math.PI / 2);
+          g.fillStyle = '#c9ccd1';
+          g.font = `600 ${Math.round(stripe * 0.42)}px "Helvetica Neue", Arial, sans-serif`;
+          g.textAlign = 'center';
+          g.textBaseline = 'middle';
+          g.fillText(`${values.capacitance} 25V`, 0, 0);
+          g.restore();
+        }
+      });
+      const wrap = new THREE.Mesh(new THREE.CylinderGeometry(R * 1.004, R * 1.004, H - 0.2, 48, 1, true),
+                                  new THREE.MeshStandardMaterial({ map: print, transparent: true, roughness: 0.35 }));
+      wrap.position.y = 0.15 + (H - 0.2) / 2;
+      can.add(wrap);
     }
 
-    // The can: dark blue sleeve, silver top
-    const can = new THREE.Mesh(new THREE.CylinderGeometry(CAN_R, CAN_R, CAN_H, 24), ctx.mat.body(0x1f3a7a));
-    can.position.set(midX, LEAD_H + CAN_H / 2, midZ);
-    can.castShadow = true;
-    group.add(can);
-    const top = new THREE.Mesh(new THREE.CylinderGeometry(CAN_R * 0.92, CAN_R * 0.92, 0.02, 24), ctx.mat.metal(0xb8b8b8));
-    top.position.set(midX, LEAD_H + CAN_H + 0.01, midZ);
-    group.add(top);
-
-    // The minus stripe, down the side of the can that faces the minus lead
-    const minusDir = new THREE.Vector3(bx - midX, 0, bz - midZ).normalize();
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.1, CAN_H * 0.96, 0.1), ctx.mat.label(0xd8d8d8));
-    stripe.position.set(midX + minusDir.x * (CAN_R - 0.03), LEAD_H + CAN_H / 2, midZ + minusDir.z * (CAN_R - 0.03));
-    stripe.rotation.y = Math.atan2(minusDir.x, minusDir.z);
-    group.add(stripe);
+    // Leads: out of the bung 2.5 mm apart, then splayed out to the holes
+    const legPath = (hole, sign) => {
+      const top = mid.clone().addScaledVector(toMinus, sign * 0.12).setY(BASE + 0.02);
+      const end = new THREE.Vector3(hole.x, -0.05, hole.z);
+      if (Math.hypot(top.x - end.x, top.z - end.z) < 0.02) return [top, end];
+      return [top, top.clone().setY(BASE * 0.6), new THREE.Vector3(hole.x, BASE * 0.25, hole.z), end];
+    };
+    group.add(ctx.bentLead(legPath(A, -1), 0.026, 0.05));
+    group.add(ctx.bentLead(legPath(B, 1), 0.026, 0.05));
 
     // A red + on the board by the plus lead
     const plusMat = ctx.mat.label(0xff3333);

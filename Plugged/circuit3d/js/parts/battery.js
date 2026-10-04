@@ -24,75 +24,114 @@
   if (node) module.exports = def;
 })(typeof window !== 'undefined' ? window : null, function () {
 
-  const W = 2.0, H = 2.6, D = 1.4;   // body; the pin positions below set where wires attach
+  // The can, a 9 V block: W wide (x), D deep (z), H to the top plate. Its
+  // print faces +z, towards the camera; the terminals stand on top.
+  const W = 2.0, H = 2.85, D = 1.3;
+  const BAND  = 0.86;                    // the copper top band's height
+  const R     = 0.09;                    // the can's corner radius
+  const POS_X = -0.5, NEG_X = 0.5;       // the + stud (left) and the − socket (right)
+  const PLATE = H + 0.02;                // the black top plate's face, where both terminals stand
+  const STUD_H = 0.3, SOCKET_H = 0.22;   // their heights above the plate
 
-  // ── The model: a black body, a red + post and a blue − ring on top ──
-  //  Drawn in label materials, so its ghost stays fairly opaque.
-  function build(ctx) {
+  // A rounded-rectangle outline w × d, corners r, as a closed Path (or Shape).
+  function roundRect(Kind, w, d, r) {
+    const p = new Kind(), x = w / 2, z = d / 2;
+    p.moveTo(-x + r, -z);
+    p.lineTo(x - r, -z);
+    p.quadraticCurveTo(x, -z, x, -z + r);
+    p.lineTo(x, z - r);
+    p.quadraticCurveTo(x, z, x - r, z);
+    p.lineTo(-x + r, z);
+    p.quadraticCurveTo(-x, z, -x, z - r);
+    p.lineTo(-x, -z + r);
+    p.quadraticCurveTo(-x, -z, -x + r, -z);
+    return p;
+  }
+
+  // ── The model: a 9 V alkaline block ───────────────────────────
+  //  A satin black can under a copper band whose rim stands round a black
+  //  top plate; on the plate the chrome + stud (left) and the hex − socket
+  //  (right) the wires snap to. "9V ALKALINE" (the set voltage) is printed
+  //  on the can and + / − on the band, front and back.
+  function build(ctx, values) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
-    const glow = (hex, emissive, k) => {
-      const m = ctx.mat.label(hex);
-      m.emissive.setHex(emissive);
-      m.emissiveIntensity = k;
+    const black  = ctx.mat.surface(0x121214, { roughness: 0.42, clearcoat: 0.7, clearcoatRoughness: 0.28 });
+    const copper = ctx.mat.surface(0xbb5c1b, { metalness: 0.5, roughness: 0.38, clearcoat: 0.4, clearcoatRoughness: 0.3 });
+    const chrome = ctx.mat.surface(0xd2d4d8, { metalness: 1, roughness: 0.2 });
+    const add = (geo, mat, x, y, z) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(x, y, z);
+      m.castShadow = true;
+      group.add(m);
       return m;
     };
-    const box = (w, h, d, m) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
-    const cylinder = (r, h, segs, m) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, segs), m);
-    const ring = (r, tube, radial, segs, m) => {
-      const o = new THREE.Mesh(new THREE.TorusGeometry(r, tube, radial, segs), m);
-      o.rotation.x = Math.PI / 2;
-      return o;
-    };
 
-    // Body and snap connector platform
-    const body = box(W, H, D, ctx.mat.label(0x111111));
-    body.position.y = H / 2;
-    body.castShadow = true;
-    group.add(body);
-    const snap = box(W * 0.65, 0.22, D * 0.55, ctx.mat.label(0x333333));
-    snap.position.set(0, H + 0.11, 0);
-    group.add(snap);
+    // The black can, up to the top plate
+    const low = H - BAND;
+    add(ctx.roundBox(W, PLATE, D, R), black, 0, PLATE / 2, 0);
 
-    // + terminal (left): red post, red disc, white "+", red halo
-    const posCap = cylinder(0.13, 0.30, 14, glow(0xff3333, 0x880000, 0.5));
-    posCap.position.set(-0.32, H + 0.37, 0);
-    const posDisc = cylinder(0.19, 0.07, 16, glow(0xff1111, 0xaa0000, 0.6));
-    posDisc.position.set(-0.32, H + 0.55, 0);
-    const plusV = box(0.05, 0.025, 0.26, ctx.mat.label(0xffffff));
-    const plusH = box(0.26, 0.025, 0.05, ctx.mat.label(0xffffff));
-    plusV.position.set(-0.32, H + 0.60, 0);
-    plusH.position.set(-0.32, H + 0.60, 0);
-    const posHalo = ring(0.26, 0.04, 8, 20, glow(0xff2222, 0xcc0000, 0.9));
-    posHalo.position.set(-0.32, H + 0.23, 0);
-    group.add(posCap, posDisc, plusV, plusH, posHalo);
+    // The copper band: a sleeve a hair proud of the can, its rounded rim
+    // standing LIP over the plate
+    const BEV = 0.02, LIP = 0.06;
+    const sleeve = roundRect(THREE.Shape, W + 0.012 - 2 * BEV, D + 0.012 - 2 * BEV, R);
+    sleeve.holes.push(roundRect(THREE.Path, W - 0.16, D - 0.16, 0.05));
+    const sleeveGeo = new THREE.ExtrudeGeometry(sleeve, { depth: BAND + LIP - 2 * BEV, bevelEnabled: true, bevelThickness: BEV,
+                                                          bevelSize: BEV, bevelSegments: 3, curveSegments: 6 });
+    sleeveGeo.rotateX(-Math.PI / 2);
+    add(sleeveGeo, copper, 0, low + BEV, 0);
 
-    // − terminal (right): blue base, blue ring, white "−", blue halo
-    const negBase = cylinder(0.28, 0.10, 18, glow(0x2244cc, 0x001166, 0.4));
-    negBase.position.set(0.32, H + 0.10, 0);
-    const negRing = ring(0.24, 0.09, 9, 18, glow(0x3366ff, 0x001188, 0.5));
-    negRing.position.set(0.32, H + 0.24, 0);
-    const minus = box(0.28, 0.025, 0.07, ctx.mat.label(0xffffff));
-    minus.position.set(0.32, H + 0.14, 0);
-    const negHalo = ring(0.36, 0.04, 8, 20, glow(0x2255ff, 0x0033cc, 0.9));
-    negHalo.position.set(0.32, H + 0.23, 0);
-    group.add(negBase, negRing, minus, negHalo);
+    // + : the male stud, a chrome post on a flange with a waist the snap
+    // grips, its crown dished
+    add(ctx.lathe([[0, 0], [0.21, 0], [0.21, 0.025], [0.17, 0.05], [0.14, 0.06], [0.135, 0.14], [0.12, 0.16],
+                   [0.12, 0.18], [0.155, 0.21], [0.165, 0.25], [0.15, 0.285], [0.12, STUD_H], [0.09, 0.292],
+                   [0.07, 0.27], [0, 0.265]], 40), chrome, POS_X, PLATE, 0);
 
-    // +/− on both long faces, so one shows from any camera angle
-    for (const fz of [D / 2 + 0.013, -(D / 2 + 0.013)]) {
-      const pV = box(0.09, 0.46, 0.02, glow(0xff2222, 0xaa0000, 0.7));
-      const pH = box(0.46, 0.09, 0.02, glow(0xff2222, 0xaa0000, 0.7));
-      pV.position.set(-0.36, H * 0.48, fz);
-      pH.position.set(-0.36, H * 0.48, fz);
-      const nH = box(0.46, 0.09, 0.02, glow(0x2255ff, 0x1133cc, 0.7));
-      nH.position.set(0.36, H * 0.48, fz);
-      group.add(pV, pH, nH);
+    // − : the female socket, a satin hex nut with a rolled lip round its dark mouth
+    const nickel = ctx.mat.surface(0xc4c7cc, { metalness: 0.85, roughness: 0.34 });
+    const hex = add(new THREE.CylinderGeometry(0.27, 0.27, 0.12, 6), nickel, NEG_X, PLATE + 0.06, 0);
+    hex.rotation.y = Math.PI / 6;
+    add(ctx.lathe([[0.12, 0], [0.21, 0], [0.22, 0.04], [0.21, 0.08], [0.18, 0.1], [0.145, 0.095],
+                   [0.125, 0.07], [0.12, 0.02]], 40), chrome, NEG_X, PLATE + 0.12, 0);
+    add(new THREE.CylinderGeometry(0.122, 0.122, 0.02, 28), ctx.mat.surface(0x2a2b2e, { metalness: 0.6, roughness: 0.5 }),
+        NEG_X, PLATE + 0.13, 0);
+
+    // The print, on both broad faces: the turn puts the back one's + under the stud too
+    if (!ctx.ghost) {
+      const volts = `${+Number(values && values.voltage != null ? values.voltage : 9).toFixed(1)}V`;
+      for (const back of [false, true]) {
+        const z = back ? -(D / 2 + 0.004) : D / 2 + 0.004, turn = back ? Math.PI : 0;
+        const can = ctx.print(W - 0.3, low - 0.3, (g, w, h) => {
+          g.fillStyle = '#eef0f2';
+          g.textAlign = 'center';
+          g.textBaseline = 'alphabetic';
+          g.font = `700 ${Math.round(h * 0.34)}px "Helvetica Neue", Arial, sans-serif`;
+          g.fillText(volts, w / 2, h * 0.5);
+          g.font = `600 ${Math.round(h * 0.085)}px "Helvetica Neue", Arial, sans-serif`;
+          g.letterSpacing = `${Math.round(h * 0.012)}px`;
+          g.fillText('ALKALINE', w / 2, h * 0.66);
+        }, 400);
+        can.rotation.set(0, turn, 0);
+        can.position.set(0, low / 2 + 0.06, z);
+        group.add(can);
+        const band = ctx.print(W - 0.2, BAND - 0.2, (g, w, h) => {
+          g.fillStyle = '#1a1410';
+          const at = x => (back ? -x : x) / (W - 0.2) * w + w / 2;
+          const t = h * 0.1, l = h * 0.42;
+          g.fillRect(at(POS_X) - l / 2, h * 0.55 - t / 2, l, t);
+          g.fillRect(at(POS_X) - t / 2, h * 0.55 - l / 2, t, l);
+          g.fillRect(at(NEG_X) - l / 2, h * 0.55 - t / 2, l, t);
+        }, 400);
+        band.rotation.set(0, turn, 0);
+        band.position.set(0, H - BAND / 2 - 0.02, back ? z - 0.006 : z + 0.006);
+        group.add(band);
+      }
     }
 
     return {
       group,
-      pinPositions: [new THREE.Vector3(-0.32, H + 0.54, 0),    // '0', +
-                     new THREE.Vector3(0.32, H + 0.24, 0)],    // '1', −
+      pinPositions: [new THREE.Vector3(POS_X, PLATE + STUD_H, 0),     // '0', + (the stud's crown)
+                     new THREE.Vector3(NEG_X, PLATE + SOCKET_H, 0)],  // '1', − (the socket's lip)
     };
   }
 

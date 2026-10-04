@@ -74,32 +74,60 @@
     const group = new THREE.Group();
     const at = legs.map(l => ctx.holeWorld(l.col, l.row));
     const mid = at[1];
-    const LEAD_H = 0.30;
+    const BASE = 0.2;                    // the body's underside above the board
+    const BODY_H = 0.46, KNOB_R = 0.22, KNOB_H = 0.34;
 
-    // Upright leads from each hole to the body
-    for (const p of at) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z), 0.025));
+    // The body turns with the part: local +x runs pin 1 → pin 3.
+    const right = new THREE.Vector3().subVectors(at[2], at[0]).normalize();
+    const frame = new THREE.Group();
+    frame.position.set(mid.x, 0, mid.z);
+    frame.rotation.y = Math.atan2(-right.z, right.x);
+    group.add(frame);
 
-    // Square body over the three legs
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.30, 0.95), ctx.mat.body(0x2b5fb3));
-    body.position.set(mid.x, LEAD_H + 0.15, mid.z);
+    // Three pins, straight down into the holes
+    for (const p of at) group.add(ctx.bentLead([new THREE.Vector3(p.x, BASE + 0.05, p.z), new THREE.Vector3(p.x, -0.05, p.z)], 0.03));
+
+    // The blue body: a rounded block, a little deeper than it is wide
+    const body = new THREE.Mesh(ctx.roundBox(0.94, BODY_H, 0.86, 0.06),
+                                ctx.mat.surface(0x1a4fb0, { roughness: 0.4, clearcoat: 0.3, clearcoatRoughness: 0.3 }));
+    body.position.set(0, BASE + BODY_H / 2, -0.06);
     body.castShadow = true;
-    group.add(body);
+    frame.add(body);
+    const top = BASE + BODY_H;
 
-    // Shaft and knob; the knob carries a white pointer
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.10, 0.14, 12), ctx.mat.metal());
-    shaft.position.set(mid.x, LEAD_H + 0.37, mid.z);
-    group.add(shaft);
+    // The threaded bushing the shaft turns in
+    const bush = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.16, 0.07, 28),
+                                ctx.mat.surface(0x2a2a2c, { roughness: 0.5 }));
+    bush.position.set(0, top + 0.035, -0.06);
+    frame.add(bush);
+
+    // The knob: black, knurled round its side, a white line on top for the wiper
     const knob = new THREE.Group();
-    knob.position.set(mid.x, LEAD_H + 0.56, mid.z);
+    knob.position.set(0, top + 0.07, -0.06);
     knob.rotation.y = knobAngle(positionOf(controls));
     knob.userData.potKnob = true;
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.32, 0.24, 20), ctx.mat.body(0x333333));
+    const knurl = new THREE.CylinderGeometry(KNOB_R, KNOB_R, KNOB_H, 72, 1);
+    const pos = knurl.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i), r = Math.hypot(x, z);
+      if (r < KNOB_R * 0.99) continue;   // the caps' centres
+      const k = (Math.floor(((Math.atan2(z, x) + Math.PI) / (Math.PI * 2)) * 72) % 2) ? 1 : 0.94;
+      pos.setX(i, x * k);
+      pos.setZ(i, z * k);
+    }
+    knurl.computeVertexNormals();
+    const cap = new THREE.Mesh(knurl, ctx.mat.surface(0x19191b, { roughness: 0.55, clearcoat: 0.2 }));
+    cap.position.y = KNOB_H / 2;
     cap.castShadow = true;
     knob.add(cap);
-    const pointer = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.24), ctx.mat.label(0xf5f5f5));
-    pointer.position.set(0, 0.125, -0.13);
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(KNOB_R * 0.86, KNOB_R * 0.94, 0.04, 40),
+                                 ctx.mat.surface(0x1f1f21, { roughness: 0.35, clearcoat: 0.5 }));
+    crown.position.y = KNOB_H + 0.02;
+    knob.add(crown);
+    const pointer = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.012, KNOB_R * 0.8), ctx.mat.surface(0xf2f2f2, { roughness: 0.4 }));
+    pointer.position.set(0, KNOB_H + 0.042, -KNOB_R * 0.42);
     knob.add(pointer);
-    group.add(knob);
+    frame.add(knob);
 
     return { group, pinPositions: at.map(p => new THREE.Vector3(p.x, 0, p.z)) };
   }

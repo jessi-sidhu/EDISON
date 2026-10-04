@@ -93,9 +93,19 @@
     return m.current >= OPEN_MA ? ['LED: current too low.'] : [];
   }
 
-  // ── The model: two leads, stubs, a dark collar, a coloured dome ──
+  // ── The model: a 5 mm LED. A tinted epoxy dome on a flange with the
+  //  cathode's flat, the lead frame showing through it (the cathode's
+  //  anvil and reflector cup, the anode's post), and two tinned leads that
+  //  leave the flange 2.54 mm apart and splay out to their holes.
   //  legs[0] = cathode (−), legs[1] = anode (+). The dome is marked
-  //  userData.ledDome and the glow light userData.ledLight, for update().
+  //  userData.ledDome and the glow light userData.ledLight, for update();
+  //  the flange shares the dome's material, so it glows with it. ──
+  const BASE_H = 0.26;                    // the flange's underside above the board
+  const DOME_R = 0.31, FLANGE_R = 0.36, FLANGE_H = 0.09, BARREL_H = 0.46;
+  const LEG_X  = 0.2;                     // each lead's offset from the centre where it leaves the flange
+  const FLAT   = 0.8;                     // the cathode flat, as a fraction of the flange radius
+  const CLEAR  = 0.4, LIT_OPACITY = 0.92;   // the epoxy's opacity dark (see-through) and lit
+
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
@@ -103,48 +113,76 @@
     const A = ctx.holeWorld(legs[0].col, legs[0].row);   // cathode
     const B = ctx.holeWorld(legs[1].col, legs[1].row);   // anode
     const ax = A.x, az = A.z, bx = B.x, bz = B.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    const toCathode = new THREE.Vector3(ax - bx, 0, az - bz).normalize();
 
-    const LEAD_H   = 0.88;   // both leads the same height
-    const COLLAR_R = 0.185;
+    // The body is drawn with local +x toward the cathode.
+    const body = new THREE.Group();
+    body.position.set(mid.x, 0, mid.z);
+    body.rotation.y = Math.atan2(-toCathode.z, toCathode.x);
+    group.add(body);
 
-    // Upright leads
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z), 0.023));
-
-    // Stubs from each lead top to the collar edge, so the dome doesn't float
-    const isHoriz = Math.abs(az - bz) < 0.01;
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to, 0.018)); };
-    if (isHoriz) {
-      stub(new THREE.Vector3(ax, LEAD_H, az), new THREE.Vector3(midX + Math.sign(ax - midX) * COLLAR_R, LEAD_H, az));
-      stub(new THREE.Vector3(bx, LEAD_H, bz), new THREE.Vector3(midX + Math.sign(bx - midX) * COLLAR_R, LEAD_H, bz));
-    } else {
-      stub(new THREE.Vector3(ax, LEAD_H, az), new THREE.Vector3(ax, LEAD_H, midZ + Math.sign(az - midZ) * COLLAR_R));
-      stub(new THREE.Vector3(bx, LEAD_H, bz), new THREE.Vector3(bx, LEAD_H, midZ + Math.sign(bz - midZ) * COLLAR_R));
-    }
-
-    // Collar, with a flat cut on the cathode side
-    const collar = new THREE.Mesh(new THREE.CylinderGeometry(COLLAR_R, COLLAR_R, 0.11, 18), ctx.mat.body(0x2a2a2a));
-    collar.position.set(midX, LEAD_H - 0.04, midZ);
-    group.add(collar);
-    const catDir = new THREE.Vector3(ax - midX, 0, az - midZ).normalize();
-    const cut = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.12, 0.08), ctx.mat.body(0x1a1a1a));
-    cut.position.set(midX + catDir.x * 0.14, LEAD_H - 0.04, midZ + catDir.z * 0.14);
-    group.add(cut);
-
-    // Dome: see-through, glowing faintly in its own colour
-    const glass = ctx.mat.glass(color, 0.88);
+    // Epoxy: water-clear with a tint of its colour, glowing faintly in it
+    const glass = ctx.mat.surface(color, { opacity: CLEAR, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.04,
+                                           envMapIntensity: 1.2, depthWrite: false });
     glass.emissive.setHex(color);
     glass.emissiveIntensity = 0.45;
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(COLLAR_R, 22, 11, 0, Math.PI * 2, 0, Math.PI * 0.55), glass);
-    dome.position.set(midX, LEAD_H + 0.04, midZ);
+
+    // The flange: a disc with the flat cut on the cathode side
+    const a = Math.acos(FLAT);
+    const rim = new THREE.Shape();
+    rim.absarc(0, 0, FLANGE_R, a, Math.PI * 2 - a, false);
+    rim.closePath();
+    const flangeGeo = new THREE.ExtrudeGeometry(rim, { depth: FLANGE_H, bevelEnabled: true, bevelThickness: 0.012,
+                                                       bevelSize: 0.012, bevelSegments: 2, curveSegments: 28 });
+    flangeGeo.rotateX(-Math.PI / 2);
+    const flange = new THREE.Mesh(flangeGeo, glass);
+    flange.position.y = BASE_H;
+    flange.castShadow = true;
+    body.add(flange);
+
+    // The dome: a short barrel and a hemisphere
+    const outline = [[DOME_R * 0.97, 0], [DOME_R, 0.015], [DOME_R, BARREL_H]];
+    for (let i = 1; i <= 14; i++) {
+      const t = (i / 14) * Math.PI / 2;
+      outline.push([DOME_R * Math.cos(t), BARREL_H + DOME_R * Math.sin(t)]);
+    }
+    const dome = new THREE.Mesh(ctx.lathe(outline, 40), glass);
+    dome.position.y = BASE_H + FLANGE_H;
     dome.castShadow = true;
     dome.userData.ledDome = true;
-    group.add(dome);
+    body.add(dome);
+
+    // The lead frame inside: the cathode's wide anvil with its cup, the anode's thin post
+    // (bright silver, so it reads through the tinted epoxy)
+    const frame = () => ctx.mat.surface(0xe2e4e8, { metalness: 0.55, roughness: 0.3 });
+    const inside = (w, h, d, x, y) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frame());
+      m.position.set(x, y, 0);
+      body.add(m);
+    };
+    const floor = BASE_H + FLANGE_H;
+    inside(0.05, 0.3, 0.03, LEG_X, floor + 0.15);
+    inside(0.17, 0.12, 0.03, LEG_X * 0.55, floor + 0.32);
+    inside(0.04, 0.34, 0.03, -LEG_X, floor + 0.17);
+    inside(0.1, 0.035, 0.03, -LEG_X * 0.75, floor + 0.34);
+    const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.035, 0.06, 16), frame());
+    cup.position.set(LEG_X * 0.35, floor + 0.41, 0);
+    body.add(cup);
+
+    // Leads: straight down from the flange, then splayed out to the holes
+    const legPath = (hole, sign) => {
+      const top = mid.clone().addScaledVector(toCathode, sign * LEG_X).setY(BASE_H + 0.02);
+      const end = new THREE.Vector3(hole.x, -0.05, hole.z);
+      if (Math.hypot(top.x - end.x, top.z - end.z) < 0.02) return [top, end];
+      return [top, top.clone().setY(BASE_H * 0.62), new THREE.Vector3(hole.x, BASE_H * 0.3, hole.z), end];
+    };
+    group.add(ctx.bentLead(legPath(A, 1), 0.024, 0.05));
+    group.add(ctx.bentLead(legPath(B, -1), 0.024, 0.05));
 
     // The glow light, off until update() lights the LED
     const light = new THREE.PointLight(color, 8.0, 10);
-    light.position.set(midX, 3.0, midZ);
+    light.position.set(mid.x, 3.0, mid.z);
     light.visible = false;
     light.userData.ledLight = true;
     group.add(light);
@@ -177,7 +215,7 @@
     group.traverse(o => {
       if (o.userData.ledDome) {
         o.material.emissiveIntensity = lit ? glowFor(m.current) : DARK_GLOW;
-        o.material.opacity = lit ? 1.0 : 0.88;
+        o.material.opacity = lit ? LIT_OPACITY : CLEAR;
       }
       if (o.userData.ledLight) o.visible = lit;
     });

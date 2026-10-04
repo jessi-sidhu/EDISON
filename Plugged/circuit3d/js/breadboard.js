@@ -276,9 +276,14 @@
     chan.position.set(0, 0.002, 0);
     bbGroup.add(chan);
 
-    // ── 5. Holes  (InstancedMesh — tapered for socket look) ──
+    // ── 5. Holes  (InstancedMesh) ──
+    // Square sockets, their dark tops just above the face (and the rail
+    // stripes), so the board reads as holes from any angle, not as posts.
     const totalHoles = COLS * ALL_ROWS.length;
-    const holeGeo    = new THREE.CylinderGeometry(0.058, 0.046, BOARD_THICK + 0.04, 8);
+    const HOLE_TOP   = 0.008;
+    const holeGeo    = new THREE.CylinderGeometry(0.074, 0.074, BOARD_THICK, 4);
+    holeGeo.rotateY(Math.PI / 4);
+    holeGeo.translate(0, HOLE_TOP - BOARD_THICK / 2, 0);
     const holeMat    = new THREE.MeshLambertMaterial({ color: 0x0c0a08 });
     const holesMesh  = new THREE.InstancedMesh(holeGeo, holeMat, totalHoles);
     holesMesh.name   = 'bb-holes';

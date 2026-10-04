@@ -37,7 +37,7 @@ async function askForBuild(page, reply) {
 
 // Colours of the preview ghosts, read from their materials. The resistor
 // ghost is the one with the tan body (0xd4a96a); its bands are every other
-// colour but the grey leads. The LED ghost is the one with the dark collar.
+// colour but the grey leads. The LED ghost is the one with the LED's dome (userData.ledDome).
 function ghostColours(page) {
   return page.evaluate(() => {
     const ghosts = App.scene.children.slice(window.__before);
@@ -48,7 +48,9 @@ function ghostColours(page) {
     };
     const all = ghosts.map(colours);
     const resistor = all.find(c => c.includes(0xd4a96a));
-    const led = all.find(c => c.includes(0x2a2a2a));
+    const hasDome = g => { let d = false; g.traverse(o => { if (o.userData.ledDome) d = true; }); return d; };
+    const ledGhost = ghosts.find(hasDome);
+    const led = ledGhost ? colours(ledGhost) : undefined;
     return {
       bands: resistor ? resistor.filter(h => h !== 0xd4a96a && h !== 0xcccccc) : null,
       led,

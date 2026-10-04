@@ -515,7 +515,7 @@ test('a photo dropped on the chat opens the corner step; with it open, Backspace
   const at = await page.evaluate(() => {
     const c = App.state.components.find(x => x.label === 'R1');
     const box = new THREE.Box3().setFromObject(c.group);
-    const p = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+    const p = box.getCenter(new THREE.Vector3());
     App.camera.updateMatrixWorld();
     p.project(App.camera);
     const r = App.renderer.domElement.getBoundingClientRect();

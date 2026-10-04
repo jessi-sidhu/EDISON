@@ -57,9 +57,11 @@
   const report = (r, m) =>
     `${r.values.ratedVoltage} V bulb ${pct(m)}% bright, ${m.power.toFixed(2)} W`;
 
-  // ── The model: two leads, stubs to a metal base, a round glass bulb ──
-  //  The glass is marked userData.bulbGlass and the glow light
-  //  userData.bulbLight, for update().
+  // ── The model: a miniature bulb. A ridged nickel base standing on two
+  //  pins, a clear pear-shaped glass envelope, and the coiled filament on
+  //  its two support wires inside. The glass is marked userData.bulbGlass,
+  //  the filament userData.bulbFilament and the glow light
+  //  userData.bulbLight, for update(). ──
   const GLASS = 0xfff1c9, GLOW = 0xffa726;   // pale glass, warm orange-yellow glow
   const DARK_GLOW = 0.05, FULL_GLOW = 0.9, FULL_LIGHT = 1.5;
   function build(ctx, values, controls, legs) {
@@ -68,52 +70,68 @@
     const A = ctx.holeWorld(legs[0].col, legs[0].row);
     const B = ctx.holeWorld(legs[1].col, legs[1].row);
     const ax = A.x, az = A.z, bx = B.x, bz = B.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    const along = new THREE.Vector3(bx - ax, 0, bz - az).normalize();
+    const FOOT = 0.32, BASE_R = 0.14, BASE_H = 0.26;
 
-    const isHoriz = Math.abs(az - bz) < 0.01;
-    const LEAD_H  = 0.5;
-    const BASE_R  = 0.13;
-    const BASE_H  = 0.22;
-    const GLASS_R = 0.3;
-
-    // Upright leads from the holes to base height
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z)));
-
-    // Stubs from the lead tops to the base
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to)); };
-    if (isHoriz) {
-      stub(new THREE.Vector3(ax, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(ax - midX) * BASE_R, LEAD_H, midZ));
-      stub(new THREE.Vector3(bx, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(bx - midX) * BASE_R, LEAD_H, midZ));
-    } else {
-      stub(new THREE.Vector3(midX, LEAD_H, az), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(az - midZ) * BASE_R));
-      stub(new THREE.Vector3(midX, LEAD_H, bz), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(bz - midZ) * BASE_R));
-    }
-
-    // Metal base, upright at the middle
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(BASE_R, BASE_R, BASE_H, 16), ctx.mat.metal());
-    base.position.set(midX, LEAD_H + BASE_H / 2 - 0.04, midZ);
+    // The base: nickel, with crimp rings
+    const nickel = ctx.mat.surface(0xbfc2c6, { metalness: 0.85, roughness: 0.35 });
+    const base = new THREE.Mesh(ctx.lathe([[BASE_R * 0.7, 0], [BASE_R, 0.03], [BASE_R, BASE_H - 0.02], [BASE_R * 0.92, BASE_H]], 32), nickel);
+    base.position.set(mid.x, FOOT, mid.z);
     base.castShadow = true;
     group.add(base);
+    for (const y of [0.08, 0.14]) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(BASE_R, 0.012, 6, 32), nickel);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.set(mid.x, FOOT + y, mid.z);
+      group.add(ring);
+    }
 
-    // Glass: see-through and dark until update() lights it
-    const glass = ctx.mat.glass(GLASS, 0.5);
+    // The glass: a clear pear shape, see-through and dark until update() lights it
+    const outline = [[BASE_R * 0.9, 0], [BASE_R * 0.95, 0.05], [0.16, 0.12], [0.24, 0.24], [0.27, 0.36], [0.26, 0.46],
+                     [0.21, 0.56], [0.12, 0.62], [0, 0.64]];
+    const glass = ctx.mat.surface(GLASS, { opacity: 0.5, roughness: 0.04, clearcoat: 1, clearcoatRoughness: 0.03,
+                                           envMapIntensity: 1.2, depthWrite: false });
     glass.emissive.setHex(GLOW);
     glass.emissiveIntensity = DARK_GLOW;
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(GLASS_R, 22, 14), glass);
-    bulb.position.set(midX, LEAD_H + BASE_H + GLASS_R * 0.8, midZ);
+    const bulb = new THREE.Mesh(ctx.lathe(outline, 40), glass);
+    bulb.position.set(mid.x, FOOT + BASE_H, mid.z);
     bulb.castShadow = true;
     bulb.userData.bulbGlass = true;
     group.add(bulb);
 
-    // Filament: a short dark wire inside the glass
-    const fil = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.02), ctx.mat.body(0x3a2a1a));
-    fil.position.copy(bulb.position);
-    group.add(fil);
+    // Inside: two support wires up from the base and the coiled filament across them
+    const y0 = FOOT + BASE_H, span = 0.11;
+    for (const s of [-1, 1]) {
+      group.add(ctx.bentLead([mid.clone().addScaledVector(along, s * 0.05).setY(y0),
+                              mid.clone().addScaledVector(along, s * span).setY(y0 + 0.34)], 0.008, 0.02));
+    }
+    const coil = [];
+    for (let i = 0; i <= 120; i++) {
+      const t = i / 120, a = t * Math.PI * 2 * 9;
+      coil.push(mid.clone().addScaledVector(along, -span + 2 * span * t).add(new THREE.Vector3(0, y0 + 0.34 + 0.018 * Math.sin(a), 0))
+                   .addScaledVector(new THREE.Vector3(-along.z, 0, along.x), 0.018 * Math.cos(a)));
+    }
+    const filament = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(coil), 240, 0.005, 5, false),
+                                    ctx.mat.surface(0x4a3a2a, { roughness: 0.6 }));
+    filament.material.emissive.setHex(0xffb347);
+    filament.material.emissiveIntensity = 0;
+    filament.userData.bulbFilament = true;
+    group.add(filament);
+
+    // Two pins out of the base, splayed to the holes
+    const legPath = (hole, sign) => {
+      const top = mid.clone().addScaledVector(along, sign * 0.07).setY(FOOT + 0.02);
+      const end = new THREE.Vector3(hole.x, -0.05, hole.z);
+      if (Math.hypot(top.x - end.x, top.z - end.z) < 0.02) return [top, end];
+      return [top, top.clone().setY(FOOT * 0.6), new THREE.Vector3(hole.x, FOOT * 0.25, hole.z), end];
+    };
+    group.add(ctx.bentLead(legPath(A, -1), 0.026, 0.05));
+    group.add(ctx.bentLead(legPath(B, 1), 0.026, 0.05));
 
     // The glow light, off until update() lights the bulb
     const light = new THREE.PointLight(GLOW, 0, 6);
-    light.position.set(midX, 3.0, midZ);
+    light.position.set(mid.x, 3.0, mid.z);
     light.visible = false;
     light.userData.bulbLight = true;
     group.add(light);
@@ -131,6 +149,7 @@
         o.material.emissiveIntensity = DARK_GLOW + (FULL_GLOW - DARK_GLOW) * b;
         o.material.opacity = b > 0 ? 0.5 + 0.4 * b : 0.5;
       }
+      if (o.userData.bulbFilament) o.material.emissiveIntensity = 2.5 * b;
       if (o.userData.bulbLight) {
         o.visible = b > 0;
         o.intensity = FULL_LIGHT * b;

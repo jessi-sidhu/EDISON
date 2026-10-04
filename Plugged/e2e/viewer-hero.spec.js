@@ -342,7 +342,8 @@ function installHeroSpy() {
     const pos = dome.geometry.attributes.position, verts = [];
     for (let i = 0; i < pos.count; i++) verts.push(px(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(dome.matrixWorld)));
     const at = px(dome.getWorldPosition(new THREE.Vector3()));
-    const top = px(dome.localToWorld(new THREE.Vector3(0, dome.geometry.parameters.radius, 0)));
+    if (!dome.geometry.boundingBox) dome.geometry.computeBoundingBox();
+    const top = px(dome.localToWorld(new THREE.Vector3(0, dome.geometry.boundingBox.max.y, 0)));
     // The board: the box of its own meshes as built, and the middles of its
     // two long top edges (the casing callout's).
     const G = App.BOARD_GEOMETRY;

@@ -78,7 +78,7 @@ async function drawn(page) {
   await page.waitForFunction(f => App.renderer.info.render.frame > f, before);
 }
 
-// Click the top centre of a part's model, the way a person selects it; first
+// Click the middle of a part's model, the way a person selects it; first
 // check the point is on the canvas (not under the lab sheet) and the part is
 // what the click hits.
 async function clickPart(page, label) {
@@ -86,7 +86,7 @@ async function clickPart(page, label) {
   const at = await page.evaluate(l => {
     const c = App.state.components.find(x => x.label === l);
     const box = new THREE.Box3().setFromObject(c.group);
-    const p = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+    const p = box.getCenter(new THREE.Vector3());
     App.camera.updateMatrixWorld();
     p.project(App.camera);
     const r = App.renderer.domElement.getBoundingClientRect();

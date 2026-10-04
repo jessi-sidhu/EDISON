@@ -56,45 +56,62 @@
     const group = new THREE.Group();
     const A = ctx.holeWorld(legs[0].col, legs[0].row);
     const B = ctx.holeWorld(legs[1].col, legs[1].row);
-    const midX = (A.x + B.x) / 2;
-    const midZ = (A.z + B.z) / 2;
-    const isHoriz = Math.abs(A.z - B.z) < 0.01;
-    const LEAD_H = 0.40;
-    const DISC_R = 0.30;
+    const mid = A.clone().add(B).multiplyScalar(0.5);
+    const along = new THREE.Vector3().subVectors(B, A).setY(0).normalize();
+    const HEAD = 0.5;                    // the disc's underside above the board
+    const DISC_R = 0.3, DISC_H = 0.1;
 
-    // Upright leads, then stubs in to the disc's rim
-    for (const p of [A, B]) group.add(ctx.lead(new THREE.Vector3(p.x, 0, p.z), new THREE.Vector3(p.x, LEAD_H, p.z), 0.025));
-    const stub = (from, to) => { if (from.distanceTo(to) > 0.01) group.add(ctx.lead(from, to, 0.025)); };
-    const off = DISC_R * 0.8;
-    if (isHoriz) {
-      stub(new THREE.Vector3(A.x, LEAD_H, midZ), new THREE.Vector3(midX - Math.sign(midX - A.x) * off, LEAD_H, midZ));
-      stub(new THREE.Vector3(B.x, LEAD_H, midZ), new THREE.Vector3(midX + Math.sign(B.x - midX) * off, LEAD_H, midZ));
-    } else {
-      stub(new THREE.Vector3(midX, LEAD_H, A.z), new THREE.Vector3(midX, LEAD_H, midZ - Math.sign(midZ - A.z) * off));
-      stub(new THREE.Vector3(midX, LEAD_H, B.z), new THREE.Vector3(midX, LEAD_H, midZ + Math.sign(B.z - midZ) * off));
-    }
+    // The head turns with the part: local +x runs lead 1 → lead 2.
+    const head = new THREE.Group();
+    head.position.set(mid.x, HEAD, mid.z);
+    head.rotation.y = Math.atan2(-along.z, along.x);
+    group.add(head);
 
-    // The disc body, flat on top of the leads
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(DISC_R, DISC_R, 0.14, 24), ctx.mat.body(0x8a4b2a));
-    body.position.set(midX, LEAD_H + 0.07, midZ);
-    body.castShadow = true;
-    group.add(body);
+    // The ceramic disc: a pale rim with rounded edges
+    const outline = [[0, 0], [DISC_R * 0.92, 0], [DISC_R, DISC_H * 0.3], [DISC_R, DISC_H * 0.7], [DISC_R * 0.94, DISC_H], [0, DISC_H]];
+    const disc = new THREE.Mesh(ctx.lathe(outline, 44), ctx.mat.surface(0xe7d7bf, { roughness: 0.6 }));
+    disc.castShadow = true;
+    head.add(disc);
 
-    // The face: a lighter disc on top that brightens with the light
-    const face = new THREE.Mesh(new THREE.CylinderGeometry(DISC_R * 0.88, DISC_R * 0.88, 0.02, 24), ctx.mat.body(0xd9a441));
-    face.position.set(midX, LEAD_H + 0.15, midZ);
+    // The face: the orange CdS film and its interleaved serpentine track,
+    // under a clear glaze. It brightens with the light (setFace).
+    const film = ctx.ghost ? null : ctx.paint(512, 512, (g, W, H) => {
+      g.fillStyle = '#d9772f';
+      g.beginPath(); g.arc(W / 2, H / 2, W / 2, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#6b2e14';
+      g.lineWidth = W * 0.035;
+      g.lineJoin = 'round';
+      const n = 7, top = H * 0.16, bottom = H * 0.84;
+      g.beginPath();
+      for (let i = 0; i <= n; i++) {
+        const x = W * 0.16 + (W * 0.68) * i / n;
+        if (i === 0) g.moveTo(x, top);
+        if (i % 2 === 0) { g.lineTo(x, top); g.lineTo(x, bottom); }
+        else { g.lineTo(x, bottom); g.lineTo(x, top); }
+      }
+      g.stroke();
+      g.fillStyle = '#b9bcc2';   // the two electrode pads
+      g.fillRect(W * 0.06, H * 0.3, W * 0.08, H * 0.4);
+      g.fillRect(W * 0.86, H * 0.3, W * 0.08, H * 0.4);
+    });
+    const face = new THREE.Mesh(new THREE.CircleGeometry(DISC_R * 0.86, 44),
+                                ctx.mat.surface(0xffffff, Object.assign({ roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08 },
+                                                                        film ? { map: film, emissiveMap: film } : {})));
+    face.rotation.x = -Math.PI / 2;
+    face.position.y = DISC_H + 0.002;
     face.userData.ldrFace = true;
-    group.add(face);
+    head.add(face);
     setFace(face, lightOf(controls));
 
-    // The zig-zag track across the face
-    const track = ctx.mat.label(0x5a2d14);
-    for (let i = -2; i <= 2; i++) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.34 - Math.abs(i) * 0.05, 0.012, 0.03), track);
-      bar.position.set(midX, LEAD_H + 0.165, midZ + i * 0.08);
-      if (!isHoriz) { bar.rotation.y = Math.PI / 2; bar.position.set(midX + i * 0.08, LEAD_H + 0.165, midZ); }
-      group.add(bar);
-    }
+    // Leads: out of the disc's underside at its electrodes, splayed to the holes
+    const legPath = (hole, sign) => {
+      const top = mid.clone().addScaledVector(along, sign * 0.17).setY(HEAD + 0.02);
+      const end = new THREE.Vector3(hole.x, -0.05, hole.z);
+      if (Math.hypot(top.x - end.x, top.z - end.z) < 0.02) return [top, end];
+      return [top, top.clone().setY(HEAD * 0.6), new THREE.Vector3(hole.x, HEAD * 0.28, hole.z), end];
+    };
+    group.add(ctx.bentLead(legPath(A, -1), 0.024, 0.05));
+    group.add(ctx.bentLead(legPath(B, 1), 0.024, 0.05));
 
     return { group, pinPositions: [new THREE.Vector3(A.x, 0, A.z), new THREE.Vector3(B.x, 0, B.z)] };
   }
