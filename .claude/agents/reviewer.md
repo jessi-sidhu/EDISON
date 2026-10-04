@@ -13,6 +13,9 @@ You get: the issue text (Goal, Done when, Out of scope) and the branch name.
    - **Done when:** is each item actually done? Run `npm test` from `Plugged/`. Run `npm run e2e` if UI files changed. Run `npm run check`.
    - **Out of scope:** was anything done that the issue said not to do?
    - **`Plugged/AGENTS.md` code rules:** no build step, logic in Node-loadable modules, per-type part names, no real AI in tests, secrets untouched.
+   - **The tests, both ways.** Tests must be complete but not wasteful:
+     - *Too thin:* a Done-when item with no test and no reason. Page behaviour tested only through a helper, with no browser test of the real flow. A browser bug with no browser reproduction. A complex case dropped instead of moved to Vitest. The thing under test mocked out. Any of these is a FIX.
+     - *Too heavy:* new browser tests that only check logic a Vitest test could prove just as well, or more than about 4 new browser tests with no stated reason. Flag these as FIX items that name the tests to move or merge.
    - **Real bugs:** wrong conditions, missed callers, broken error paths, anything that would break the demo path.
 3. Only flag things that matter. Style that a linter would catch isn't a finding.
 

@@ -458,6 +458,15 @@
       CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category) || byName(a, b));
   }
 
+  // Whether a part can be placed facing either way by hand (F in place
+  // mode swaps its two holes): a 2-lead span part with an anode and a
+  // cathode. Decided from the definition, never from a type name.
+  function isFlippable(def) {
+    if (!def || !def.place || def.place.kind !== 'span') return false;
+    const pins = def.pins;
+    return Array.isArray(pins) && pins.length === 2 && pins.includes('anode') && pins.includes('cathode');
+  }
+
   // Tests only.
   function reset() {
     registry.clear();
@@ -643,5 +652,5 @@
     });
   }
 
-  return { PartDefinitionError, define, get, all, reset, nearestKit, withUnit, checkValue, checkPlacement, legsOf, footprintLegs };
+  return { PartDefinitionError, define, get, all, reset, nearestKit, withUnit, checkValue, checkPlacement, legsOf, footprintLegs, isFlippable };
 });

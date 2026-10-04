@@ -80,6 +80,14 @@
     let ghostType    = null;
     let ghostRot     = null;  // 0 or 1
 
+    // F: the picked 2-lead part goes in facing the other way (its two holes
+    // swapped). Lasts for this pick; App.setMode clears it.
+    let flipped      = false;
+
+    function canFlip(type) {
+      return state.mode === 'place' && Parts.isFlippable(Parts.get(type));
+    }
+
     function syncGhost() {
       const t = state.pickedType;
       const r = state.placementRotation;
@@ -446,7 +454,7 @@
         syncGhost();
         positionGhost(holeA, holeB);
         if (ghostGroup) {
-          ghostGroup.rotation.y = state.placementRotation === 1 ? Math.PI / 2 : 0;
+          ghostGroup.rotation.y = (state.placementRotation === 1 ? Math.PI / 2 : 0) + (flipped ? Math.PI : 0);
         }
 
         // Hole label
@@ -575,8 +583,9 @@
 
         const holes = holesUnderRay(type);
         if (!holes || !holes.holeB) return;
-        const hA = holes.holeA;
-        const hB = holes.holeB;
+        // Flipped: the first pin goes in the far hole, the second in the hovered one.
+        const hA = flipped ? holes.holeB : holes.holeA;
+        const hB = flipped ? holes.holeA : holes.holeB;
 
         // Registry parts are checked first; a refusal is the hint, word for word.
         if (Parts.get(type)) {
@@ -705,6 +714,15 @@
         return;
       }
 
+      if ((e.key === 'f' || e.key === 'F') && canFlip(state.pickedType)) {
+        flipped = !flipped;
+        ghostType = null;
+        syncGhost();
+        if (lastPointer) handleHover(lastPointer, true);
+        App.setHint(flipped ? 'Flipped: + and − swapped · F to flip back' : 'Normal · F to flip', 1800);
+        return;
+      }
+
       switch (e.key) {
         case 's': case 'S': App.setMode('select'); break;
         case 'p': case 'P': App.setMode('place');  break;
@@ -742,6 +760,7 @@
       if (m !== 'place') destroyGhost();
       clearFootprint();
       fpType      = null;   // a (re)picked footprint part starts at its first rotation
+      flipped     = false;  // and a (re)picked flippable part starts facing the normal way
       refusalHint = null;
       scrollHint  = null;
       placeHint   = document.getElementById('hint-text').textContent;
