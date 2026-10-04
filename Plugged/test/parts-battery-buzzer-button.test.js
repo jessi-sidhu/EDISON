@@ -88,10 +88,11 @@ test('parts/index.js lists battery.js, buzzer.js and button.js, and each file ex
   }
 });
 
-// #31 adds the potentiometer, the sixth registered part.
-test('all six parts are registered: resistor, led, battery, buzzer, button, potentiometer', () => {
+// #31 adds the potentiometer, the sixth registered part; #40 the light
+// sensor (ldr), the seventh; #41 the thermistor, the eighth.
+test('all eight parts are registered: resistor, led, battery, buzzer, button, potentiometer, ldr, thermistor', () => {
   const types = Parts.all().map(d => d.type).sort();
-  assert.deepStrictEqual(types, ['battery', 'button', 'buzzer', 'led', 'potentiometer', 'resistor']);
+  assert.deepStrictEqual(types, ['battery', 'button', 'buzzer', 'ldr', 'led', 'potentiometer', 'resistor', 'thermistor']);
 });
 
 test("each keeps its saved type and today's label prefix (ids.js): BAT, BZ, SW", () => {

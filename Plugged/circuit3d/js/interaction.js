@@ -67,6 +67,13 @@
       return !!(def && def.place.kind === 'footprint');
     }
 
+    // Columns (or rows) between a span part's two leads, from its
+    // place.span.default; 0 for any other part.
+    function defaultSpan(type) {
+      const def = Parts.get(type);
+      return def && def.place.kind === 'span' ? def.place.span.default : 0;
+    }
+
     // ── Ghost management ─────────────────────────────────────
     // The ghost preview group, recreated when type or rotation changes.
     let ghostGroup   = null;
@@ -84,7 +91,7 @@
 
       destroyGhost();
       const bb   = state.breadboard;
-      const span = App.SPANS[t] || 0;
+      const span = defaultSpan(t);
       ghostGroup = App.buildPreview(t, span, bb.HS, r);
       ghostGroup.visible = false;
       scene.add(ghostGroup);
@@ -114,7 +121,7 @@
       const holeA = holeUnderRay();
       if (!holeA) return null;
 
-      const span  = App.SPANS[type] || App.SPANS.resistor;
+      const span  = defaultSpan(type);
       return { holeA, holeB: state.breadboard.getSpanHole(holeA, span, state.placementRotation) };
     }
 

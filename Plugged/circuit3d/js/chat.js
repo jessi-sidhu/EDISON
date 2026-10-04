@@ -366,7 +366,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
         const hB = Chat.resolveEndpoint(a.holeB, board);
         if (hA && hA.hole && hB && hB.hole) {
           const rotation = hA.hole.col === hB.hole.col ? 1 : 0;
-          ghost = App.buildPreview(def.type, App.SPANS[def.type] || def.place.span.default, bb.HS, rotation, Chat.partValues(a));
+          ghost = App.buildPreview(def.type, def.place.span.default, bb.HS, rotation, Chat.partValues(a));
           ghost.position.set((hA.hole.x + hB.hole.x) / 2, 0, (hA.hole.z + hB.hole.z) / 2);
         }
       } else if (def && def.place.kind === 'footprint') {

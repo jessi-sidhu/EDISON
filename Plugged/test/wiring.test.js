@@ -141,19 +141,9 @@ test('chat.js has no battery spot of its own, and the preview asks for the same 
   assert.match(preview[0], /batterySpot\(/, 'the preview ghost must read the spot from the board/App');
 });
 
-test('part spans are one App.SPANS table in app.js; the old names read from it', () => {
-  const hits = copiesOf(/SPANS\s*=\s*\{/);
-  assert.equal(total(hits), 1, 'span tables found in: ' + where(hits));
-  assert.equal(hits[0].file, 'circuit3d/js/app.js');
-  const app = read('circuit3d/js/app.js');
-  assert.match(app, /App\.SPANS\s*=\s*\{\s*resistor:\s*4,\s*led:\s*2,\s*buzzer:\s*2,\s*button:\s*3\s*\}/);
-  for (const [alias, key] of [['RESISTOR_SPAN', 'resistor'], ['LED_SPAN', 'led'],
-                              ['BUZZER_SPAN', 'buzzer'], ['BUTTON_SPAN', 'button']]) {
-    assert.match(app, new RegExp(`App\\.${alias}\\s*=\\s*(App\\.)?SPANS\\.${key}\\b`), `${alias} must read App.SPANS.${key}`);
-  }
-  assert.match(read('circuit3d/js/interaction.js'), /App\.SPANS/);
-  assert.match(read('circuit3d/js/chat.js'), /App\.SPANS/);
-});
+// Part spans: issue #53 removed the App.SPANS table and its *_SPAN aliases;
+// spans come from each part's place.span.default. test/parts-tidy.test.js
+// ("spans come from the registry, not an App.SPANS table") checks that.
 
 test('App.exportState stays: e2e tests and debugging use it (issue #6, step 3 dropped)', () => {
   assert.match(read('circuit3d/js/app.js'), /App\.exportState\s*=\s*function/);

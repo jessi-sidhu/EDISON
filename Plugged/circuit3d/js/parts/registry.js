@@ -99,6 +99,7 @@
   }
 
   // A value with its unit, SI-prefixed for Ω V A F H: 1200 Ω → "1.2 kΩ".
+  // Exported as Parts.withUnit, the one SI formatter (inspector, server).
   const SI = [[1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p']];
   function withUnit(n, unit) {
     const sep = unit === '%' ? '' : ' ';
@@ -642,5 +643,5 @@
     });
   }
 
-  return { PartDefinitionError, define, get, all, reset, nearestKit, checkValue, checkPlacement, legsOf, footprintLegs };
+  return { PartDefinitionError, define, get, all, reset, nearestKit, withUnit, checkValue, checkPlacement, legsOf, footprintLegs };
 });

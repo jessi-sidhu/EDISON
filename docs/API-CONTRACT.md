@@ -221,6 +221,9 @@ The example is `Plugged/circuit3d/js/parts/potentiometer.js` (#31). The toggle s
 ### `Parts.nearestKit(value, series)`
 - **Output:** the nearest value in the E-series across decades. `1234, 'E12'` gives `1200`, and `470, 'E12'` gives `470`.
 
+### `Parts.withUnit(n, unit)`
+The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspector, formatValue and the server's prompt lines.
+
 ### `Parts.checkPlacement(type, legs, holeMap, board)`
 - **Called by:** hand placement (`interaction.js`), the AI apply path (`chat.js`), the server (`finishAIReply`, inside the AI's tool loop), and file loading, where it only flags, never blocks.
 - **Flagged parts (loaded from an old file, breaking a rule): warn only.**

@@ -11,10 +11,11 @@
 const { test, expect } = require('@playwright/test');
 const Parts = require('../circuit3d/js/parts');
 
-// The resistor (#23), the LED (#25), the battery, buzzer and button (#26) and
-// the potentiometer (#31) are listed even before their files exist, so this
-// spec fails (rather than running nothing) until each is registered.
-const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', ...Parts.all().map(d => d.type)])];
+// The resistor (#23), the LED (#25), the battery, buzzer and button (#26),
+// the potentiometer (#31), the light sensor (#40) and the thermistor (#41)
+// are listed even before their files exist, so this spec fails (rather than running nothing) until
+// each is registered.
+const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', 'ldr', 'thermistor', ...Parts.all().map(d => d.type)])];
 
 // Resistor colours, as the model has always drawn them.
 const BODY = 0xd4a96a, LEAD = 0xc0c0c0, GHOST_LEAD = 0xcccccc;
@@ -309,7 +310,9 @@ test('viewer.html opens a saved circuit with resistors: registry loaded, each dr
 // Testing contract item 8, issue #26: the viewer loads a circuit that uses
 // every part, each drawn by its own view.build (App.buildPart), none by the
 // old per-type builders. #31 adds the potentiometer (RV1 on e40/e41/e42, one
-// named holeRef per pin, its saved position). The expected lists come from
+// named holeRef per pin, its saved position); #40 the light sensor (LDR1 on
+// b51–b54, its saved light); #41 the thermistor (TH1 on c56–c59, its saved
+// temperature). The expected lists come from
 // the circuit and the registry the page loads, so a new part doesn't break
 // this test; give EVERY_PART one of each new part to keep item 8 covered.
 const EVERY_PART = {
@@ -322,6 +325,10 @@ const EVERY_PART = {
     { type: 'button',   label: 'SW1', holeRefs: [h(15, 'b'), h(18, 'b')] },
     { type: 'potentiometer', label: 'RV1', values: { resistance: 10000 }, controls: { position: 50 },
       holeRefs: [{ pin: '1', ...h(39, 'e') }, { pin: 'wiper', ...h(40, 'e') }, { pin: '3', ...h(41, 'e') }] },
+    { type: 'ldr', label: 'LDR1', values: { r10: 10000 }, controls: { light: 300 },   // #40, b51–b54
+      holeRefs: [{ pin: '1', ...h(50, 'b') }, { pin: '2', ...h(53, 'b') }] },
+    { type: 'thermistor', label: 'TH1', values: { r25: 10000 }, controls: { temperature: 25 },   // #41, c56–c59
+      holeRefs: [{ pin: '1', ...h(55, 'c') }, { pin: '2', ...h(58, 'c') }] },
   ],
   wires: [
     { startHole: null, endHole: h(62, 'tp'), startCompIdx: 0, startPinIdx: 0, endCompIdx: -1, endPinIdx: -1, color: 0xef4444 },

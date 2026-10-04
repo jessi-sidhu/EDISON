@@ -44,14 +44,6 @@
     return `Untitled (${n})`;
   }
 
-  // Span constants: columns (or rows) between leads. The one table;
-  // interaction.js and chat.js read App.SPANS, the old names are aliases.
-  App.SPANS = { resistor: 4, led: 2, buzzer: 2, button: 3 };
-  App.RESISTOR_SPAN = App.SPANS.resistor;
-  App.LED_SPAN      = App.SPANS.led;
-  App.BUZZER_SPAN   = App.SPANS.buzzer;
-  App.BUTTON_SPAN   = App.SPANS.button;
-
   // How far past the board's end a battery sits (user and AI placement).
   App.BATTERY_MARGIN = 2.5;
 

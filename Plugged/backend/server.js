@@ -218,18 +218,8 @@ function elementsOf(def) {
   return els;
 }
 
-// A number with its unit, SI-prefixed for Ω V A F H: 1e7 Ω → "10 MΩ".
-// The same format as Parts.checkValue's reasons.
-const SI = [[1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p']];
-function withUnit(n, unit) {
-  const sep = unit === '%' ? '' : ' ';
-  if (!['Ω', 'V', 'A', 'F', 'H'].includes(unit) || n === 0) return String(n) + sep + unit;
-  const a = Math.abs(n);
-  const [f, p] = SI.find(([f]) => a >= f) || SI[SI.length - 1];
-  return (n < 0 ? '−' : '') + String(Number((a / f).toPrecision(3))) + ' ' + p + unit;
-}
 const UNIT_WORDS = { 'Ω': 'ohms', V: 'volts', A: 'amps', F: 'farads', H: 'henries', '%': 'percent', '°C': 'degrees C', lux: 'lux' };
-const rangeOf = spec => `${withUnit(spec.min, spec.unit)}–${withUnit(spec.max, spec.unit)}`;
+const rangeOf = spec => `${Parts.withUnit(spec.min, spec.unit)}–${Parts.withUnit(spec.max, spec.unit)}`;
 const spanText = s => (s.min === s.max ? `exactly ${s.min}` : `${s.min}–${s.max}`);
 
 function valueParam(key, spec) {
@@ -442,7 +432,7 @@ const GENERATED = {
                 const spec = d.values[key];
                 return spec.choices
                   ? `- ${toolName(d)} ${key}: ${Object.keys(spec.choices).join(', ')} (default ${spec.default})`
-                  : `- ${toolName(d)} ${key}: ${rangeOf(spec)}, in ${UNIT_WORDS[spec.unit] || spec.unit} (default ${withUnit(spec.default, spec.unit)})`;
+                  : `- ${toolName(d)} ${key}: ${rangeOf(spec)}, in ${UNIT_WORDS[spec.unit] || spec.unit} (default ${Parts.withUnit(spec.default, spec.unit)})`;
               })),
 };
 
