@@ -422,7 +422,7 @@
 
   App.deselect = function () {
     if (!state.selected) return;
-    const { item, kind } = state.selected;
+    const { item } = state.selected;
     const root = item.group;
     if (root) root.traverse(obj => {
       if (!obj.isMesh || !origEmissive.has(obj)) return;

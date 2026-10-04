@@ -31,6 +31,20 @@ function fakeFetch(status, body) {
   return fn;
 }
 
+
+// A fetch that answers each call with the next reply in the list.
+function scriptedFetch(replies) {
+  const calls = [];
+  const fn = async (url, opts) => {
+    calls.push(JSON.parse(opts.body));
+    const message = replies[Math.min(calls.length - 1, replies.length - 1)];
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message }] }) };
+  };
+  fn.calls = calls;
+  return fn;
+}
+const call = (id, name, args) => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args || {}) } });
+
 test('toOpenAITools turns the Gemini tool list into OpenAI function tools', () => {
   assert.deepEqual(P.toOpenAITools(TOOLS), [
     { type: 'function', function: { name: 'delete_all', description: 'Clear the board.',
@@ -64,17 +78,50 @@ test('askDeepSeek sends one non-thinking chat request with the tools, history an
 });
 
 test('askDeepSeek turns tool calls into actions and skips ones with broken JSON', async () => {
-  const fetch = fakeFetch(200, { choices: [{ message: { content: '', tool_calls: [
-    { id: '1', type: 'function', function: { name: 'delete_all', arguments: '{}' } },
-    { id: '2', type: 'function', function: { name: 'place_resistor', arguments: '{"holeA":"a3","holeB":"a7"}' } },
-    { id: '3', type: 'function', function: { name: 'place_resistor', arguments: '{"holeA":"a3",' } },
-  ] } }] });
+  const fetch = scriptedFetch([
+    { content: '', tool_calls: [
+      { id: '1', type: 'function', function: { name: 'delete_all', arguments: '{}' } },
+      { id: '2', type: 'function', function: { name: 'place_resistor', arguments: '{"holeA":"a3","holeB":"a7"}' } },
+      { id: '3', type: 'function', function: { name: 'place_resistor', arguments: '{"holeA":"a3",' } },
+    ] },
+    { content: 'Done.', tool_calls: null },
+  ]);
   const out = await P.askDeepSeek('', 'build', [], { SYSTEM_PROMPT: 'S', CIRCUIT_TOOLS: TOOLS, fetch, apiKey: 'k' });
 
   assert.deepEqual(out.actions, [
     { tool: 'delete_all' },
     { tool: 'place_resistor', holeA: 'a3', holeB: 'a7' },
   ]);
+  // The broken call is answered with an error, so the model can retry it.
+  const results = fetch.calls[1].messages.filter(m => m.role === 'tool');
+  assert.match(results.find(m => m.tool_call_id === '3').content, /not valid JSON/);
+});
+
+// DeepSeek calls tools a turn at a time and waits for their results.
+test('askDeepSeek keeps the conversation going until the model stops calling tools', async () => {
+  const fetch = scriptedFetch([
+    { content: '', tool_calls: [call('c1', 'delete_all'), call('c2', 'place_battery')] },
+    { content: '', tool_calls: [call('c3', 'place_resistor', { holeA: 'a2', holeB: 'a6' })] },
+    { content: 'Built it.', tool_calls: null },
+  ]);
+  const out = await P.askDeepSeek('', 'build', [], { SYSTEM_PROMPT: 'S', CIRCUIT_TOOLS: TOOLS, fetch, apiKey: 'k' });
+
+  assert.equal(out.reply, 'Built it.');
+  assert.deepEqual(out.actions.map(a => a.tool), ['delete_all', 'place_battery', 'place_resistor']);
+  assert.equal(fetch.calls.length, 3);
+  // Round 2 carries round 1's tool calls and a result for each, by id.
+  const sent = fetch.calls[1].messages.slice(-3);
+  assert.equal(sent[0].role, 'assistant');
+  assert.deepEqual(sent[0].tool_calls.map(c => c.id), ['c1', 'c2']);
+  assert.deepEqual(sent.slice(1).map(m => [m.role, m.tool_call_id]), [['tool', 'c1'], ['tool', 'c2']]);
+});
+
+test('askDeepSeek stops after a fixed number of rounds if the model never finishes', async () => {
+  const fetch = scriptedFetch([{ content: '', tool_calls: [call('x', 'delete_all')] }]);
+  const out = await P.askDeepSeek('', 'build', [], { SYSTEM_PROMPT: 'S', CIRCUIT_TOOLS: TOOLS, fetch, apiKey: 'k' });
+
+  assert.equal(fetch.calls.length, P.DEEPSEEK_MAX_ROUNDS);
+  assert.equal(out.actions.length, P.DEEPSEEK_MAX_ROUNDS);
 });
 
 test('askDeepSeek explains an empty balance (HTTP 402)', async () => {

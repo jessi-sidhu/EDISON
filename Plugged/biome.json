@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["circuit3d/js/**/*.js", "backend/**/*.js", "test/**/*.js", "e2e/**/*.js", "*.config.js", "firebase-config.js"]
+  },
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "complexity": {
+        "useArrowFunction": "off",
+        "useOptionalChain": "off",
+        "useLiteralKeys": "off",
+        "noUselessEscapeInRegex": "off"
+      },
+      "style": {
+        "useTemplate": "off",
+        "useNodejsImportProtocol": "off",
+        "useExponentiationOperator": "off"
+      },
+      "suspicious": {
+        "noAssignInExpressions": "off",
+        "useIterableCallbackReturn": "off"
+      },
+      "correctness": {
+        "noUnusedFunctionParameters": "off"
+      }
+    }
+  }
+}

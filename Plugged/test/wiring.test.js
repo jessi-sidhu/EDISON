@@ -13,12 +13,29 @@ function scriptOrder(html) {
   return [...html.matchAll(/<script src="([^"]+)"/g)].map(m => m[1]);
 }
 
+test('Claude loads the code guide when working in Plugged/', () => {
+  assert.match(read('CLAUDE.md'), /^@AGENTS\.md\s*$/m);
+  assert.match(read('AGENTS.md'), /^# Plugged: code guide/m);
+});
+
 test('the editor keeps circuits under the signed-in user\'s key, loading storage.js first', () => {
   const order = scriptOrder(read('circuit3d/index.html'));
   assert.ok(order.indexOf('js/storage.js') >= 0 && order.indexOf('js/storage.js') < order.indexOf('js/app.js'),
     'storage.js must load before app.js: ' + order.join(', '));
   assert.match(read('circuit3d/js/app.js'),
     /const LS_KEY = SparkyStorage\.projectsKey\(SparkyStorage\.currentUid\(localStorage\)\)/);
+});
+
+test('both Firebase pages use the one shared config, for the plugged-hackathon project', () => {
+  for (const page of ['landing.html', 'dashboard.html']) {
+    const html = read(page);
+    const order = scriptOrder(html);
+    assert.ok(order.includes('firebase-config.js'), `${page} must load firebase-config.js`);
+    assert.doesNotMatch(html, /apiKey:/, `${page} must not carry its own copy of the config`);
+    assert.match(html, /firebase\.initializeApp\(window\.FIREBASE_CONFIG\)/);
+  }
+  assert.match(read('firebase-config.js'), /projectId:\s*"plugged-hackathon"/);
+  assert.match(read('.firebaserc'), /"default":\s*"plugged-hackathon"/);
 });
 
 test('the Clear All confirmation says it can be undone, because it can', () => {

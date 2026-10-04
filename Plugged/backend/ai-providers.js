@@ -147,6 +147,37 @@ async function askDeepSeek(markdown, userMsg, history, ctx) {
   }
   messages.push({ role: 'user', content: `BOARD STATE:\n${boardState}\n\nQUESTION: ${msg}` });
 
+  // DeepSeek calls a few tools per turn and waits for their results before
+  // calling more, so keep answering "done" until it stops calling tools.
+  // The tools only queue actions for the browser preview; nothing runs here.
+  const tools   = toOpenAITools(ctx.CIRCUIT_TOOLS);
+  const actions = [];
+  let reply = '';
+  for (let round = 0; round < DEEPSEEK_MAX_ROUNDS; round++) {
+    const m = await deepSeekTurn(messages, tools, ctx);
+    if (String(m.content || '').trim()) reply = String(m.content).trim();
+    const calls = (m.tool_calls || []).filter(c => c && c.function && c.function.name);
+    if (!calls.length) break;
+
+    messages.push({ role: 'assistant', content: m.content || '', tool_calls: calls });
+    for (const c of calls) {
+      // The model can emit invalid JSON arguments; drop that call, keep the rest.
+      let args = null;
+      try { args = JSON.parse(c.function.arguments || '{}'); } catch { /* reported below */ }
+      if (args) actions.push({ tool: c.function.name, ...args });
+      messages.push({ role: 'tool', tool_call_id: c.id,
+        content: args ? 'Done. Queued for the user to preview.' : 'Rejected: the arguments were not valid JSON.' });
+    }
+  }
+  return { reply, actions };
+}
+
+// A chat turn is resent in full each round, so this bounds the cost of a
+// model that never stops calling tools. A 3-LED build is ~16 calls.
+const DEEPSEEK_MAX_ROUNDS = 12;
+
+// One request to DeepSeek. Returns the assistant message.
+async function deepSeekTurn(messages, tools, ctx) {
   const res = await (ctx.fetch || fetch)(DEEPSEEK_URL, {
     method: 'POST',
     headers: {
@@ -156,7 +187,7 @@ async function askDeepSeek(markdown, userMsg, history, ctx) {
     body: JSON.stringify({
       model: DEEPSEEK_MODEL,
       messages,
-      tools: toOpenAITools(ctx.CIRCUIT_TOOLS),
+      tools,
       tool_choice: 'auto',
       thinking: { type: 'disabled' },
       temperature: 0.3,
@@ -170,17 +201,7 @@ async function askDeepSeek(markdown, userMsg, history, ctx) {
   }
 
   const data = await res.json();
-  const m = (data.choices && data.choices[0] && data.choices[0].message) || {};
-  const actions = [];
-  for (const call of m.tool_calls || []) {
-    const fn = call && call.function;
-    if (!fn || !fn.name) continue;
-    // The model can emit invalid JSON arguments; drop that call, keep the rest.
-    let args;
-    try { args = JSON.parse(fn.arguments || '{}'); } catch { continue; }
-    actions.push({ tool: fn.name, ...args });
-  }
-  return { reply: String(m.content || '').trim(), actions };
+  return (data.choices && data.choices[0] && data.choices[0].message) || {};
 }
 
 // ── Shared parser ────────────────────────────────────────────
@@ -276,4 +297,4 @@ function makeAsk(askGemini, ctx) {
   };
 }
 
-module.exports = { makeAsk, parseAgentJSON, fixtureKey, describeTools, toOpenAITools, askDeepSeek };
+module.exports = { makeAsk, parseAgentJSON, fixtureKey, describeTools, toOpenAITools, askDeepSeek, DEEPSEEK_MAX_ROUNDS };

@@ -9,3 +9,5 @@ node_modules/
 .firebase/
 .DS_Store
 .claude/tdd-guard/data/*.json
+test-results/
+playwright-report/

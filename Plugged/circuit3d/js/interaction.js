@@ -13,7 +13,7 @@
 (function (App) {
 
   function initInteraction() {
-    const { scene, camera, controls, state } = App;
+    const { scene, camera, state } = App;
     const canvas    = document.getElementById('canvas');
     const holeLabel = document.getElementById('hole-label');
 
@@ -332,8 +332,6 @@
       // ── SELECT ─────────────────────────────────────────
       if (mode === 'select') {
         const compMeshes = getAllComponentMeshes();
-        const wireMeshes = state.wires.map(w => w.group).filter(Boolean)
-          .concat(state.wires.map(w => w.tube).filter(Boolean));
 
         // also allow clicking wire tubes (stored as group children)
         const allWireMeshes = [];

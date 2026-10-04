@@ -388,7 +388,6 @@
       COLS, HS, ROW_Z,
       BOARD_W, BOARD_D,
       BODY_ROWS, RAIL_ROWS,
-      BODY_ROWS,
     };
   }
 

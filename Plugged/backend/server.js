@@ -315,7 +315,7 @@ async function askGemini(markdown, userMsg, history) {
 
   const parts = candidate.content?.parts || [];
   let reply = '';
-  let actions = [];
+  const actions = [];
 
   for (const part of parts) {
     if (part.text) reply += part.text;
