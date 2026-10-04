@@ -823,3 +823,48 @@ test('chat.js exports no per-type tables: PLACE and VALUE_KEY are gone', () => {
   assert.doesNotMatch(src, /\bplace(Resistor|LED|Buzzer|Button|Battery)\b/, 'chat.js still has per-type adapter methods');
   assert.doesNotMatch(src, /['"`]place_(battery|buzzer|button|led|resistor)['"`]/, 'chat.js still lists place_<type> tools by name (the preview too)');
 });
+
+// ── Reply text: **bold** without HTML injection (issue #62) ─────────────────
+// Chat.formatReply(text) returns the HTML the AI's chat bubble shows: the text
+// HTML-escaped first, then **x** turned into <strong>x</strong>.
+
+test('formatReply turns **bold** into <strong>', () => {
+  assert.equal(Chat.formatReply('Two LEDs in **series** share one path.'),
+    'Two LEDs in <strong>series</strong> share one path.');
+  assert.equal(Chat.formatReply('**R1** and **LED1**'), '<strong>R1</strong> and <strong>LED1</strong>');
+});
+
+test('formatReply escapes HTML, so a <script> stays text, even inside **bold**', () => {
+  assert.equal(Chat.formatReply('<script>alert(1)</script>'), '&lt;script&gt;alert(1)&lt;/script&gt;');
+  assert.equal(Chat.formatReply('**<img src=x onerror=alert(1)>**'),
+    '<strong>&lt;img src=x onerror=alert(1)&gt;</strong>');
+  assert.equal(Chat.formatReply('a & b "c" \'d\''), 'a &amp; b &quot;c&quot; &#39;d&#39;');
+});
+
+test('formatReply leaves plain text and a lone ** alone', () => {
+  assert.equal(Chat.formatReply('9 V battery, 470 Ω'), '9 V battery, 470 Ω');
+  assert.equal(Chat.formatReply('2 ** 3 is not bold'), '2 ** 3 is not bold');
+  assert.equal(Chat.formatReply(''), '');
+});
+
+// Issue #67: the camera frames the circuit only after a batch that places
+// parts, so an edit (set_value, set_control, delete_part) never snaps away a
+// view the user zoomed to. Chat.placesParts(actions) → true when any action's
+// tool starts with 'place_'.
+
+test('placesParts: true for a batch that places a part', () => {
+  assert.equal(typeof Chat.placesParts, 'function', 'Chat.placesParts is not a function');
+  assert.equal(Chat.placesParts(Recipes.ONE_LED), true, 'the one-LED recipe places parts');
+  assert.equal(Chat.placesParts([{ tool: 'place_led', holeA: 'c8', holeB: 'c6' }]), true, 'a lone place_led');
+  assert.equal(Chat.placesParts([{ tool: 'set_value', part: 'R1', resistance: 1000 }, { tool: 'place_battery' }]), true,
+    'an edit plus a placement');
+});
+
+test('placesParts: false for edits, wires alone, and an empty batch', () => {
+  assert.equal(typeof Chat.placesParts, 'function', 'Chat.placesParts is not a function');
+  assert.equal(Chat.placesParts([{ tool: 'set_value', part: 'R1', resistance: 1000 }]), false, 'set_value');
+  assert.equal(Chat.placesParts([{ tool: 'set_control', part: 'SW1', pressed: true }]), false, 'set_control');
+  assert.equal(Chat.placesParts([{ tool: 'delete_part', part: 'R1' }]), false, 'delete_part');
+  assert.equal(Chat.placesParts([{ tool: 'add_wire', from: 'a2', to: 'tp_3', color: 'red' }]), false, 'add_wire only');
+  assert.equal(Chat.placesParts([]), false, 'an empty batch');
+});

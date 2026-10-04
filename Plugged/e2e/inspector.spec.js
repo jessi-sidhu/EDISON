@@ -308,8 +308,9 @@ test('the inspector follows the selection: switch parts, empty click hides, dele
   await expect(row(page, 'resistance')).toHaveCount(0);
   await expect(row(page, 'color')).toHaveCount(1);
 
-  // A click on an empty part of the board deselects.
-  await clickHole(page, 'h45');
+  // A click on an empty part of the board deselects. e4 is empty and next to
+  // the circuit, so it stays on screen once the camera frames the build (#67).
+  await clickHole(page, 'e4');
   expect(await selectedLabel(page)).toBe(null);
   await expect(inspector(page), 'deselect hides the inspector').toBeHidden();
 

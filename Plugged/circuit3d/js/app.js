@@ -561,6 +561,28 @@
     if (App.simRunning) App.runSimulation();
   };
 
+  // ── Frame the circuit (issue #67) ────────────────────────────
+  // Points the camera at the board's parts, at home's angle and close enough
+  // to see and click them. Off-board parts (the battery) are left out, or the
+  // frame would span the whole board. No parts → the home view. Instant, no
+  // animation. Called after an AI build and when a circuit is opened; hand
+  // placement never calls it.
+  App.frameCircuit = function () {
+    const boxes = [];
+    for (const c of state.components) {
+      const def = Parts.get(c.type);
+      if (!def || def.place.kind === 'offboard' || !c.group) continue;
+      const b = new THREE.Box3().setFromObject(c.group);
+      if (!b.isEmpty()) boxes.push({ min: b.min.toArray(), max: b.max.toArray() });
+    }
+    const { target, pos } = CameraFrame.frameParts(boxes, {
+      home: App.CAMERA.home, fov: App.camera.fov, aspect: App.camera.aspect, minDistance: 6,
+    });
+    App.controls.target.set(...target);
+    App.camera.position.set(...pos);
+    App.controls.update();
+  };
+
   // ── Save / Load ──────────────────────────────────────────────
 
   // ── Isometric thumbnail capture ──────────────────────────────
@@ -646,6 +668,7 @@
   App.loadCircuitData = function (data) {
     App.clearAll();
     restoreBoard(data);
+    App.frameCircuit();
 
     // Sync circuit name + ID
     if (data.name) {

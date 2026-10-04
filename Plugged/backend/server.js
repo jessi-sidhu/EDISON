@@ -116,6 +116,7 @@ const buildPrompt = tools => [
   '- Anything that changes wiring or adds parts: never patch. Always clear and rebuild the full correct circuit.',
   '- After building, write 2-3 sentences explaining what you built and how it works.',
   '- When you explain a build with more than one LED, say which topology you built: series, parallel, or separate branches.',
+  '- When you build LEDs in series, say in your reply that they are dimmer than one LED alone, or need a lower resistor.',
   '',
   'CRITICAL WIRING RULES:',
   '- Placing a component on the board does NOT connect it to power or ground.',

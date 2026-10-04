@@ -290,6 +290,16 @@ test('BUILDING BEHAVIOR tells the AI to remove one part with delete_part', () =>
     `no BUILDING BEHAVIOR line says to remove one part with delete_part: ${JSON.stringify(lines)}`);
 });
 
+// Issue #62 (QA AI-08): a series-LED reply must say the LEDs are dimmer or
+// need a lower resistor. One added reply-style line, in BUILDING BEHAVIOR.
+test('BUILDING BEHAVIOR tells the AI to say series LEDs are dimmer or need a lower resistor', () => {
+  const lines = buildingBehavior();
+  const line = lines.find(l => /\bseries\b/i.test(l) && /\bdimmer\b/i.test(l));
+  assert.ok(line, `no BUILDING BEHAVIOR line says series LEDs are dimmer: ${JSON.stringify(lines)}`);
+  assert.match(line, /lower resistor/i, `the series line should mention a lower resistor: "${line}"`);
+  assert.match(line, /\breply\b|\bsay\b/i, `the series line should be about what the reply says: "${line}"`);
+});
+
 // #27 D1 fix: a real DeepSeek run placed a resistor b8→b12 and a buzzer
 // b14→b16 and never joined columns 12 and 14. The buzzer's guide now gives
 // the series layout, mirroring the one-LED recipe: resistor b{C}–b{C+4},

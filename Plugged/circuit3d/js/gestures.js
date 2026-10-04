@@ -22,6 +22,12 @@
 //  Gestures.create({ now, setTimeout, clearTimeout, simulate, pushHistory,
 //                    throttleMs = 100, scrollEndMs = 300 })
 //    → { tick(kind, apply), release() }
+//
+//  Gestures.pickScrollPart(pointer, candidates, maxPx) → candidate | null
+//    Which part a wheel tick near (not only on) a part turns (bug #59).
+//    pointer {x, y} and each candidate's rect {x, y, w, h} (top-left,
+//    y down) in page px. The nearest rect, measured to its nearest edge
+//    or corner (0 inside), if that is ≤ maxPx; else null.
 // ─────────────────────────────────────────────────────────────
 
 (function (root, factory) {
@@ -65,5 +71,20 @@
     return { tick, release };
   }
 
-  return { create };
+  function rectDistance(p, r) {
+    const dx = Math.max(r.x - p.x, 0, p.x - (r.x + r.w));
+    const dy = Math.max(r.y - p.y, 0, p.y - (r.y + r.h));
+    return Math.hypot(dx, dy);
+  }
+
+  function pickScrollPart(pointer, candidates, maxPx) {
+    let best = null, bestD = Infinity;
+    for (const c of candidates || []) {
+      const d = rectDistance(pointer, c.rect);
+      if (d <= maxPx && d < bestD) { best = c; bestD = d; }
+    }
+    return best;
+  }
+
+  return { create, pickScrollPart };
 });

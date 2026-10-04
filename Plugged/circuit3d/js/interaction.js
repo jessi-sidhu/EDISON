@@ -251,18 +251,81 @@
     });
 
     // ── Scroll gestures ─────────────────────────────────────
-    // While simulating, the wheel over a part with a scroll gesture moves
-    // its control instead of zooming. Caught on the way down, before
-    // OrbitControls on the canvas sees it.
+    // While simulating, the wheel on or near (SCROLL_NEAR_PX) a part with a
+    // scroll gesture moves its control instead of zooming (bug #59: small
+    // parts are easy to miss by a few pixels). Caught on the way down,
+    // before OrbitControls on the canvas sees it.
+    const SCROLL_NEAR_PX = 15;
+    const scrollBox      = new THREE.Box3();
+    const scrollCorner   = new THREE.Vector3();
+
+    function scrollKey(comp) {
+      const def = comp && Parts.get(comp.type);
+      return (def && def.gestures && def.gestures.scroll) || null;
+    }
+
+    // A model's on-screen outline: its Box3 projected through the camera,
+    // as a page-pixel rect { x, y, w, h } (top-left, y down).
+    function screenRect(group) {
+      scrollBox.setFromObject(group);
+      const r = canvas.getBoundingClientRect();
+      const { min, max } = scrollBox;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const X of [min.x, max.x]) for (const Y of [min.y, max.y]) for (const Z of [min.z, max.z]) {
+        scrollCorner.set(X, Y, Z).project(camera);
+        const sx = r.left + (scrollCorner.x + 1) / 2 * r.width;
+        const sy = r.top  + (1 - scrollCorner.y) / 2 * r.height;
+        x0 = Math.min(x0, sx); x1 = Math.max(x1, sx);
+        y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+      }
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
+
+    // The scroll-gesture part under the pointer, else the nearest one within
+    // SCROLL_NEAR_PX of it on screen, else null. Needs updateRay(e) first.
+    function scrollPartAt(e) {
+      const hits = raycaster.intersectObjects(getAllComponentMeshes(), false);
+      const hit  = hits.length ? ownerOf(hits[0].object) : null;
+      if (scrollKey(hit)) return hit;
+      const candidates = state.components
+        .filter(c => c.group && scrollKey(c))
+        .map(c => ({ id: c.label, rect: screenRect(c.group), comp: c }));
+      const picked = Gestures.pickScrollPart({ x: e.clientX, y: e.clientY }, candidates, SCROLL_NEAR_PX);
+      return picked ? picked.comp : null;
+    }
+
+    // While simulating, hovering a scroll-gesture part names the gesture and
+    // the control's value; off it, the mode hint comes back. Only a change
+    // of text touches the hint.
+    let scrollHint = null;   // the scroll hint shown now, or null
+
+    function showScrollHint(comp) {
+      const key  = scrollKey(comp);
+      const def  = key && Parts.get(comp.type);
+      const spec = def && def.controls && Object.hasOwn(def.controls, key) ? def.controls[key] : null;
+      let text = null;
+      if (spec) {
+        const now = comp.controls && Object.hasOwn(comp.controls, key) ? comp.controls[key] : spec.default;
+        text = `Scroll to change ${key} · ${Parts.withUnit(now, spec.unit)}`;
+      }
+      if (text === scrollHint) return;
+      const had  = scrollHint !== null;
+      scrollHint = text;
+      if (text !== null) App.setHint(text);
+      else if (had) App.setHint(placeHint);
+    }
+
     canvas.parentElement.addEventListener('wheel', e => {
       if (!App.simRunning || e.target !== canvas) return;
       updateRay(e);
-      const hits = raycaster.intersectObjects(getAllComponentMeshes(), false);
-      const comp = hits.length ? ownerOf(hits[0].object) : null;
+      const comp = scrollPartAt(e);
       if (!comp || !App.partGesture(comp, 'scroll', e.deltaY < 0 ? 1 : -1)) return;
       e.preventDefault();
       e.stopPropagation();
+      showScrollHint(comp);
     }, { capture: true, passive: false });
+
+    canvas.addEventListener('pointerleave', () => showScrollHint(null));
 
     canvas.addEventListener('pointercancel', e => {
       if (e.pointerId !== downPointerId) return;
@@ -301,6 +364,8 @@
       }
       lastPointer = e;
       handleHover(e);
+      if (App.simRunning) showScrollHint(scrollPartAt(e));
+      else showScrollHint(null);
     });
 
     // quiet: leave the hint alone (R has just set it).
@@ -678,6 +743,7 @@
       clearFootprint();
       fpType      = null;   // a (re)picked footprint part starts at its first rotation
       refusalHint = null;
+      scrollHint  = null;
       placeHint   = document.getElementById('hint-text').textContent;
       hoverSphere.visible  = false;
       hoverSphereB.visible = false;

@@ -233,7 +233,22 @@
     });
   }
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, partFor, partValues, colorHex, EDITS, ROTATION };
+  // The HTML an AI reply shows: escaped first, so the model's text can never
+  // be markup, then **x** turned into <strong>x</strong> (issue #62).
+  const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  function formatReply(text) {
+    return String(text)
+      .replace(/[&<>"']/g, ch => ESCAPES[ch])
+      .replace(/\*\*(\S(?:[^*]*\S)?)\*\*/g, '<strong>$1</strong>');
+  }
+
+  // Whether a batch places a part: only then does Accept frame the circuit,
+  // so an edit never snaps away the view the user zoomed to (issue #67).
+  function placesParts(actions) {
+    return (actions || []).some(a => !!a && typeof a.tool === 'string' && a.tool.startsWith('place_'));
+  }
+
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, placesParts, partFor, partValues, colorHex, formatReply, EDITS, ROTATION };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -300,7 +315,8 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     const box = document.getElementById('sparky-messages');
     const el  = document.createElement('div');
     el.className   = 'chat-msg ' + role;
-    el.textContent = text;
+    if (role === 'ai') el.innerHTML = Chat.formatReply(text);   // escaped, then **bold**
+    else               el.textContent = text;
     box.appendChild(el);
     box.scrollTop  = box.scrollHeight;
     return el;
@@ -444,6 +460,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     document.getElementById('sparky-pending-bar').style.display = 'none';
 
     const { applied, failed } = Chat.acceptBuild(actions, board);
+    if (Chat.placesParts(actions)) App.frameCircuit();   // new parts: big enough to see and click (#67)
     sparkyAddMsg(`✓ Applied ${applied} change${applied !== 1 ? 's' : ''} to your circuit.` +
       (failed ? ` ${failed} could not be applied.` : ''), 'system');
   }
