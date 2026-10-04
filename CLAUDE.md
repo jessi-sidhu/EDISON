@@ -1,7 +1,7 @@
 @AGENTS.md
 
 ## Claude Code specifics
-- **A GitHub issue is an approved design.** Working an issue counts as bounded work: skip brainstorming and spec writing, restate the plan in 3 to 5 bullets, then implement. Use brainstorming and writing-plans only for architecture and planning work; ask Thandi first when a plan rests on circuit physics.
+- **A GitHub issue is an approved design.** Working an issue counts as bounded work: skip brainstorming and spec writing, restate the plan in 3 to 5 bullets, then implement. Use brainstorming and writing-plans only for architecture and planning work.
 - **Project skills:**
   - `/start-task`: begin an issue.
   - `/ship`: finish it. Runs the checks, then pushes straight to `dev`.

@@ -35,7 +35,7 @@ GitHub issue ──/start-task──▶ local branch ──build + verify──�
                 main (tested, demo-ready) ◀── /promote (CI green + demo walk) ◀───────────┘
 ```
 
-- **Aarmen decides; Thandi on the physics.** Aarmen writes the code and makes the calls. Anything that rests on circuit physics (a part's model or rating, a simulator rule, an expected reading) goes past Thandi first.
+- **Aarmen decides.** Aarmen writes the code and makes every call, circuit physics included. Thandi's checks on real parts are advice, not a sign-off.
 - **Every piece of work is a GitHub issue.** Write one with `/new-task`. Pick one with `/start-task`, or run `/start-task 12` for a specific issue.
 - **Your Claude follows the issue.** It touches only the files the issue lists and builds against `docs/API-CONTRACT.md`. If something is unclear, it stops and asks.
 - **Finish with `/ship`.** It runs the checks, reviews the diff, and pushes straight to `dev`. No PR and no waiting.
@@ -46,7 +46,7 @@ GitHub issue ──/start-task──▶ local branch ──build + verify──�
 | Who | Focus |
 |---|---|
 | Aarmen | All the code: architecture, features, `bug` fixes, `/qa-pass` and `/promote` |
-| Thandi | Engineer: circuit design and physical testing; checks the simulator and the expected results in `docs/QA.md` against real parts |
+| Thandi | Engineer: circuit design and physical testing; can check the simulator against real parts |
 
 The full rules are in [AGENTS.md](AGENTS.md). The plan and design docs are in [docs/](docs/).
 

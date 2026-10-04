@@ -16,14 +16,14 @@
 - [ ] Pitch draft and demo script written; first backup demo video recorded
 
 ## Track drop
-- [ ] Aarmen runs `/adapt-to-tracks`; Thandi checks any new circuits.
-- [ ] The new demo path goes into `docs/QA.md`, with Thandi's expected numbers.
+- [ ] Aarmen runs `/adapt-to-tracks`.
+- [ ] The new demo path goes into `docs/QA.md`, with its expected numbers.
 
 ## Sprint (T = hacking starts; adjust to the real schedule)
 | Time | Checkpoint |
 |---|---|
 | T+0:00 | Track drop re-plan done; everyone has an issue |
-| T+1:00 | Kickoff: first issue picked; Thandi has the circuits to check |
+| T+1:00 | Kickoff: first issue picked |
 | T+4:00 | Track-specific changes visible on `dev` (mocks OK for new parts); first sprint `/promote` |
 | T+10:00 | New parts real; sponsor integrations in; `/qa-pass` checkpoint, then `/promote` |
 | T+14:00 | Checkpoint: cut anything that isn't nearly done |

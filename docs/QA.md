@@ -1,6 +1,6 @@
 # QA script
 
-<!-- Thandi owns the expected results here (the circuits and the numbers a real board gives); Aarmen keeps the cases runnable.
+<!-- Aarmen owns the cases and their expected results; Thandi can check the numbers on a real board.
      /qa-pass runs every case here against `dev`: the AI build cases through `npm run ai-eval` (see the note above the AI table), the rest in a real browser, the way a user would.
      Each case: what to do, and what must be true. Keep expected results concrete (numbers, exact messages) so a
      pass/fail is never a judgment call. At track drop, add the new demo path first. -->
@@ -49,6 +49,7 @@ Build these by hand, then click Run Simulation.
 | LG-03 | LG-01 with the LED turned around | The LED stays dark, and a line says "LED is backwards" |
 | LG-04 | Red LED straight across the battery, no resistor | "Short circuit", suggesting a 470 ohm resistor |
 | LG-05 | Landing page → Try it out (demo circuit). Simulate, click the push button, simulate again | Released: "Circuit open — no complete path" only. Pressed: `💡 LED ON (14.9 mA)` |
+| LG-06 | Try it out (demo circuit). Simulate, click the push button, then click hole e7 (resistor–LED node), press Esc, then click the resistor and the LED | The button still presses (`💡 LED ON (14.9 mA)`) and opens no card. e7: a card reads `I(R1) − I(LED1) = 14.9 − 14.9 = 0 mA`; Esc closes it. Resistor: `V = IR → 7.0 V = 14.9 mA × 470 Ω`. LED: `V = Vf + I·ron → 2.0 V = 2.0 V + 14.9 mA × 0.1 Ω`. Stop closes the card. No console errors |
 
 ## Core flows
 | ID | Do | Pass when |

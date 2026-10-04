@@ -21,15 +21,14 @@ description: Finish the current task - run checks, review, commit, rebase onto t
    - Otherwise, run the **reviewer** subagent with the issue text.
    - On FIX, fix the listed items, run the checks again, and run the reviewer once more. If it still says FIX, stop and show the user.
    - Remove debug logs, commented-out code and anything out of scope.
-4. **Circuit physics.** If the diff changes a part's model or rating, a simulator rule, a mistake rule, a lab circuit or an expected value in `docs/QA.md`, ask the user whether Thandi has checked it. If not, stop until he has.
-5. **Commit.** Stage only this task's files, never `.env*`. Use a short imperative message, ending with `Closes #<n>` when there's an issue.
-6. **Rebase and push to `dev`.**
+4. **Commit.** Stage only this task's files, never `.env*`. Use a short imperative message, ending with `Closes #<n>` when there's an issue.
+5. **Rebase and push to `dev`.**
    - Run `git fetch origin dev && git rebase origin/dev`.
    - On conflicts, keep both sides' intent, show the user what you chose, and re-run step 2's checks.
    - If a conflict touches someone else's module or is unclear, stop and ask.
    - Then push: `git push origin HEAD:dev`. Never force-push.
    - If the push is rejected because `dev` moved, fetch, rebase and check again, then retry once.
-7. **Tidy up.**
+6. **Tidy up.**
    - On a task branch in a worktree (`.worktrees/<n>`, the normal case):
      - Find the main root first: `root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")`.
      - Leave the worktree: the ExitWorktree tool if the session entered it with EnterWorktree, otherwise `cd "$root"`.
@@ -37,4 +36,4 @@ description: Finish the current task - run checks, review, commit, rebase onto t
      - Never switch branches in the main checkout. It stays on `dev`.
    - Worked directly on `dev` in the main checkout (the fallback): run `git pull`. There's no branch or worktree to remove.
    - If the commit message didn't close the issue, run `gh issue close <n> --comment "Shipped to dev in <sha>"`.
-8. **Report.** Give the commit on `dev`, and remind the user that CI runs on it now (`gh run list --branch dev --limit 1`). It reaches `main` at the next `/promote`.
+7. **Report.** Give the commit on `dev`, and remind the user that CI runs on it now (`gh run list --branch dev --limit 1`). It reaches `main` at the next `/promote`.

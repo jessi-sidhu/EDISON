@@ -9,19 +9,12 @@ Two people.
   - Works every issue, fixes the `bug` issues, and runs `/qa-pass` and `/promote`.
 - **Thandi:** engineer. Circuit design and physical testing.
   - Designs circuits and checks them on real parts.
-  - Says whether the simulator's numbers and the AI's builds are physically right.
-  - Owns the expected results in `docs/QA.md`: the circuits, and the numbers a real board gives.
+  - Can check the simulator's numbers and the AI's builds against a real board. That is advice, not a sign-off.
 
 If you are an agent: your job is the issue in front of you, nothing more. When the issue is unclear or seems wrong, stop and tell Aarmen. Don't guess at architecture.
 
-## Deciding: Aarmen decides, Thandi on the physics
-- **Aarmen decides** code, architecture, the contract, dependencies, config and the plan. Say what changed in the commit; no sign-off needed.
-- **Ask Thandi first** when a change rests on circuit physics:
-  - a new part's model or its ratings
-  - a simulator rule
-  - what counts as a mistake in a circuit
-  - an expected value in `docs/QA.md`
-  - a lab circuit
+## Deciding: Aarmen decides
+- **Aarmen decides** everything: code, architecture, the contract, dependencies, config, the plan, and the circuit physics (part models and ratings, simulator rules, what counts as a mistake, expected values in `docs/QA.md`, lab circuits). Say what changed in the commit; no sign-off needed.
 - Write big calls under "Key decisions" in `docs/ARCHITECTURE.md` so they aren't re-argued.
 
 ## Branches: dev is the workspace, main is tested
@@ -37,7 +30,7 @@ If you are an agent: your job is the issue in front of you, nothing more. When t
 
 ## Phases
 1. **Build week (pre-event):** Build the real product. The core demo should work end to end on real code, deployed, before the event. Keep modules swappable behind the contracts so they can be reshaped when tracks drop.
-2. **Track drop:** Aarmen runs `/adapt-to-tracks` (with Thandi on any circuit questions), and it updates the PRD and plan and re-cuts the issues. Pause feature work until it's done.
+2. **Track drop:** Aarmen runs `/adapt-to-tracks`, and it updates the PRD and plan and re-cuts the issues. Pause feature work until it's done.
 3. **Sprint (24h):** Reshape for the chosen track, add sponsor integrations, polish, and rehearse. Work issues against the `docs/PLAN.md` checkpoints. After the feature freeze, only demo-path bug fixes.
 
 ## Commands
@@ -68,7 +61,6 @@ The app is `Plugged/`. Its commands, code rules and gotchas are in `Plugged/AGEN
 - Pull `dev` before starting and before shipping.
 
 **Ask first**
-- Thandi, on anything that rests on circuit physics (see "Deciding").
 - Aarmen, on anything the issue lists as out of scope.
 
 **Never**

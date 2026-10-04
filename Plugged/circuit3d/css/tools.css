@@ -1,0 +1,15 @@
+/* equations (#92): the equation card, built by js/tools/equations.js */
+#equation-card {
+  position: fixed;
+  z-index: 60;
+  max-width: 420px;
+  padding: 6px 10px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font: 500 13px/1.4 'Inter', sans-serif;
+  color: var(--text-primary, #222);
+  pointer-events: none;
+}
+#equation-card[hidden] { display: none; }
