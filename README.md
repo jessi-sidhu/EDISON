@@ -1,5 +1,19 @@
 # Edison
 
+Edison is an AI lab partner for circuits. It's a 3D breadboard with a live simulator and Edison, an AI tutor that builds circuits from a prompt, finds and explains mistakes, and proposes fixes you accept with one click.
+- **The breadboard and simulator** handle resistors, LEDs, capacitors, op-amps and sine sources, with a bench supply, function generator, multimeter and scope.
+- **It reads photos of real breadboards:** tap the 4 corners, and Gemini labels every part and wire, then builds the board.
+- **ENSC 220 labs** come as step-by-step lab manuals.
+
+**The demo, in under 3 minutes:**
+1. Upload a photo of a real, broken op-amp LED blinker and tap its corners.
+2. Edison reads it, builds it, and names the two mistakes: the op-amp is turned around and 2 columns off, and the V− wire is missing.
+3. Say "fix it", then Accept, and the LED blinks.
+
+The demo photos are rehearsed: each has a recorded reading and a fixed board, so the demo never waits on a live AI call.
+
+**Run it:** `cd Plugged && npm ci`, put `DEEPSEEK_API_KEY`, `GEMINI_API_KEY` and `AI_PROVIDER=deepseek` in `Plugged/backend/.env`, then `cd backend && node server.js` and open http://localhost:5001/circuit3d/index.html?ui=edison.
+
 ## Setup (5 min)
 
 **Mac**
