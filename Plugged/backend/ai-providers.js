@@ -108,9 +108,9 @@ function askClaude(markdown, userMsg, history, ctx) {
 
 // ── DeepSeek provider ────────────────────────────────────────
 // OpenAI-compatible chat completions with native tool calls. Thinking mode
-// is on by default on DeepSeek; it is switched off here because it is
-// slower, bills reasoning tokens, and ignores temperature, unless
-// DEEPSEEK_THINKING=1 (#205, deepSeekRequest).
+// is on by default (#205, issue #4): it took the AI test set from 11/48 to
+// 24/48. It is slower, bills reasoning tokens and ignores temperature;
+// DEEPSEEK_THINKING=0 switches it off (deepSeekRequest).
 const DEEPSEEK_URL   = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-flash';
 
@@ -139,8 +139,9 @@ function toOpenAITools(circuitTools) {
 }
 
 // One overall deadline for a whole DeepSeek ask (issue #129): every tool-loop
-// and repair round shares it. Read per ask so a test can set it.
-const deepSeekTimeoutMs = () => Number(process.env.DEEPSEEK_TIMEOUT_MS) || 60000;
+// and repair round shares it. Read per ask so a test can set it. 240 s by
+// default (issue #4): a build with reasoning took up to 195 s.
+const deepSeekTimeoutMs = () => Number(process.env.DEEPSEEK_TIMEOUT_MS) || 240000;
 
 // Runs run(signal) against one deadline of `ms`. Past it, the signal aborts
 // every request still open and this rejects with code AI_TIMEOUT, even if
@@ -162,22 +163,26 @@ function deepSeekFallbackModel() {
   const v = process.env.DEEPSEEK_FALLBACK_MODEL;
   return v === undefined ? 'deepseek-v4-pro' : v.trim();
 }
-// How long ONE primary-model request may take before the ask switches.
+// How long ONE primary-model request may take before the ask switches,
+// with reasoning off only (issue #4, askDeepSeek).
 const deepSeekPrimaryTimeoutMs = () => Number(process.env.DEEPSEEK_PRIMARY_TIMEOUT_MS) || 25000;
 
-// One ask under one overall deadline. While a fallback model is set, each
-// primary request gets deepSeekPrimaryTimeoutMs; past it, or on a 5xx or a
-// network error, the whole ask restarts once on the fallback with the same
-// opening messages, keeping nothing from the primary's rounds. A 4xx never
-// falls back. The fallback gets only the time left. A reply from the fallback
-// carries a non-enumerable `fallbackModel` (kept out of the JSON for the page).
+// One ask under one overall deadline. While a fallback model is set, a 5xx
+// or a network error restarts the whole ask once on the fallback with the
+// same opening messages, keeping nothing from the primary's rounds. With
+// reasoning off (DEEPSEEK_THINKING=0, or explain mode) each primary request
+// also gets deepSeekPrimaryTimeoutMs, and running past it switches too; with
+// reasoning on (issue #4: a build took 8–195 s) running long never switches.
+// A 4xx never falls back. The fallback gets only the time left. A reply from
+// the fallback carries a non-enumerable `fallbackModel` (kept out of the JSON
+// for the page).
 function askDeepSeek(markdown, userMsg, history, ctx, board) {
   const fallback = deepSeekFallbackModel();
   return withDeadline(deepSeekTimeoutMs(), async signal => {
     const run = extra => deepSeekRounds(markdown, userMsg, history, { ...ctx, signal, ...extra }, board);
     if (!fallback || fallback === DEEPSEEK_MODEL) return run({ model: DEEPSEEK_MODEL });
     try {
-      return await run({ model: DEEPSEEK_MODEL, requestMs: deepSeekPrimaryTimeoutMs() });
+      return await run({ model: DEEPSEEK_MODEL, ...(thinkingOn(ctx) ? {} : { requestMs: deepSeekPrimaryTimeoutMs() }) });
     } catch (e) {
       if (signal.aborted || !e.canFallBack) throw e;
       console.warn(`[ask] ${DEEPSEEK_MODEL} failed (${e.message.slice(0, 80)}); retrying on ${fallback}`);
@@ -357,9 +362,10 @@ async function deepSeekTurn(messages, tools, ctx) {
 }
 
 // Thinking mode (#205), read per request so the eval or a test can set it:
-// DEEPSEEK_THINKING=1 lets the model reason before it answers; unset or 0
-// keeps the request as it was. Explain mode (#169) never thinks.
-const thinkingOn = ctx => !ctx.explain && /^(1|on|true)$/i.test(String(process.env.DEEPSEEK_THINKING || ''));
+// on by default (issue #4), so the model reasons before it answers;
+// DEEPSEEK_THINKING=0 (or off, false) sends the old non-thinking request.
+// Unset or blank counts as on. Explain mode (#169) never thinks.
+const thinkingOn = ctx => !ctx.explain && !/^(0|off|false)$/i.test(String(process.env.DEEPSEEK_THINKING || '').trim());
 
 // The assistant message the loop sends back: in thinking mode DeepSeek needs
 // each one's reasoning_content in every later request of the same ask.
@@ -385,7 +391,7 @@ async function deepSeekRequest(messages, tools, ctx, signal) {
       thinking: { type: think ? 'enabled' : 'disabled' },
       // Thinking mode ignores temperature; an explain answer (#169) as steady as it can be.
       ...(think ? (effort ? { reasoning_effort: effort } : {}) : { temperature: ctx.explain ? 0 : 0.3 }),
-      max_tokens: think ? (Number(process.env.DEEPSEEK_MAX_TOKENS) || 16000) : 2048,
+      max_tokens: think ? (Number(process.env.DEEPSEEK_MAX_TOKENS) || 32000) : 2048,   // 16000 ran out mid-reasoning (issue #4)
     }),
   });
 

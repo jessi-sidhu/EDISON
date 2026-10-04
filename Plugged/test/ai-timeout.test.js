@@ -3,10 +3,11 @@
 // showed "Failed to fetch" after about 5 minutes.
 //
 // Shapes these tests assume (stated so the builder matches them):
-// - DEEPSEEK_TIMEOUT_MS (env, default 60000) is one overall deadline for a
-//   whole DeepSeek ask: every round of the tool loop and every repair round
-//   share it. It is not per request. These tests set it to 150 ms before
-//   loading the server, so reading it at load time or call time both work.
+// - DEEPSEEK_TIMEOUT_MS (env, default 240000 since issue #4: a reasoning
+//   build took up to 195 s) is one overall deadline for a whole DeepSeek ask:
+//   every round of the tool loop and every repair round share it. It is not
+//   per request. These tests set it to 150 ms before loading the server; the
+//   default's test unsets it for one ask, so it must be read per ask.
 // - Each DeepSeek fetch gets an AbortSignal (opts.signal) that is aborted
 //   when the deadline passes.
 // - Past the deadline the ask rejects with an Error whose code is
@@ -17,7 +18,8 @@
 //   failure keeps today's 502 reply.
 // - The page has its own guard, SparkyChat.ASK_TIMEOUT_MS (exported from
 //   chat.js, read when each ask starts), longer than the server's default
-//   deadline so the server's clear reply normally arrives first.
+//   deadline (255000 against 240000, issue #4) so the server's clear reply
+//   normally arrives first.
 //
 // How: the real Server.ask and the real HTTP server with AI_PROVIDER=deepseek,
 // and a fake global fetch standing in for DeepSeek. No network, no key. The
@@ -34,6 +36,7 @@ const Recipes = require('./fixtures/recipes.js');
 
 const DEADLINE = 150;
 const SLACK    = 350;   // event-loop and HTTP overhead on a busy laptop or CI
+const DEFAULT_DEADLINE = 240000;   // DEEPSEEK_TIMEOUT_MS unset (issue #4)
 const FRIENDLY = /took too long/i;
 
 // ── The fake DeepSeek ───────────────────────────────────────────────────────
@@ -168,6 +171,38 @@ test('rounds that each beat the deadline cannot add up past it: the deadline cov
   assertTimedOut(out, 'Server.ask over six 100 ms rounds');
 });
 
+// The default deadline, on a fake clock so no test waits 4 minutes. A
+// DeepSeek that never answers is still waited on 1 s before the deadline and
+// has failed with AI_TIMEOUT 1 s after it. The fallback model (#130) is left
+// as it is by default; with reasoning on it never takes over from a primary
+// that only runs long (#4), and either way the one overall deadline holds.
+test.each([
+  ['DEEPSEEK_TIMEOUT_MS unset: the default deadline is 240 s',  undefined, DEFAULT_DEADLINE],
+  ['pin: DEEPSEEK_TIMEOUT_MS=5000 still overrides the default', '5000',    5000],
+])('%s', async (_, value, ms) => {
+  const saved = process.env.DEEPSEEK_TIMEOUT_MS;
+  if (value === undefined) delete process.env.DEEPSEEK_TIMEOUT_MS; else process.env.DEEPSEEK_TIMEOUT_MS = value;
+  vi.useFakeTimers();
+  try {
+    vi.stubGlobal('fetch', hangingDeepSeek());
+    const started = Date.now();
+    let out = null;
+    Server.ask('', 'Build a single LED circuit.', []).then(
+      v => { out = { state: 'resolved', value: v, at: Date.now() - started }; },
+      e => { out = { state: 'rejected', error: e, at: Date.now() - started }; });
+
+    await vi.advanceTimersByTimeAsync(ms - 1000);
+    assert.equal(out, null, `the ask gave up after ${out && out.at} ms (${out && out.error && out.error.message}); the deadline is ${ms} ms`);
+    await vi.advanceTimersByTimeAsync(2000);
+    assert.ok(out, `the ask had no answer ${ms + 1000} ms in (deadline ${ms} ms)`);
+    assert.equal(out.state, 'rejected', `the ask should fail with the timeout, got a reply: ${JSON.stringify(out.value)}`);
+    assert.equal(out.error && out.error.code, 'AI_TIMEOUT', `rejected without code AI_TIMEOUT: ${out.error && out.error.message}`);
+  } finally {
+    vi.useRealTimers();
+    if (saved === undefined) delete process.env.DEEPSEEK_TIMEOUT_MS; else process.env.DEEPSEEK_TIMEOUT_MS = saved;
+  }
+});
+
 test('pin: a reply inside the deadline is unaffected', async () => {
   vi.stubGlobal('fetch', scriptedDeepSeek([tools('a', Recipes.ONE_LED), says('Built it.')], [30]));
   const out = await settleWithin(Server.ask('', 'Build a single LED circuit.', []), 2000);
@@ -203,8 +238,9 @@ test('pin: any other DeepSeek failure keeps the 502 reply, with no AI_TIMEOUT co
 
 // ── The page's guard ────────────────────────────────────────────────────────
 
-test('the page waits longer than the server\'s default 60 s deadline before giving up itself', () => {
+test('the page waits longer than the server\'s default 240 s deadline before giving up itself', () => {
   const Chat = require('../circuit3d/js/chat.js');
   assert.equal(typeof Chat.ASK_TIMEOUT_MS, 'number', 'chat.js exports no ASK_TIMEOUT_MS');
-  assert.ok(Chat.ASK_TIMEOUT_MS > 60000, `ASK_TIMEOUT_MS is ${Chat.ASK_TIMEOUT_MS}; the server's own 60 s timeout reply should arrive first`);
+  assert.ok(Chat.ASK_TIMEOUT_MS > DEFAULT_DEADLINE,
+    `ASK_TIMEOUT_MS is ${Chat.ASK_TIMEOUT_MS}; the server's own ${DEFAULT_DEADLINE / 1000} s timeout reply should arrive first`);
 });

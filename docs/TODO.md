@@ -4,31 +4,12 @@ The work queue, in order, with everything needed to pick a task up cold on any m
 
 Every AI task is measured on the AI test set (`docs/AI-TEST-SET.md`, 16 cases × 3 runs), not judged by eye:
 - `npm run ai-eval -- --only bank --json <file>` runs it, from `Plugged/`.
-- Add `DEEPSEEK_THINKING=1 DEEPSEEK_TIMEOUT_MS=300000` for reasoning, and `DEEPSEEK_MODEL=deepseek-v4-pro` for the Pro model.
+- Reasoning is on by default (#4); add `DEEPSEEK_THINKING=0` to turn it off, and `DEEPSEEK_MODEL=deepseek-v4-pro` for the Pro model.
 - It costs well under a dollar a run.
 
 Where the test set stands: **11/48 with reasoning off, 24/48 with reasoning on** (deepseek-flash, median 36.6 s per build).
 
 ---
-
-## 1. Reasoning on by default, with the right model and limits
-
-**Why.** Reasoning took the test set from 11/48 to 24/48, about 0.6¢ a build. The app still runs with it off, and two limits would break it if it were turned on as is:
-- **Time:** builds take 8–195 s (median 37 s). The server gives up at 60 s (`DEEPSEEK_TIMEOUT_MS`) and the page at 75 s (`ASK_TIMEOUT_MS` in `Plugged/circuit3d/js/chat.js`).
-- **Tokens:** cases 06 and 16 returned no build at all in all 6 runs, about 70–77 s each, with reply "(no response)" and 0 actions. That's most likely reasoning using the whole `max_tokens` (16000) before any tool call. The server now logs `[ask] DeepSeek stopped at max_tokens` when this happens.
-
-**Steps.**
-1. Run the test set with reasoning on and `DEEPSEEK_MAX_TOKENS=32000` (or `DEEPSEEK_REASONING_EFFORT` lower). Check that 06 and 16 now build. Record the results.
-2. Run it on `deepseek-v4-pro` with reasoning on (about 3–4× flash's token price). Compare pass rate, median and worst seconds per build, and cents per build. **Aarmen picks the model.**
-3. Make reasoning the default for builds in `Plugged/backend/ai-providers.js`. Explain mode stays off, and `DEEPSEEK_THINKING=0` stays as the off switch.
-4. Set the server deadline and the page timeout above the slowest build seen, with the page's longer than the server's so the server's own message shows. Write the decision in `docs/ARCHITECTURE.md` under Key decisions.
-5. Check that the chat's "Edison is thinking" indicator holds up through a 60 s wait.
-
-**Done when.**
-- Unit tests: the default request has thinking on; `DEEPSEEK_THINKING=0` turns it off; the page timeout is longer than the server's.
-- `npm run ai-eval -- --only demo` passes 3/3, with the demo build's time noted.
-- The full `npm run ai-eval` is compared with its last run.
-- In a browser: "Build a single LED circuit with a current-limiting resistor" → preview → Accept → lit.
 
 ## 2. TL072 guide: a sine input sets the generator's amplitude (GitHub #210)
 

@@ -432,11 +432,12 @@ async function main() {
   process.exit(summary.exitCode);
 }
 
-// The DeepSeek settings a run used (#205), as the server reads them.
+// The DeepSeek settings a run used (#205), as the server reads them:
+// thinking is on unless DEEPSEEK_THINKING is 0, off or false (issue #4).
 function evalSettings(env) {
   return {
     model:    env.DEEPSEEK_MODEL || 'deepseek-flash',
-    thinking: /^(1|on|true)$/i.test(String(env.DEEPSEEK_THINKING || '')),
+    thinking: !/^(0|off|false)$/i.test(String(env.DEEPSEEK_THINKING || '').trim()),
     effort:   env.DEEPSEEK_REASONING_EFFORT || null,
   };
 }
