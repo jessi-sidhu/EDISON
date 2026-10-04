@@ -92,10 +92,11 @@ test('parts/index.js lists battery.js, buzzer.js and button.js, and each file ex
 // sensor (ldr), the seventh; #41 the thermistor, the eighth; #34 the bench
 // supply (bench_supply), the ninth; #43 the 7-segment display; #33 the diode;
 // #35 the Zener; #32 the toggle switch (toggle_switch);
-// #39 the slide switch (slide_switch); #36 the bulb; #37 the DC motor.
-test('every part is registered: resistor, led, battery, buzzer, button, potentiometer, ldr, thermistor, bench_supply, seven_segment, diode, zener, toggle_switch, slide_switch, bulb, motor', () => {
+// #39 the slide switch (slide_switch); #36 the bulb; #37 the DC motor; #38 the current source;
+// #42 the RGB LED (rgb_led).
+test('every part is registered: resistor, led, battery, buzzer, button, potentiometer, ldr, thermistor, bench_supply, seven_segment, diode, zener, toggle_switch, slide_switch, bulb, motor, current_source, rgb_led', () => {
   const types = Parts.all().map(d => d.type).sort();
-  assert.deepStrictEqual(types, ['battery', 'bench_supply', 'bulb', 'button', 'buzzer', 'diode', 'ldr', 'led', 'motor', 'potentiometer', 'resistor', 'seven_segment', 'slide_switch', 'thermistor', 'toggle_switch', 'zener']);
+  assert.deepStrictEqual(types, ['battery', 'bench_supply', 'bulb', 'button', 'buzzer', 'current_source', 'diode', 'ldr', 'led', 'motor', 'potentiometer', 'resistor', 'rgb_led', 'seven_segment', 'slide_switch', 'thermistor', 'toggle_switch', 'zener']);
 });
 
 test("each keeps its saved type and today's label prefix (ids.js): BAT, BZ, SW", () => {

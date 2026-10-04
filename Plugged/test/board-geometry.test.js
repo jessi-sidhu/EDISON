@@ -76,17 +76,28 @@ test('the bottom rail drawn red is bp and the blue one is bn, in the top\'s orde
 
 // The board description sent with every AI question (breadboard.js's
 // App.boardTopologyText) must agree with the colours and with the server's
-// second-battery recipe, which puts + on bp_N and GND on bn_N.
-test('the AI board description calls bp the + bottom rail and bn GND, like the server prompt', () => {
+// second-battery recipe, which puts + on bp_N and − on bn_N (issue #71: the
+// bottom rails carry the second source's own terminals, so bn is its negative
+// side, never plain GND, and no rail has a fixed voltage).
+test('the AI board description calls bp the + and bn the − bottom rail, names no rail voltage, like the server prompt', () => {
   const G = load();
   const src = fs.readFileSync(path.join(__dirname, '..', 'circuit3d', 'js', 'breadboard.js'), 'utf8');
   const window = { App: { BOARD_GEOMETRY: G } };
   new Function('window', src)(window);
   const text = window.App.boardTopologyText();
-  assert.match(text, /bp = positive bottom rail \(\+9V\), bn = negative bottom rail \(GND\)/);
+  const railLines = text.split('\n').filter(l => /\b(tp|tn|bp|bn)\s*=/.test(l));
+  assert.ok(railLines.length > 0, `the board description defines no rails: ${text}`);
+  const volts = railLines.filter(l => /\d+(\.\d+)?\s?V\b/.test(l));
+  assert.deepStrictEqual(volts, [], 'the board description gives the rails a fixed voltage');
+  const bpLine = railLines.find(l => /\bbp\s*=/.test(l));
+  const bn     = (railLines.find(l => /\bbn\s*=/.test(l)) || '').replace(/^.*\bbn\s*=/, 'bn =');
+  assert.match(bpLine || '', /\bbp\s*=\s*positive\b/, `bp should be the positive bottom rail: "${bpLine}"`);
+  assert.match(bn, /^bn\s*=\s*negative\b.*(\(\s*[−-]\s*\)|\bnegative\s*\(?[−-]\)?)/,
+    `bn should be the negative (−) bottom rail: "${bn}"`);
+  assert.doesNotMatch(bn, /\b(GND|ground)\b/i, `bn should not be called GND: "${bn}"`);
   assert.doesNotMatch(text, /bn = positive/);
   const server = fs.readFileSync(path.join(__dirname, '..', 'backend', 'server.js'), 'utf8');
-  assert.match(server, /bp_N \(\+\) and bn_N \(GND\)/, 'the server prompt should still put + on bp and GND on bn');
+  assert.match(server, /bp_N \(\+\) and bn_N \(−\)/, 'the server prompt should put + on bp and − on bn');
 });
 
 test('TOTAL_HOLES is COLS x rows: 882 at 63 columns', () => {

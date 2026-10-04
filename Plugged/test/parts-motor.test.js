@@ -718,12 +718,12 @@ test('the known answer at 3 V has no circuit problems and passes finishAIReply u
 
 const found = q => Sidebar.groups(Parts.all(), q).flatMap(g => g.parts.map(p => p.type));
 
-test('sidebar search: "motor", "fan" and "Spin" find only the motor; "led" and "switch" find what they did', () => {
+test('sidebar search: "motor", "fan" and "Spin" find only the motor; "led" (the LED and, since #42, the RGB LED) and "switch" find what they did', () => {
   motor();
   assert.deepStrictEqual(found('motor'), ['motor']);
   assert.deepStrictEqual(found('fan'), ['motor']);
   assert.deepStrictEqual(found('Spin'), ['motor']);
-  assert.deepStrictEqual(found('led'), ['led']);
+  assert.deepStrictEqual(found('led').sort(), ['led', 'rgb_led']);
   assert.deepStrictEqual(found('switch').sort(), ['button', 'slide_switch', 'toggle_switch']);
 });
 

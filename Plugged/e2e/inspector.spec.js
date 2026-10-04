@@ -357,9 +357,10 @@ test('sidebar: every registered part once under its category; "led" filters to t
   await expect(page.locator('#sidebar .comp-item[data-type="wire"]'), 'the Wire tool stays').toBeVisible();
 
   // Search.
-  await page.locator('#part-search').fill('led');
-  await expect(page.locator('#sidebar .comp-item[data-type]:not([data-type="wire"]):visible')).toHaveCount(1);
+  await page.locator('#part-search').fill('led');   // the LED and, since #42, the RGB LED (rgb_led)
+  await expect(page.locator('#sidebar .comp-item[data-type]:not([data-type="wire"]):visible')).toHaveCount(2);
   await expect(page.locator('#sidebar .comp-item[data-type="led"]')).toBeVisible();
+  await expect(page.locator('#sidebar .comp-item[data-type="rgb_led"]')).toBeVisible();
   await expect(page.locator('#sidebar .comp-group[data-category="Passives"]')).toBeHidden();
   await expect(page.locator('#sidebar .comp-group[data-category="Semiconductors"]')).toBeVisible();
 

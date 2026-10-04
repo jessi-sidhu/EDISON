@@ -92,15 +92,17 @@ test('no parts gives no groups', () => {
 
 // ── Search ─────────────────────────────────────────────────────────────────
 
-test('search "led" finds only the LED', () => {
+// #42: the RGB LED's type (rgb_led) and name ("RGB LED") hold "led", so a
+// search for "led" finds it too, beside the LED, both Semiconductors.
+test('search "led" finds the LED and the RGB LED, nothing else', () => {
   const gs = groups(Parts.all(), 'led');
   assert.deepEqual(gs.map(g => g.category), ['Semiconductors']);
-  assert.deepEqual(typesOf(gs), ['led']);
+  assert.deepEqual(typesOf(gs).sort(), ['led', 'rgb_led']);
 });
 
-test('search is case-insensitive: "LED" and "Led" find the LED', () => {
-  assert.deepEqual(typesOf(groups(Parts.all(), 'LED')), ['led']);
-  assert.deepEqual(typesOf(groups(Parts.all(), 'Led')), ['led']);
+test('search is case-insensitive: "LED" and "Led" find the LED and the RGB LED', () => {
+  assert.deepEqual(typesOf(groups(Parts.all(), 'LED')).sort(), ['led', 'rgb_led']);
+  assert.deepEqual(typesOf(groups(Parts.all(), 'Led')).sort(), ['led', 'rgb_led']);
 });
 
 test('search matches the name: "push" finds the Push Button, "BUZZ" the buzzer', () => {

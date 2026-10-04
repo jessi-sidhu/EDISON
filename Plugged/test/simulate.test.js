@@ -1687,3 +1687,260 @@ test('two 9 V batteries in parallel across 6 Ω: the group total (1.5 A) is a sh
   assert.equal(r.shorted, one.shorted, `shorted like the one-battery run: ${texts(r).join(' | ')}`);
   assert.deepStrictEqual(shortLines(r), shortLines(one), 'the same short line(s) as one battery across 6 Ω');
 });
+
+// ── The ideal current source: the I element (#38) ─────────────────────────
+//  parts/current_source.js is an on-board span part, pins ['from', 'to'],
+//  ref 'from', one element I(from, to, amps = values.current). Current flows
+//  from `from` through the source and out of `to`, so in the circuit outside
+//  it leaves `to` and comes back into `from`: the stamp injects +amps at
+//  `to` and −amps at `from`. currents[] reads +amps for the source (pin 0 →
+//  pin 1 inside it). Its `from` is the ground of a circuit whose earliest
+//  source it is. The labels here are the records' own ('IS1'); the prefix is
+//  the builder's pick.
+//
+//  With nowhere for the current to go (no path from `to` back to `from`
+//  through anything but current sources: nothing wired, a dangling
+//  resistor, an open switch, a backwards LED), an ideal current source has
+//  no answer: with GMIN alone it would read 10 mA / 1e-12 S = 10 GV. So the
+//  check must come before trusting the solve. analyze() then says so in one
+//  line containing "no path for the current", keeps to an existing status
+//  ('ok' or 'unsolvable', no new value), and nowhere (lines, nodeVoltages,
+//  voltageAt, currents, parts, the AI summary) holds NaN, Infinity or a
+//  huge number.
+//
+//  Hand-computed (every resistor exact, the source ideal):
+//   10 mA into 1 kΩ:                          V = 10 V
+//   10 mA into 1 kΩ ∥ 1 kΩ (500 Ω):           V = 5 V, 5 mA each
+//   10 mA into 1 kΩ ∥ 4 kΩ (800 Ω):           V = 8 V, 8 mA and 2 mA
+//   9 V, 1 kΩ from + to X, 1 kΩ from X to −, 1 mA into X (superposition):
+//     V(X) = 4.5 + 1 mA × 500 Ω = 5.0 V; 4 mA from +, 5 mA to −, battery 4 mA
+//     the source turned round (1 mA out of X): 4.5 − 0.5 = 4.0 V; 5 mA / 4 mA
+//   Two sources, nodal: 10 mA into A, 5 mA into B, 1 kΩ A–gnd, A–B, B–gnd:
+//     2VA − VB = 10, −VA + 2VB = 5 → VA = 25/3 = 8.333 V, VB = 20/3 = 6.667 V
+//   10 mA into A, 4 mA out of A, 1 kΩ A–gnd: 6 mA, 6 V
+//   10 mA into a red LED (vf 2.0, ron 0.1 Ω): on at exactly 10 mA, 2.001 V
+
+const SRC = 'IS1';
+function needIsrc() {
+  assert.ok(Parts().get('current_source'),
+    "Parts.get('current_source') is null: parts/current_source.js must exist and be listed in parts/index.js");
+}
+// holes [from, to]; amps as values.current.
+function isrc(from, to, amps, label) {
+  return comp('current_source', [from, to], { label: label || SRC, values: { current: amps === undefined ? 0.01 : amps } });
+}
+function ohms(a, b, R, label) { return comp('resistor', [a, b], { label, values: { resistance: R } }); }
+const railWire = (col, row) => wire(h(col, 'a'), h(col, row || 'tn'));
+const nearMA = (got, want, why) =>
+  assert.ok(typeof got === 'number' && Math.abs(got - want) < 1e-3, `${why}: expected ${want} mA, got ${got}`);
+
+// 10 mA source: from b2 (column 2 wired to tn), to b5; R1 1 kΩ c5–c9, column 9 to tn.
+function knownAnswerCircuit(amps) {
+  const components = [isrc(h(1, 'b'), h(4, 'b'), amps), ohms(h(4, 'c'), h(8, 'c'), 1000, 'R1')];
+  return { components, wires: [railWire(1), railWire(8)] };
+}
+
+test('I stamp: 10 mA from ground into 1 kΩ reads 10.0 V at `to`, 10 mA through R1, currents[] +0.01 A for the source, no open-circuit line (#38)', () => {
+  needIsrc();
+  const { components, wires } = knownAnswerCircuit();
+  const r = Sim.analyze(components, wires);
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  assert.equal(r.shorted, false);
+  nearV(vAt(r, h(4, 'e')), 10, '`to` column (5)');
+  nearV(vAt(r, h(1, 'e')), 0,  '`from` column (2), on the ground rail');
+  nearMA(part(r, 'R1').m.current, 10, 'R1');
+  assert.ok(Math.abs(r.currents[1] - 0.01) < 1e-6, `currents[1] (R1, lead1 → lead2) 0.01 A, got ${r.currents[1]}`);
+  assert.ok(Math.abs(r.currents[0] - 0.01) < 1e-9, `currents[0] (the source, from → to inside it) +0.01 A, got ${r.currents[0]}`);
+  nearV(part(r, SRC).r.pins.to, 10, 'parts.IS1.r.pins.to');
+  nearV(part(r, SRC).r.pins.from, 0, 'parts.IS1.r.pins.from');
+  assert.ok(!texts(r).some(t => /Circuit open|no path|No battery|Battery terminals/i.test(t)), texts(r).join(' | '));
+});
+
+test('I stamp follows the value: 2 mA into the same 1 kΩ is 2.0 V; 1 A into it is 1000 V, a real reading, not an open circuit (#38)', () => {
+  needIsrc();
+  let r = Sim.analyze(...Object.values(knownAnswerCircuit(0.002)));
+  nearV(vAt(r, h(4, 'e')), 2, '2 mA × 1 kΩ');
+  r = Sim.analyze(...Object.values(knownAnswerCircuit(1)));
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  nearV(vAt(r, h(4, 'e')), 1000, '1 A × 1 kΩ');
+  assert.ok(!texts(r).some(t => /no path for the current/i.test(t)), texts(r).join(' | '));
+});
+
+test('current division: 10 mA into 1 kΩ ∥ 1 kΩ is 5 V, 5 mA each; into 1 kΩ ∥ 4 kΩ is 8 V, 8 mA and 2 mA (#38)', () => {
+  needIsrc();
+  for (const [R2, V, i1, i2] of [[1000, 5, 5, 5], [4000, 8, 8, 2]]) {
+    // Both resistors from column 5 to ground: R1 c5–c9, R2 d5–d10.
+    const components = [isrc(h(1, 'b'), h(4, 'b')), ohms(h(4, 'c'), h(8, 'c'), 1000, 'R1'), ohms(h(4, 'd'), h(9, 'd'), R2, 'R2')];
+    const r = Sim.analyze(components, [railWire(1), railWire(8), railWire(9)]);
+    assert.equal(r.status, 'ok', texts(r).join(' | '));
+    nearV(vAt(r, h(4, 'e')), V, `node with 1 kΩ ∥ ${R2} Ω`);
+    nearMA(part(r, 'R1').m.current, i1, `R1 with R2 = ${R2}`);
+    nearMA(part(r, 'R2').m.current, i2, `R2 = ${R2}`);
+  }
+});
+
+test('superposition: 9 V, 1 kΩ + to X, 1 kΩ X to −, 1 mA into X gives 5.0 V (4 mA / 5 mA, battery 4 mA); turned round, 4.0 V (#38)', () => {
+  needIsrc();
+  for (const [into, V, i1, i2] of [[true, 5, 4, 5], [false, 4, 5, 4]]) {
+    const bat = Object.assign(battery(), { label: 'BAT1' });
+    // R1 b5–b9 fed from tp_4 → a5; R2 c9–c13, a13 → tn_13; X = column 9.
+    // The source spans e13 (column 13, ground) and e9 (X), 1 mA.
+    const src = into ? isrc(h(12, 'e'), h(8, 'e'), 0.001) : isrc(h(8, 'e'), h(12, 'e'), 0.001);
+    const components = [bat, ohms(h(4, 'b'), h(8, 'b'), 1000, 'R1'), ohms(h(8, 'c'), h(12, 'c'), 1000, 'R2'), src];
+    const r = Sim.analyze(components, [wire(h(3, 'tp'), h(4, 'a')), railWire(12)]);
+    assert.equal(r.status, 'ok', texts(r).join(' | '));
+    const how = into ? '1 mA into X' : '1 mA out of X';
+    nearV(vAt(r, h(8, 'a')), V, `V(X), ${how}`);
+    nearMA(part(r, 'R1').m.current, i1, `R1, ${how}`);
+    nearMA(part(r, 'R2').m.current, i2, `R2, ${how}`);
+    nearMA(part(r, 'BAT1').m.current, i1, `the battery supplies what R1 carries, ${how}`);
+    nearV(vAt(r, h(20, 'tn')), 0, 'ground is still the battery − (placed first)');
+  }
+});
+
+test('two current sources, nodal analysis: 10 mA into A, 5 mA into B, 1 kΩ A–gnd, A–B, B–gnd: VA 8.333 V, VB 6.667 V (#38)', () => {
+  needIsrc();
+  // A = column 10, B = column 20 (column 15 wired to it). Grounds on tn.
+  const components = [
+    isrc(h(5, 'd'), h(9, 'd'), 0.01, 'IS1'),          // from d6 (tn), to d10 (A)
+    ohms(h(9, 'b'), h(12, 'b'), 1000, 'R1'),          // A – column 13 (tn)
+    ohms(h(9, 'c'), h(14, 'c'), 1000, 'R2'),          // A – column 15 (= B)
+    ohms(h(19, 'b'), h(23, 'b'), 1000, 'R3'),         // B – column 24 (tn)
+    isrc(h(15, 'd'), h(19, 'd'), 0.005, 'IS2'),       // from d16 (tn), to d20 (B)
+  ];
+  const wires = [railWire(5), railWire(12), wire(h(14, 'a'), h(19, 'a')), railWire(23), railWire(15)];
+  const r = Sim.analyze(components, wires);
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  nearV(vAt(r, h(9, 'e')), 25 / 3, 'VA');
+  nearV(vAt(r, h(19, 'e')), 20 / 3, 'VB');
+  nearMA(part(r, 'R1').m.current, 25 / 3, 'R1 (A to ground)');
+  nearMA(part(r, 'R2').m.current, 5 / 3, 'R2 (A to B)');
+  nearMA(part(r, 'R3').m.current, 20 / 3, 'R3 (B to ground)');
+  nearV(vAt(r, h(30, 'tn')), 0, 'ground: the earliest source’s `from`, on tn');
+});
+
+test('two current sources facing opposite ways into one 1 kΩ: 10 mA in, 4 mA out, 6 mA and 6 V (#38)', () => {
+  needIsrc();
+  const components = [
+    isrc(h(5, 'd'), h(9, 'd'), 0.01, 'IS1'),     // from d6 (tn) → to d10 (A)
+    isrc(h(9, 'e'), h(5, 'e'), 0.004, 'IS2'),    // from e10 (A) → to e6 (tn): pulls 4 mA out of A
+    ohms(h(9, 'b'), h(12, 'b'), 1000, 'R1'),
+  ];
+  const r = Sim.analyze(components, [railWire(5), railWire(12)]);
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  nearV(vAt(r, h(9, 'c')), 6, 'V(A)');
+  nearMA(part(r, 'R1').m.current, 6, 'R1');
+});
+
+test("a circuit whose only source is the current source is grounded at its `from` pin: `from` 0 V, `to` 10 V, the tn rail it never touches floating (#38)", () => {
+  needIsrc();
+  // No rail at all: R1's far end (column 9) is wired back to `from` (column 2).
+  const components = [isrc(h(1, 'b'), h(4, 'b')), ohms(h(4, 'c'), h(8, 'c'), 1000, 'R1')];
+  const r = Sim.analyze(components, [wire(h(8, 'a'), h(1, 'a'))]);
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  nearV(vAt(r, h(1, 'c')), 0, 'the `from` column is ground');
+  nearV(vAt(r, h(4, 'e')), 10, 'the `to` column');
+  assert.strictEqual(vAt(r, h(30, 'tn')), null, 'the tn rail is in no circuit');
+  nearMA(part(r, 'R1').m.current, 10, 'R1');
+  assert.ok(!texts(r).some(t => /Circuit open|no path|No battery/i.test(t)), texts(r).join(' | '));
+});
+
+test('a 10 mA source drives a red LED at exactly 10 mA: lit, 2.001 V across it (the diode loop settles) (#38)', () => {
+  needIsrc();
+  // `to` (column 5) into the LED's anode d5; its cathode d7, column 7 to tn.
+  const components = [isrc(h(1, 'b'), h(4, 'b')), comp('led', [h(6, 'd'), h(4, 'd')], { label: 'LED1' })];
+  const r = Sim.analyze(components, [railWire(1), railWire(6)]);
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  assert.equal(part(r, 'LED1').m.on, true, JSON.stringify(part(r, 'LED1').m));
+  nearMA(part(r, 'LED1').m.current, 10, 'LED1');
+  assert.ok(Math.abs(vAt(r, h(4, 'e')) - 2.001) < 1e-6, `V(to) = vf + 10 mA × 0.1 Ω, got ${vAt(r, h(4, 'e'))}`);
+  assert.equal(litLEDs(r), 1, texts(r).join(' | '));
+});
+
+// ── The open circuit: no path for the current (#38) ──
+
+const NO_PATH = /no path for the current/i;
+const HUGE_V = 100, HUGE_MA = 1000;
+
+// Every reading analyze() and the summary give, none NaN, Infinity or huge.
+function assertNoBlowUp(r, holes, lines) {
+  const bad = [];
+  const num = (x, what, lim) => {
+    if (x === null || x === undefined || typeof x === 'boolean' || typeof x === 'string') return;
+    if (typeof x !== 'number' || !Number.isFinite(x) || Math.abs(x) > lim) bad.push(`${what} = ${x}`);
+  };
+  Object.entries(r.nodeVoltages || {}).forEach(([n, v]) => num(v, `nodeVoltages.${n}`, HUGE_V));
+  (r.currents || []).forEach((i, k) => num(i, `currents[${k}] (A)`, 1));
+  if (typeof r.voltageAt === 'function') holes.forEach(x => num(r.voltageAt(x), `voltageAt(${x.row}${x.col + 1})`, HUGE_V));
+  for (const [label, p] of Object.entries(r.parts || {})) {
+    Object.entries(p.r.pins || {}).forEach(([pin, v]) => num(v, `${label}.r.pins.${pin}`, HUGE_V));
+    Object.entries(p.r.current || {}).forEach(([id, v]) => num(v, `${label}.r.current.${id} (mA)`, HUGE_MA));
+    Object.entries(p.m || {}).forEach(([k, v]) => num(v, `${label}.m.${k}`, HUGE_MA));
+  }
+  for (const t of texts(r).concat(lines)) {
+    if (/NaN|Infinity|undefined|null|\de[+-]?\d/.test(t)) bad.push(`line "${t}"`);
+    for (const m of t.matchAll(/-?\d+(?:\.\d+)?/g)) if (Math.abs(+m[0]) > HUGE_MA) bad.push(`line "${t}" (${m[0]})`);
+  }
+  assert.deepStrictEqual(bad, [], 'no NaN, Infinity or huge reading anywhere');
+}
+
+function assertNoPath(components, wires) {
+  const r = Sim.analyze(components, wires);
+  const lines = summary(components, wires);
+  assert.ok(['ok', 'unsolvable'].includes(r.status), `an existing status, 'ok' or 'unsolvable'; got ${r.status}`);
+  assert.ok(texts(r).some(t => NO_PATH.test(t)), `a results line saying "no path for the current": ${texts(r).join(' | ')}`);
+  assert.ok(lines.some(t => NO_PATH.test(t)), `the AI summary says it too:${show(lines)}`);
+  const holes = components.flatMap(c => c.holeRefs || []).concat(wires.flatMap(w => [w.startHole, w.endHole]).filter(Boolean));
+  assertNoBlowUp(r, holes, lines);
+  if (!components.some(c => c.type === 'battery')) {
+    assert.ok(!texts(r).some(t => /battery/i.test(t)), `no results line talks about a battery there isn't: ${texts(r).join(' | ')}`);
+  }
+  return r;
+}
+
+const OPEN_CASES = {
+  'a lone current source, nothing wired': () => [[isrc(h(1, 'b'), h(4, 'b'))], []],
+  '`from` on the ground rail, `to` wired to nothing': () => [[isrc(h(1, 'b'), h(4, 'b'))], [railWire(1)]],
+  '`to` into a 1 kΩ whose far end goes nowhere': () =>
+    [[isrc(h(1, 'b'), h(4, 'b')), ohms(h(4, 'c'), h(8, 'c'), 1000, 'R1')], [railWire(1)]],
+  '`from` left unwired: `to` → 1 kΩ → ground rail, nothing back into `from`': () =>
+    [[isrc(h(1, 'b'), h(4, 'b')), ohms(h(4, 'c'), h(8, 'c'), 1000, 'R1')], [railWire(8)]],
+  'an open toggle switch in the loop (`to` → S1 → 1 kΩ → ground)': () => switchLoop(false),
+  'a backwards LED as the only way back (cathode at `to`)': () =>
+    [[isrc(h(1, 'b'), h(4, 'b')), comp('led', [h(4, 'd'), h(6, 'd')], { label: 'LED1' })], [railWire(1), railWire(6)]],
+};
+
+// to b5 → S1 c5–c7 → R1 d7–d11 → a11 → tn; from b2 → a2 → tn.
+function switchLoop(closed) {
+  return [[isrc(h(1, 'b'), h(4, 'b')),
+    comp('toggle_switch', [h(4, 'c'), h(6, 'c')], { label: 'S1', controls: { closed } }),
+    ohms(h(6, 'd'), h(10, 'd'), 1000, 'R1')], [railWire(1), railWire(10)]];
+}
+
+for (const [name, build] of Object.entries(OPEN_CASES)) {
+  test(`open circuit, ${name}: one "no path for the current" line, an existing status, no NaN / Infinity / huge reading anywhere (#38)`, () => {
+    needIsrc();
+    assertNoPath(...build());
+  });
+}
+
+test('the same loop with the switch closed has its path: 10 mA through S1 and R1, 10.0 V, no "no path" line (#38)', () => {
+  needIsrc();
+  const r = Sim.analyze(...switchLoop(true));
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  nearMA(part(r, 'R1').m.current, 10, 'R1');
+  assert.ok(Math.abs(vAt(r, h(4, 'e')) - 10) < 1e-3, `V(to) = 10 mA × (1 kΩ + 1 mΩ), got ${vAt(r, h(4, 'e'))}`);
+  assert.ok(!texts(r).some(t => NO_PATH.test(t)), texts(r).join(' | '));
+});
+
+test('summary of the known answer: solved, measured from the current source (never called a battery), its report "10 mA · 10.0 V across", each pin by role (#38)', () => {
+  needIsrc();
+  const { components, wires } = knownAnswerCircuit();
+  const lines = summary(components, wires);
+  assert.match(lines[0], /^Status: solved\. Voltages are measured from IS1\b/, show(lines));
+  assert.doesNotMatch(lines[0], /battery/i, `the status line calls the current source a battery:${show(lines)}`);
+  assertLine(lines, /^- IS1: 10 mA · 10\.0 V across$/, 'the source’s report');
+  assertLine(lines, /^ {2}- IS1 pin 0 \(b2, from\): 0\.00 V$/, '`from` by role');
+  assertLine(lines, /^ {2}- IS1 pin 1 \(b5, to\): 10\.00 V$/, '`to` by role');
+  assert.ok(!lines.some(t => /no path|Circuit open/i.test(t)), show(lines));
+});

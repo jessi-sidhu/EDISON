@@ -104,7 +104,7 @@ const buildPrompt = tools => [
   `- Columns 1-${COLS}. Rows a/b/c/d/e = top half. Rows f/g/h/i/j = bottom half.`,
   '- Same column + same half = electrically connected (e.g. a14 and e14 share a node).',
   '- The CENTER CHANNEL separates top from bottom. a14 and f14 are NOT connected unless you wire them.',
-  '- tp_N = positive power rail at column N (+9V). tn_N = GND rail at column N.',
+  '- tp_N = positive (+) power rail at column N. tn_N = GND rail at column N.',
   '- Rails are NOT auto-connected to body holes. Always wire from tp/tn to body holes.',
   '',
   'PARTS:',
@@ -127,7 +127,7 @@ const buildPrompt = tools => [
   '- Without BOTH battery wires the circuit WILL NOT WORK. ALWAYS include them.',
   '- Never wire BAT1.0 straight to BAT1.1, or tp to tn: that is a short circuit.',
   '- Battery wires go to the rails at the highest column, the end nearest the battery, so they drop straight in. In the recipes, N = the highest column in the board description (Columns 1-N).',
-  '- A second battery (two separate circuits) goes on the bottom rails, bp_N (+) and bn_N (GND), nearest row j: BAT2.0 -> bp_{N} (red) and BAT2.1 -> bn_{N} (black). Its parts go in rows f–j, with its rail wires in row j. Never wire a second battery to the tp/tn rails.',
+  '- A second battery (two separate circuits) goes on the bottom rails, bp_N (+) and bn_N (−), nearest row j: BAT2.0 -> bp_{N} (red) and BAT2.1 -> bn_{N} (black). Its parts go in rows f–j, with its rail wires in row j. Never wire a second battery to the tp/tn rails.',
   '',
   'COMPONENT RULES:',
   ...GENERATED.pinRoles,
@@ -160,7 +160,7 @@ const buildPrompt = tools => [
   '',
   'CRITICAL WIRING RULES:',
   '- Placing a component on the board does NOT connect it to power or ground.',
-  '- You MUST add_wire from a power rail (tp_N) to each component that needs +9V.',
+  '- You MUST add_wire from a power rail (tp_N) to each component that needs power.',
   '- You MUST add_wire from each component that needs GND to a ground rail (tn_N).',
   '- Without these rail-to-body wires, the circuit WILL NOT WORK.',
   '- A hole holds one lead. To connect to a part, use another hole in the same column and half.',
@@ -711,6 +711,9 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // ways (a released button counts as closed, a backwards LED still joins its
   // columns): the "is it on a complete path at all" check reads this one.
   const placedParts = [];
+  // A current source's I element, as a [plus, minus] terminal pair: its
+  // current leaves `to` and comes back into `from`.
+  const isrcPairs = [];
   const joins = wireEdges.map(([x, y]) => ({ x, y, part: -1 }));
   actions.forEach((a, i) => {
     const def = PART_BY_TOOL.get(a.tool);
@@ -726,6 +729,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
       const [x, y] = el.pins;
       joins.push({ x: node(x), y: node(y), part: i });
       if (el.kind === 'R' || el.kind === 'SW') edges.push([node(x), node(y)]);
+      if (el.kind === 'I') isrcPairs.push([node(y), node(x)]);
       if (el.kind === 'D') diodes.push({ i, el, anode: node(x), cathode: node(y), outer: x in holeOf && y in holeOf, holeOf });
     }
   });
@@ -787,6 +791,19 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
 
   const pos = new Set(), neg = new Set();
   const terminals = [];
+  // A terminal pair's reach into pos / neg: first each side without diodes,
+  // then grown through forward diodes without crossing into the other side:
+  // an LED that lit up one branch must not carry + round through the ground
+  // rail and hide a reversed LED elsewhere.
+  function growPair(plus, minus) {
+    const plusSide = reach(plus), minusSide = reach(minus);
+    const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
+    const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
+    for (const k of plusSide) pos.add(k);
+    for (const k of minusSide) neg.add(k);
+    for (const k of reach(plus, fromPlus, onlyMinus))  pos.add(k);
+    for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
+  }
   const railPairs = new Map();   // "tp|tn" → the batteries wired to that rail pair
   for (const { def, n } of [...sources.values()].sort(byOrder)) {
     const key = k => sourceKey(def, n, k);
@@ -818,18 +835,13 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
       const pair = `${rails(plusWires)}|${rails(reach(minus, wireEdges))}`;
       if (isBattery(def) && !/^\||\|$/.test(pair)) railPairs.set(pair, [...(railPairs.get(pair) || []), n]);
 
-      // First each side without diodes, then grown through forward diodes
-      // without crossing into the other side: an LED that lit up one branch
-      // must not carry + round through the ground rail and hide a reversed LED
-      // elsewhere.
-      const plusSide = reach(plus), minusSide = reach(minus);
-      const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
-      const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
-      for (const k of plusSide) pos.add(k);
-      for (const k of minusSide) neg.add(k);
-      for (const k of reach(plus, fromPlus, onlyMinus))  pos.add(k);
-      for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
+      growPair(plus, minus);
     }
+  }
+
+  for (const [p, m] of isrcPairs) {
+    terminals.push([p, m]);
+    growPair(p, m);
   }
 
   // #51: two batteries on one pair of rails fight each other.

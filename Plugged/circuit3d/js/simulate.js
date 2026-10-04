@@ -252,6 +252,8 @@
       const { el, nodes: [n1, n2] } = e;
       if (el.kind === 'R' && el.ohms > 0) conductance(n1, n2, 1 / el.ohms);
       if (el.kind === 'SW' && el.closed) conductance(n1, n2, 1 / SW_OHMS);
+      // I: a set current out of the source's `to` pin, back into its `from`.
+      if (el.kind === 'I') { inject(n2, el.amps); inject(n1, -el.amps); }
       if (el.kind !== 'D') return;
       // I(anode → cathode) = (Va − Vc ∓ V) / ron: Vf when on, −Vz in breakdown.
       const mode = modeOf.get(e), G = 1 / el.ron;
@@ -283,6 +285,7 @@
     if (el.kind === 'R' && el.ohms > 0) return (sol.v(a) - sol.v(b)) / el.ohms;
     if (el.kind === 'SW') return el.closed ? (sol.v(a) - sol.v(b)) / SW_OHMS : 0;
     if (el.kind === 'V') return sol.vCurrent.get(e) || 0;
+    if (el.kind === 'I') return el.amps;
     if (el.kind === 'D') {
       const vd = sol.v(a) - sol.v(b);
       if (mode === 'on')        return (vd - el.vf) / el.ron;
@@ -596,6 +599,19 @@
     }
     const { sol } = solved;
     const modeOf  = modesOf(solved.modes);
+    // An ideal current source with no loop outside it (through settled
+    // modes) would force its current anyway: no path, so no readings.
+    if (els.some(e => e.el.kind === 'I')) {
+      const uf = new UnionFind();
+      els.forEach(e => {
+        e.nodes.forEach(n => uf.make(n));
+        if (e.el.kind !== 'I' && conducts(e, modeOf)) e.nodes.forEach(n => uf.union(e.nodes[0], n));
+      });
+      if (els.some(e => e.el.kind === 'I' && uf.find(e.nodes[0]) !== uf.find(e.nodes[1]))) {
+        lines.push({ text: '  ⚠ No path for the current: wire the current source into a closed loop.', cls: 'sim-err' });
+        return done({ status: 'unsolvable', lines: withHeads(null) });
+      }
+    }
     // The nodes a source reaches through the settled modes: these read volts.
     const { live } = groundCircuits(graph, modeOf);
     // Amps through each stamped source, read before the split below, so a
@@ -703,8 +719,8 @@
 
     const src0 = components.find(c => { const d = partDef(c.type); return d && d.ref !== undefined; });
     const def0 = partDef(src0.type), ref = def0.ref;
-    // A 2-pin source reads as today's battery; others name the ref pin by index.
-    const from = def0.pins.length === 2 ? `${labelOf(components, src0)}.${ref} (the first battery's − terminal)`
+    // An off-board 2-pin source reads as today's battery; others name the ref pin by index.
+    const from = def0.pins.length === 2 && def0.place.kind === 'offboard' ? `${labelOf(components, src0)}.${ref} (the first battery's − terminal)`
       : `${labelOf(components, src0)}.${def0.pins.indexOf(ref)} (${ref.toUpperCase()}, the ${def0.name.toLowerCase()}'s ground)`;
     const out  = [`Status: ${r.shorted ? 'short circuit' : 'solved'}. Voltages are measured from ${from}.`];
     if (!results) return out.concat(messages);   // a source shorted by a wire solves nothing

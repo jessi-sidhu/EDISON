@@ -15,7 +15,7 @@ const Parts = require('../circuit3d/js/parts');
 // the potentiometer (#31), the light sensor (#40), the thermistor (#41),
 // the diode (#33), the toggle switch (#32) and the slide switch (#39) are listed even before their files exist, so this spec fails (rather than
 // running nothing) until each is registered.
-const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', 'ldr', 'thermistor', 'diode', 'zener', 'toggle_switch', 'slide_switch', 'bulb', 'motor', ...Parts.all().map(d => d.type)])];
+const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', 'ldr', 'thermistor', 'diode', 'zener', 'toggle_switch', 'slide_switch', 'bulb', 'motor', 'current_source', 'rgb_led', ...Parts.all().map(d => d.type)])];
 
 // Resistor colours, as the model has always drawn them.
 const BODY = 0xd4a96a, LEAD = 0xc0c0c0, GHOST_LEAD = 0xcccccc;

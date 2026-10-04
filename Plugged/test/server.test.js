@@ -632,3 +632,86 @@ test('a 350 Ω resistor is kept at 350, with a note giving the closest kit value
   assert.equal(find(out, 'place_resistor').resistance, 350);
   assert.match(out.reply, /330 Ω/);
 });
+
+// ── Prompt wording: set_value ranges, one ± rail story, no hard-coded 9 V (issue #71) ──
+//
+// The chosen ± story (issue #71 comment): the bottom rails carry the SECOND
+// source's own terminals. A second battery puts its + on bp and its − on bn;
+// the dual bench supply puts −V on bn with COM on tn. So bn is always the
+// second source's negative side, never called "GND" by itself.
+// These check meaning, not wording, so the prompt can be phrased freely.
+
+const Parts71 = require('../circuit3d/js/parts');
+const setValueParam = key => {
+  const decl = Server.CIRCUIT_TOOLS[0].function_declarations.find(d => d.name === 'set_value');
+  assert.ok(decl, 'no set_value tool');
+  const p = decl.parameters.properties[key];
+  assert.ok(p, `set_value has no "${key}" param`);
+  return p.description;
+};
+
+// PIN (passes today, done in #35 via valueDescription): each value's range is per part.
+for (const [key, parts] of [
+  ['voltage',    [['battery', /1 V–24 V/], ['bench supply', /0 V–30 V/]]],
+  ['resistance', [['resistor', /1 Ω–10 MΩ/]]],
+]) {
+  test(`PIN: set_value's ${key} description names each part's own range (${parts.map(p => p[0]).join(', ')})`, () => {
+    const text = setValueParam(key);
+    for (const [part, range] of parts) {
+      const clause = text.split(';').find(c => new RegExp(`(^|\\.\\s|\\s)${part}:`).test(c));
+      assert.ok(clause, `set_value.${key} has no "${part}:" range: "${text}"`);
+      assert.match(clause, range, `set_value.${key} gives ${part} the wrong range: "${clause}"`);
+    }
+  });
+}
+
+// Item 3: "+9V" is wrong with a 5 V supply or a non-9 V battery. (Recipes that
+// set a 9 V battery may still say 9 V; only a hard-coded + rail voltage is out.)
+test('no line of the system prompt hard-codes the + rail as +9V / +9 V', () => {
+  const hits = promptText().split('\n').filter(l => /\+\s?9\s?V\b/i.test(l));
+  assert.deepEqual(hits, [], 'prompt lines that still hard-code a +9V rail');
+});
+
+test('the rail description (tp_N) and the must-wire rule name no fixed rail voltage', () => {
+  const lines = promptText().split('\n');
+  const railLine = lines.find(l => /\btp_N\b/.test(l) && /\brail\b/i.test(l) && /\btn_N\b/.test(l) && /^- tp_N/.test(l));
+  const mustLine = lines.find(l => /MUST add_wire from a power rail/i.test(l) || (/MUST add_wire/.test(l) && /\btp_N\b/.test(l)));
+  assert.ok(railLine, 'no BREADBOARD LAYOUT line describing tp_N / tn_N');
+  assert.ok(mustLine, 'no CRITICAL WIRING RULES line telling the AI to wire from tp_N');
+  for (const line of [railLine, mustLine]) {
+    assert.doesNotMatch(line, /\d+(\.\d+)?\s?V\b/, `this line assumes a rail voltage: "${line}"`);
+  }
+});
+
+// Item 2: one ± story. bn is the second source's negative side in both texts.
+const sentencesWithBn = text => text.split(/(?<=[.;])\s+|\n/).filter(s => /\bbn(_|\b)/.test(s));
+// "bn_N (GND)", "ground rail (bn_N", "GND rail bn_N", "bn_N = GND", "bn is ground" …
+const callsBnGround = s =>
+  /\bbn_[^\s,)]*\s*(\(|=|is)\s*(the\s+)?(GND|ground)\b/i.test(s)
+  || /\b(GND|ground)\s+rail\s*\(?\s*(\(|,)?\s*bn_/i.test(s)
+  || /\b(GND|ground)\b\s*(\)|,)?\s*(on|to|->|→)\s*(the\s+)?bn(_|\b)/i.test(s);
+// "bn_N (−)", "− on bn", "(−) to bn_N", "negative on bn", "bn_N (−V)", "bn = −" …
+const callsBnNegative = s =>
+  /\bbn_[^\s,)]*\s*(\(|=|is)\s*(the\s+)?(−|-(?!>)|negative|minus)/i.test(s)
+  || /(−|(?<!-)-(?!>)|negative|minus)V?\s*(\))?\s*(terminal\s+)?(on|to|->|→)\s*(the\s+)?bn(_|\b)/i.test(s);
+
+test('the second-battery rule puts its + on bp and its − on bn, and never calls bn GND', () => {
+  const line = promptText().split('\n').find(l => /second battery/i.test(l) && /\bbn_/.test(l));
+  assert.ok(line, 'no BATTERY line telling the AI where a second battery goes (bp_N / bn_N)');
+  assert.match(line, /BAT2\.0\s*->\s*bp_/, `the second battery's + (BAT2.0) should go to bp: "${line}"`);
+  assert.match(line, /BAT2\.1\s*->\s*bn_/, `the second battery's − (BAT2.1) should go to bn: "${line}"`);
+  assert.equal(callsBnGround(line), false, `the second-battery rule calls bn GND on its own: "${line}"`);
+  assert.equal(callsBnNegative(line), true, `the second-battery rule should say bn carries the second source's − side: "${line}"`);
+});
+
+test('the prompt and the bench supply guide agree: bn is the second source\'s negative side, never plain GND', () => {
+  const guide = Parts71.get('bench_supply').ai.guide;
+  const texts = { 'system prompt': promptText(), 'bench_supply ai.guide': guide };
+  for (const [name, text] of Object.entries(texts)) {
+    const bn = sentencesWithBn(text);
+    assert.ok(bn.length > 0, `the ${name} never mentions bn`);
+    const ground = bn.filter(callsBnGround);
+    assert.deepEqual(ground, [], `the ${name} calls bn GND/ground`);
+    assert.ok(bn.some(callsBnNegative), `the ${name} never says bn is the − side: ${JSON.stringify(bn)}`);
+  }
+});

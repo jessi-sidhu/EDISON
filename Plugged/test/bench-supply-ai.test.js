@@ -112,7 +112,7 @@ test('guard (passes today): the other battery rules stay word for word', () => {
     '- Without BOTH battery wires the circuit WILL NOT WORK. ALWAYS include them.',
     '- Never wire BAT1.0 straight to BAT1.1, or tp to tn: that is a short circuit.',
     '- Battery wires go to the rails at the highest column, the end nearest the battery, so they drop straight in. In the recipes, N = the highest column in the board description (Columns 1-N).',
-    '- A second battery (two separate circuits) goes on the bottom rails, bp_N (+) and bn_N (GND), nearest row j: BAT2.0 -> bp_{N} (red) and BAT2.1 -> bn_{N} (black). Its parts go in rows f–j, with its rail wires in row j. Never wire a second battery to the tp/tn rails.',
+    '- A second battery (two separate circuits) goes on the bottom rails, bp_N (+) and bn_N (−), nearest row j: BAT2.0 -> bp_{N} (red) and BAT2.1 -> bn_{N} (black). Its parts go in rows f–j, with its rail wires in row j. Never wire a second battery to the tp/tn rails.',
   ];
   assert.deepStrictEqual(KEEP.filter(l => !lines.includes(l)), []);
 });

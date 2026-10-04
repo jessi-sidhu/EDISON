@@ -680,12 +680,12 @@ test('the known answer at 6 V has no circuit problems and passes finishAIReply u
 
 const found = q => Sidebar.groups(Parts.all(), q).flatMap(g => g.parts.map(p => p.type));
 
-test('sidebar search: "bulb" and "incandescent" find only the bulb; "lamp" finds the LED and the bulb; "led" still only the LED', () => {
+test('sidebar search: "bulb" and "incandescent" find only the bulb; "lamp" finds the LED and the bulb; "led" the LED and the RGB LED (#42), not the bulb', () => {
   bulb();
   assert.deepStrictEqual(found('bulb'), ['bulb']);
   assert.deepStrictEqual(found('Incandescent'), ['bulb']);
   assert.deepStrictEqual(found('lamp').sort(), ['bulb', 'led']);
-  assert.deepStrictEqual(found('led'), ['led']);
+  assert.deepStrictEqual(found('led').sort(), ['led', 'rgb_led']);
 });
 
 // ── The browser half ──────────────────────────────────────────────────────
