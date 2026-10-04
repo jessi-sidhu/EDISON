@@ -263,7 +263,7 @@
         new THREE.BoxGeometry(sW, 0.005, 0.21),
         new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.60 })
       );
-      m.position.set(0, 0.003, zPos);
+      m.position.set(0, 0.0005, zPos);   // top at 0.003: under the sunk hole caps (0.005), so a rail's glow shows untinted
       bbGroup.add(m);
     }
     for (const rail of RAIL_ROWS) addRailStrip(ROW_Z[rail], RAIL_IS_POS[rail]);   // + red, − blue
@@ -298,6 +298,9 @@
       }
     });
     holesMesh.instanceMatrix.needsUpdate = true;
+    // Sunk (#187): flush sockets whose cap sits 0.005 above the top face, not
+    // 0.21-tall pegs; just enough for the Connections and Thevenin glows to show.
+    holesMesh.position.y = -0.205;
     bbGroup.add(holesMesh);
 
     // ── 6. Edge banding (plastic lips around the board) ──────

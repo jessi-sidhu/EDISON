@@ -376,7 +376,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     }
     if (!res.ok || !data) {
       console.error('/api/ask failed:', res.status, data);
-      throw new Error((data && data.reply) || 'Sparky could not reach the AI service. Please try again in a moment.');
+      throw new Error((data && data.reply) || 'Edison could not reach the AI service. Please try again in a moment.');
     }
     return { reply: data.reply || '(no response)', actions: data.actions || [] };
   }
@@ -443,7 +443,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
       if (!def || def.place.kind !== 'offboard') return;
       const spot = board.batterySpot();   // the same spot Accept uses
       const built = App.buildPart(def.type, Parts.legsOf({ type: def.type, holeRefs: null }), Chat.partValues(a), { ghost: true });
-      built.group.position.set(spot.x, 0, spot.z);
+      built.group.position.set(spot.x, App.BENCH_Y || 0, spot.z);   // on the bench, where Accept puts it (#187)
       if (!(def.type in counts)) counts[def.type] = actions.slice(0, i).some(b => b.tool === 'delete_all') ? 0 : countOf(def.type);
       built.pinPositions.forEach((p, k) => {
         const at = p.clone().add(built.group.position);

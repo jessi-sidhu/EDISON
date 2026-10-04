@@ -118,9 +118,6 @@
     if (input) { input.placeholder = 'Ask Edison about your circuit'; input.title = NAME_LINE; }
     // The suggestion chips lose their emoji; their onclick stays.
     for (const b of doc.querySelectorAll('.sparky-suggest-btn')) b.textContent = b.textContent.replace(/^[^\p{L}\p{N}]+/u, '');
-    const brand = doc.querySelector('.topbar-brand');
-    const name = brand && [...brand.childNodes].reverse().find(n => n.nodeType === 3 && n.textContent.trim());
-    if (name) name.textContent = ' Plugged ';
   }
 
   // ?ask=<text> (the landing page's prompt): sent once, then dropped from the URL.

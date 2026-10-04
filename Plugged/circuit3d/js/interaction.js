@@ -435,7 +435,7 @@
           if (hit && ghostGroup) {
             const margin  = state.breadboard.BOARD_W / 2 + App.BATTERY_MARGIN;
             const clampX  = pt.x >= 0 ? Math.max(pt.x, margin) : Math.min(pt.x, -margin);
-            ghostGroup.position.set(clampX, 0, pt.z);
+            ghostGroup.position.set(clampX, App.BENCH_Y || 0, pt.z);   // on the bench, as placed (#187)
             ghostGroup.visible = true;
           } else if (ghostGroup) {
             ghostGroup.visible = false;

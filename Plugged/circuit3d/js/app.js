@@ -231,9 +231,10 @@
     return wx >= 0 ? Math.max(wx, margin) : Math.min(wx, -margin);
   }
 
-  // An off-board model is drawn around (0, 0, 0): move it, and its pins, to (x, z).
+  // An off-board model is drawn around (0, 0, 0): move it, and its pins, to
+  // (x, z) on the bench: App.BENCH_Y in Edison (scene-env.js), 0 in classic.
   function atSpot(built, x, z) {
-    built.group.position.set(x, 0, z);
+    built.group.position.set(x, App.BENCH_Y || 0, z);
     return { group: built.group, pinPositions: built.pinPositions.map(p => p.clone().add(built.group.position)) };
   }
 

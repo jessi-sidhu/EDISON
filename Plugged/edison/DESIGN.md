@@ -121,7 +121,7 @@ The landing page doesn't follow the pad tokens above, and it knowingly breaks tw
   - There is no light mode: no toggle, no theme storage, no `data-theme`. The landing never writes `localStorage`.
 - **Type:** DM Mono everywhere. No shadows, no gradients, no transitions, square corners.
 - **The top (refs 01, 02), kept from v2 exactly:**
-  - the small centred **PLUGGED WITH EDISON** wordmark;
+  - the small centred **EDISON** wordmark (#186: was PLUGGED WITH EDISON);
   - the light DM Mono headline;
   - the square **Ask Edison** box. Its placeholder, and what an empty box sends, is `Landing.EXAMPLES[0]`, "Build me a light bulb".
 - **The stage (ref 04):** `section.ed-stage`, the page's only section, under the Ask box.
@@ -136,7 +136,7 @@ The landing page doesn't follow the pad tokens above, and it knowingly breaks tw
     - It is `display: none` under 720 px.
   - **`#hero-stage`:** fills the stage under the HUD and is empty here; the hero frame goes in it.
 - **Caps labels:** written in capitals in the HTML, since the design guard bans `text-transform`. Labels are 11 to 12 px with letter-spacing 0.12em, in the ink; sublines are in the grey text colour.
-- **The footer:** one quiet grey line, "Plugged, built for Edison. Not an official SFU site." and the "Switch to classic UI" link.
+- **The footer:** one quiet grey line, "Edison, built for Edison. Not an official SFU site." and the "Switch to classic UI" link.
 - **Phone (720 px and under):** a 16 px HUD gutter, the title block kept, the inset hidden. No sideways scroll at 390 px.
 
 v2's giant outlined EDISON, the three sections below the hero (line art, "+" buttons, the 3-column grid) and the dark/light toggle are gone.

@@ -23,7 +23,7 @@
 // - describeError(err) → a one-line reason safe to print: names the status
 //   ("DeepSeek 401") but never the response body (it can echo the key).
 // - outcome(testCase, replyOrError) → 'pass' | 'fail' | 'error'. A thrown
-//   Error or the server's "Sparky could not reach the AI service" reply is
+//   Error or the server's "Edison could not reach the AI service" reply is
 //   'error'.
 // - summarize(results), results = [{ id, tags, outcomes: ['pass'|'fail'|'error'] }]
 //   → { cases: [{ id, passes, runs, passAll }], exitCode }, exitCode 1 iff a
@@ -47,7 +47,7 @@ const Eval  = require('../scripts/ai-eval.js');
 const CASES = require('../scripts/ai-eval-cases.js');
 
 const HEADS_UP = '\n\nHeads up, this build has a problem:\n- Hole c6 holds 2 leads.\n\nAsk me to fix it.';
-const FALLBACK = 'Sparky could not reach the AI service. Please try again in a moment.';
+const FALLBACK = 'Edison could not reach the AI service. Please try again in a moment.';   // #186: was Sparky
 const DEMO_MESSAGE = 'Build a single LED circuit with a current-limiting resistor.';
 
 const reply = (actions, text = 'Built it.') => ({ reply: text, actions });

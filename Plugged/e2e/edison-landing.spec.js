@@ -43,7 +43,7 @@
 //   background rgb(16, 16, 16) (#101010), text rgb(244, 244, 244) (#F4F4F4).
 //   Grey LINES are rgb(103, 103, 103) (#676767); grey TEXT is the 5.6:1 hint
 //   (#8A8A8A), since all text must pass WCAG AA (4.5:1 under 24 px).
-// - Kept from v2 exactly: <header> holding the wordmark "PLUGGED WITH EDISON",
+// - Kept from v2: <header> holding the wordmark "EDISON" (#186: was "PLUGGED WITH EDISON"),
 //   centred; the h1 "Breadboard circuits, built and simulated with AI"; the
 //   form.ed-ask with a textbox labelled "Ask Edison" and an "Ask Edison"
 //   button. The textbox's placeholder is Landing.EXAMPLES[0], "Build me a
@@ -69,8 +69,9 @@
 //     bottom-right quarter at 1440, and stays display: none under 720 px;
 //   - the existing #hero-stage, holding the hero frame (#164).
 // - No .ed-giant, .ed-sec or .ed-theme, no button named "Switch to light/dark
-//   mode", and no element whose whole text is "EDISON".
-// - The footer is one line: "Plugged, built for Edison. Not an
+//   mode", and no element outside the <header> whose whole text is "EDISON"
+//   (the header's wordmark reads EDISON since #186).
+// - The footer is one line: "Edison, built for Edison. Not an
 //   official SFU site." and the "Switch to classic UI" link to
 //   ../landing.html?ui=classic.
 // - The landing never writes localStorage (no setItem, removeItem or clear),
@@ -242,7 +243,7 @@ test('the first screen: the kept wordmark, headline and Ask box ("Build me a lig
   await open(page);
 
   // Kept from v2 (refs 01, 02): the wordmark, the headline, the Ask box.
-  await expect.soft(page.getByRole('banner'), 'the header wordmark').toHaveText('PLUGGED WITH EDISON');
+  await expect.soft(page.getByRole('banner'), 'the header wordmark').toHaveText('EDISON');
   await expect.soft(page.getByRole('heading', { level: 1 })).toHaveText('Breadboard circuits, built and simulated with AI');
   const askBox = page.getByRole('textbox', { name: 'Ask Edison' });
   await expect(askBox, 'the Ask box').toBeVisible();
@@ -268,7 +269,7 @@ test('the first screen: the kept wordmark, headline and Ask box ("Build me a lig
         'section other than .ed-stage': document.querySelectorAll('section:not(.ed-stage)').length,
         'a theme toggle button': [...document.querySelectorAll('button')]
           .filter(b => /switch to (light|dark) mode/i.test(b.getAttribute('aria-label') || b.textContent)).length,
-        'an element reading just EDISON': [...document.querySelectorAll('body *')].filter(e => P.shown(e) && P.text(e) === 'EDISON').length,
+        'an element reading just EDISON outside the header': [...document.querySelectorAll('body *')].filter(e => !e.closest('header') && P.shown(e) && P.text(e) === 'EDISON').length,
       },
       notMono: [...document.querySelectorAll('body *')]
         .filter(e => P.shown(e) && (P.ownText(e) || e.matches('input, button')))
@@ -344,13 +345,13 @@ test('the first screen: the kept wordmark, headline and Ask box ("Build me a lig
   expect.soft(Math.abs(F.markCentre - F.vw / 2), 'the wordmark is centred (px off the viewport centre)').toBeLessThanOrEqual(4);
   expect.soft(F.gone, 'v2 leftovers on the page').toEqual({
     '.ed-giant': 0, '.ed-sec': 0, '.ed-theme': 0, 'section other than .ed-stage': 0,
-    'a theme toggle button': 0, 'an element reading just EDISON': 0,
+    'a theme toggle button': 0, 'an element reading just EDISON outside the header': 0,
   });
   expect.soft(F.notMono, 'text not set in DM Mono').toEqual([]);
   expect.soft(F.unreadable, 'text under 4.5:1 contrast (3:1 when large)').toEqual([]);
 
   // The footer: one line, the classic link kept.
-  expect.soft(F.footText, 'the footer').toBe('Plugged, built for Edison. Not an official SFU site. Switch to classic UI');
+  expect.soft(F.footText, 'the footer').toBe('Edison, built for Edison. Not an official SFU site. Switch to classic UI');
   expect.soft(F.footSpread, 'the footer is one line (spread of its text runs\' centres, px)').toBeLessThanOrEqual(4);
   expect.soft(F.classic, 'Switch to classic UI goes to').toBe('/landing.html?ui=classic');
 

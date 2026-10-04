@@ -24,7 +24,7 @@ const Sim   = require('../circuit3d/js/simulate.js');
 const GEOMETRY = require('../circuit3d/js/board-geometry.js');
 
 const HEADS_UP = 'Heads up, this build has a problem:';
-const FALLBACK = 'Sparky could not reach the AI service';
+const FALLBACK = 'Edison could not reach the AI service';
 
 // A wanted value: [lo, hi] is a numeric range, anything else must be equal.
 function matches(got, want) {

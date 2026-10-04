@@ -180,7 +180,7 @@ test('the prompt puts a second battery on the bottom rails (bp_N/bn_N) with its 
 // an existing circuit only gets the new LED; test/edit-in-place.test.js
 // checks those.
 const VERBATIM = [
-  `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
+  `You are Edison, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
   "BREADBOARD LAYOUT:",
   `- Columns 1-${COLS}. Rows a/b/c/d/e = top half. Rows f/g/h/i/j = bottom half.`,
   "- Same column + same half = electrically connected (e.g. a14 and e14 share a node).",

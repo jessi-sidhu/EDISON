@@ -125,7 +125,7 @@ const packFits = (pack, tools) => {
 // The prompt for a request that sends `tools`: the core, plus the pin roles,
 // values, sizing, guides, controls and recipes of the parts in play only.
 const buildPrompt = tools => [
-  `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
+  `You are Edison, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
   '',
   'BREADBOARD LAYOUT:',
   `- Columns 1-${COLS}. Rows a/b/c/d/e = top half. Rows f/g/h/i/j = bottom half.`,
@@ -1599,7 +1599,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/ask') {
     if (rateLimited(req, askHits, ASK_MAX_PER_WINDOW)) {
-      return sendJSON(res, 429, { reply: 'Too many requests. Give Sparky a moment and try again.', actions: [] });
+      return sendJSON(res, 429, { reply: 'Too many requests. Give Edison a moment and try again.', actions: [] });
     }
     const body = await readBody(req, res, MAX_BODY_BYTES, { reply: 'That request is too large.', actions: [] });
     if (body === null) return;
@@ -1613,7 +1613,7 @@ const server = http.createServer(async (req, res) => {
       // Upstream body can contain key/quota detail, so it stays in the log.
       console.error('[ask] failed:', e.message);
       if (e.code === 'AI_TIMEOUT') return sendJSON(res, 504, { reply: 'The AI took too long — try again.', actions: [], code: 'AI_TIMEOUT' });
-      return sendJSON(res, 502, { reply: 'Sparky could not reach the AI service. Please try again in a moment.', actions: [] });
+      return sendJSON(res, 502, { reply: 'Edison could not reach the AI service. Please try again in a moment.', actions: [] });
     }
   }
 
