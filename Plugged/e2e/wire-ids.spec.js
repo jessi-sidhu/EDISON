@@ -56,11 +56,12 @@ async function openWithAI(page, reply) {
   return bodies;
 }
 
+// failed: a step that couldn't apply, so nothing was (a fix lands whole or not at all, #199).
 async function accept(page, n, failed) {
   await expect(page.locator('#sparky-pending-bar')).toBeVisible();
   await page.getByRole('button', { name: 'Accept' }).click();
   await expect(page.locator('.chat-msg.system').last())
-    .toHaveText(`✓ Applied ${n} change${n === 1 ? '' : 's'} to your circuit.${failed ? ` ${failed} could not be applied.` : ''}`);
+    .toHaveText(failed ? /^Nothing was changed: .* didn't match your board\. Ask again\.$/ : `✓ Applied ${n} change${n === 1 ? '' : 's'} to your circuit.`);
 }
 
 // Types a message and waits for its reply (a preview when it has actions).

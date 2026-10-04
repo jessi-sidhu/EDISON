@@ -36,6 +36,15 @@
 //   has a saved answer for every crop the page sends for that reading
 //   (PhotoCrops.items on the sample's grid), and readLeads replays them all
 //   with no fetch.
+// - #200: the picker offers only samples that build a working circuit. An
+//   entry may say `offered: false` (kept for npm run photo-eval and the
+//   replays here, never shown); every other entry is offered (photo.js).
+//   demo-board is offered. Every offered sample, replayed from its recording
+//   through the page's path (the reader, the confirm screen's snap, the crop
+//   round's merge, Build it, the board, the simulation), builds a working
+//   circuit: Build it enabled with nothing edited, every part and wire it
+//   read on the board, a source, a closed loop from the source back to
+//   itself through the other parts, and no "Circuit open".
 
 const assert = require('node:assert');
 const fs     = require('node:fs');
@@ -51,6 +60,9 @@ const PhotoGrid  = require('../circuit3d/js/photo-grid.js');
 const PhotoCrops = require('../circuit3d/js/photo-crops.js');
 const { isSafeId, validateReading, readPhoto } = require('../backend/photo-reader.js');
 const { readLeads } = require('../backend/photo-leads.js');
+const PhotoImport = require('../circuit3d/js/photo-import.js');
+const Sim         = require('../circuit3d/js/simulate.js');
+const { Parts, Board, simulate } = require('./fixtures/photo-import-helpers.js');
 
 const RECORDINGS = path.join(__dirname, 'fixtures', 'photo');
 
@@ -232,4 +244,120 @@ test.each(Object.keys(SOURCES))('the %s recording replays with no AI call: its R
       else process.env[k] = v;
     }
   }
+});
+
+// ── What the picker offers (#200) ─────────────────────────────
+
+// photo.js's rule: every sample but those marked offered: false.
+const offeredIds = samples => Object.keys(samples).filter(id => samples[id].offered !== false);
+const OFFERED    = offeredIds(loadSamples());
+
+// fn() with ENV_KEYS unset (the live defaults), then put back.
+async function withDefaultEnv(fn) {
+  const savedEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]));
+  for (const k of ENV_KEYS) delete process.env[k];
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+// A sample through the page's path, with no AI: /api/photo's reader answers
+// from its recording (photo.js send); the confirm screen snaps every '?' end
+// to the hole under it (PhotoConfirm.open); each saved crop answer merges in
+// and snaps, one line at a time (placeLegs → PhotoConfirm.place); Build it is
+// PhotoImport.build; SparkyChat.applyBuild puts it on an empty board.
+async function replay(id) {
+  const s = loadSamples()[id];
+  const grid = PhotoGrid.homography(s.taps, s.cols);
+  const sent = { cols: grid.cols, pitch: grid.pitch, x0: grid.x0, y0: grid.y0, width: grid.width, height: grid.height };
+  const fetch = async url => { throw new Error(`no AI in this test: ${url}`); };
+  return withDefaultEnv(async () => {
+    const reply = await readPhoto({ sample: id, image: TINY_PNG, grid: sent }, { fetch });
+    assert.equal(reply.provider, 'fixture', `${id}: answered by ${reply.provider} (${reply.model}), not its recording`);
+    let reading = JSON.parse(JSON.stringify(reply.reading));
+    const snap = () => {
+      const ends = [...reading.parts.flatMap(p => p.leads), ...reading.wires.flatMap(w => w.ends), ...reading.power.flatMap(p => [p.plus, p.minus])];
+      for (const e of ends) if (e.hole === '?') e.hole = grid.snap(e.pt).hole;
+    };
+    snap();
+    const items = reply.key && reply.provider !== 'deepseek' ? PhotoCrops.items(reply.reading, grid) : [];
+    if (items.length) {
+      const body   = { key: reply.key, items: items.map(it => ({ ...it, image: TINY_PNG, window: PhotoCrops.window(grid, it.box) })) };
+      const placed = await readLeads(body, { fetch });
+      for (const entry of placed.items) {
+        reading = PhotoCrops.merge(reading, [entry]);
+        snap();
+      }
+    }
+    const result = PhotoImport.build(reading, { components: [] });
+    const { board, errors } = Board.apply(Board.empty(), result.actions);
+    return { reading, result, board, errors };
+  });
+}
+
+// Why a replayed sample doesn't work, [] when it does: Build it greyed (an LED
+// with no + picked, PhotoConfirm's rule), something it read left off the
+// board, no source, a source with no loop back to itself through the other
+// parts (every part counted as conducting, so a backwards LED still closes
+// it), or the simulator's "Circuit open".
+function trouble({ reading, result, board, errors }) {
+  const out = [];
+  const unpicked = reading.parts.filter(p => p.type === 'led' &&
+    !(p.leads.filter(l => l.role === 'anode').length === 1 && p.leads.filter(l => l.role === 'cathode').length === 1));
+  if (unpicked.length) out.push(`Build it waits for a + on ${unpicked.map(p => p.id).join(', ')}`);
+  if (result.skipped.length) out.push(`not built: ${result.skipped.map(x => x.id).join(', ')}`);
+  if (errors.length) out.push(`Board.apply errors: ${JSON.stringify(errors)}`);
+
+  const sim     = Board.toSim(board);
+  const graph   = Sim.buildGraph(sim.components, sim.wires);
+  const isSource = g => { const def = Parts.get(g.comp.type); return !!def && def.ref !== undefined; };
+  const sources = graph.filter(isSource);
+  if (!sources.length) out.push(`no source: the board holds ${board.parts.map(p => p.label).join(', ') || 'nothing'}`);
+  for (const src of sources) {
+    const uf = new Sim.UnionFind();
+    for (const g of graph) if (g !== src) g.nodes.forEach(n => uf.union(g.nodes[0], n));
+    const looped = src.nodes.some((n, i) => src.nodes.some((m, j) => j > i && uf.find(n) === uf.find(m)));
+    if (!looped) out.push(`${src.comp.label}: no closed loop from its + back to its − through the other parts`);
+  }
+
+  const { r, problems } = simulate(board);
+  if (r.status !== 'ok') out.push(`the simulation's status is ${r.status}`);
+  const open = (r.lines || []).filter(l => /circuit open/i.test(l.text)).map(l => l.text.trim());
+  if (open.length) out.push(`the simulator says: ${open.join(' / ')}`);
+  if (problems.some(p => p.kind === 'open')) out.push('the mistakes panel says: Circuit open');
+  return out;
+}
+
+test('demo-board is offered, and an entry that sets offered sets it true or false', () => {
+  const samples = loadSamples();
+  assert.ok(OFFERED.includes(DEFAULT), `the picker offers ${DEFAULT}: offered ${JSON.stringify(OFFERED)}`);
+  for (const [id, s] of Object.entries(samples)) {
+    if ('offered' in s) assert.equal(typeof s.offered, 'boolean', `${id}.offered is true or false, got ${JSON.stringify(s.offered)}`);
+  }
+});
+
+test.each(OFFERED)('%s, offered on the picker, replays to a working circuit: Build it enabled, everything it read built, a source, a closed loop, no "Circuit open"', async id => {
+  const built = await replay(id);
+  assert.deepStrictEqual(trouble(built), [], `${id} builds ${built.board.parts.map(p => p.label).join(', ')}`);
+});
+
+// The check itself catches a broken board: demo-board's recording with its
+// battery's − lead left off, and with no battery at all.
+test('the working-circuit check catches an open loop and a missing source', async () => {
+  const built = await replay(DEFAULT);
+  assert.deepStrictEqual(trouble(built), [], 'demo-board as recorded works');
+  const without = keep => {
+    const { board, errors } = Board.apply(Board.empty(), built.result.actions.filter(keep));
+    return trouble({ ...built, board, errors });
+  };
+  const open = without(a => !(a.tool === 'add_wire' && /^BAT1\.1$/.test(a.from)));
+  assert.ok(open.some(t => /BAT1: no closed loop/.test(t)), `no − lead: ${JSON.stringify(open)}`);
+  assert.ok(open.some(t => /Circuit open/i.test(t)), `no − lead, the simulator: ${JSON.stringify(open)}`);
+  const none = without(a => a.tool !== 'place_battery' && !/^BAT1\./.test(a.from || ''));
+  assert.ok(none.some(t => /^no source/.test(t)), `no battery: ${JSON.stringify(none)}`);
 });

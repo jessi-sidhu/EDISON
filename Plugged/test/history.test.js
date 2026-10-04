@@ -39,3 +39,16 @@ test('history keeps at most limit entries, and clear empties it', () => {
   assert.equal(h.size(), 0);
   assert.equal(h.undo(), false);
 });
+
+// #199: an AI fix that fails part-way is taken back whole, and redo can't
+// bring the half-applied board back.
+test('revert undoes the last step and forgets it: no redo of it', () => {
+  const s = { n: 0 };
+  const h = createHistory({ snapshot: () => s.n, apply: v => { s.n = v; }, limit: 60 });
+  h.batch(() => { s.n = 1; s.n = 2; });
+  assert.strictEqual(h.revert(), true);
+  assert.strictEqual(s.n, 0, 'back to before the batch');
+  assert.strictEqual(h.redo(), false, 'nothing to redo');
+  assert.strictEqual(s.n, 0);
+  assert.strictEqual(h.revert(), false, 'nothing left to revert');
+});

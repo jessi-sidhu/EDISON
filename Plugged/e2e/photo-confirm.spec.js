@@ -182,15 +182,12 @@ async function openEditor(page) {
   await page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
 }
 
-// 📷 → Use sample photo → the picker's demo-board tile (#182), /api/photo
-// answering `reading` → the confirm screen.
+// 📷 → Use sample photo → straight to demo-board, the one offered sample
+// (#200: no picker), /api/photo answering `reading` → the confirm screen.
 async function openConfirm(page, reading) {
   await page.route('**/api/photo', route => route.fulfill({ json: { reading, provider: 'fixture', model: 'deepseek-flash', ms: 12 } }));
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
-  const tile = page.locator('#photo-samples [data-sample="demo-board"]');
-  await expect(tile, 'Use sample photo opens the sample picker (#182)').toBeVisible();
-  await tile.click();
   await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen').toBeVisible();
 }
 

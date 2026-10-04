@@ -1129,7 +1129,7 @@ const askAI = makeAsk(
     toolsFor:  (markdown, message) => selectTools(message, boardTypes(markdown)),
     promptFor: buildPrompt,
     partTools,
-    refusal:   placementRefusal,
+    refusal:   (action, prior, board) => placementRefusal(action, prior) || referenceRefusal(action, prior, board),
     duplicate: duplicateWire,
     checkBuild,
   }
@@ -1280,6 +1280,34 @@ function checkBuild(actions, board, { fullCheck = false } = {}) {
 // Every model's { reply, actions } goes through this before the browser
 // sees it: a default reply, JSON-in-text fallback, malformed actions
 // dropped, and circuit problems reported.
+// The edit tools that name something already on the board (#199).
+const REFERS = ['delete_wire', 'delete_part', 'set_value', 'set_control'];
+
+// A step that names a wire or part the board doesn't have (nor one placed
+// earlier in this reply), as a refusal the model can act on: the reason
+// and the board's real wire ids or part labels. null when it's fine.
+function referenceRefusal(a, prior, board) {
+  if (!a || ![...REFERS, 'add_wire'].includes(a.tool) || !isBoard(board)) return null;   // no board sent: nothing to check against
+  const before = prior || [];
+  const b = board;
+  const mine = Board.apply(b, [...before, a]).errors.find(e => e.index === before.length);
+  if (!mine) return null;
+  const known = a.tool === 'delete_wire'
+    ? `The board's wires are ${b.wires.map(w => w.id).join(', ') || 'none'} (the Wires table).`
+    : `The board's parts are ${b.parts.map(p => p.label).join(', ') || 'none'}.`;
+  return `${mine.why}. ${known}`;
+}
+
+// What a reply's edits name that isn't there: wire ids and part labels,
+// each once, in order. [] when no board was sent.
+function missingReferences(actions, board) {
+  if (!isBoard(board)) return [];
+  const names = Board.apply(board, actions).errors
+    .filter(e => REFERS.includes(e.tool))
+    .map(e => { const a = actions[e.index]; return String(a.tool === 'delete_wire' ? a.wire : a.part); });
+  return [...new Set(names)];
+}
+
 function finishAIReply({ reply, actions, board, fullCheck = false }) {
   reply = String(reply || '').trim();
   actions = Array.isArray(actions) ? actions : [];
@@ -1344,6 +1372,15 @@ function finishAIReply({ reply, actions, board, fullCheck = false }) {
   }
   actions = kept;
   if (notes.length) reply += `\n\n${notes.join('\n')}`;
+
+  // A fix lands whole or not at all (#199): if any edit names a wire or part
+  // that isn't on the board, applying the rest would leave it half-fixed.
+  const missing = missingReferences(actions, board);
+  if (missing.length) {
+    console.warn(`[edit] dropped a reply that names ${missing.join(', ')}, not on the board`);
+    actions = [];
+    reply += `\n\nI couldn't make that change: it named ${missing.join(', ')}, not on your board. Nothing was changed. Ask me again.`;
+  }
 
   // Report problems instead of patching them, so a wrong circuit is visible
   // rather than rewritten into a different one.

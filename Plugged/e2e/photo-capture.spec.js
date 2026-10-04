@@ -72,6 +72,12 @@
 //       #photo-error-sample opens the same picker (demo-board among it).
 //     A sample's confirm screen shows its credit (PhotoSamples[id].credit) as
 //     visible text inside #photo-confirm, and no other sample's credit.
+//   - #200: the picker offers only samples that build a working circuit:
+//     every entry but those with offered: false, and today that's demo-board
+//     alone. With one offered sample, Use sample photo (and the error card's)
+//     goes straight to it: no picker. The picker tests here offer a second
+//     sample in the page (offered = true before the picker first opens), so
+//     its tiles are the offered samples only.
 //   - While #photo-modal is open, keydown is swallowed in the capture phase:
 //     Backspace and Ctrl+Z never reach the board.
 const fs   = require('node:fs');
@@ -135,6 +141,10 @@ async function pickSample(page, id) {
   await expect(tile(page, id), `the sample picker (#182) shows the ${id} tile`).toBeVisible();
   await tile(page, id).click();
 }
+// Offers these samples too (#200: only demo-board is offered), so the picker
+// shows; before it first opens, since its tiles are built then.
+const offer = (page, ids) => page.evaluate(ids => { for (const id of ids) window.PhotoSamples[id].offered = true; }, ids);
+const offeredOf = samples => Object.keys(samples).filter(id => samples[id].offered !== false);
 
 // ── Choose a photo, tap the corners, send ──────────────────────────────────
 
@@ -270,7 +280,7 @@ test('Choose photo → tap a1, a63, j63, j1 → the grid appears; Redo; Looks ri
 
 // ── The sample ─────────────────────────────────────────────────────────────
 
-test('Use sample photo → the picker\'s demo-board tile → /api/photo gets sample "demo-board" with its flattened image, the corner step never shows, and its credit is on the confirm screen', async ({ page }) => {
+test('Use sample photo → straight to demo-board, the one offered sample (no picker, #200) → /api/photo gets sample "demo-board" with its flattened image, the corner step never shows, and its credit is on the confirm screen', async ({ page }) => {
   const errors = watchErrors(page);
   const sent = [];
   await page.route('**/api/photo', route => {
@@ -283,10 +293,12 @@ test('Use sample photo → the picker\'s demo-board tile → /api/photo gets sam
   expect(sample.file).toBe('samples/demo-board.jpg');
   expect(Object.keys(sample.taps).sort()).toEqual([`a${sample.cols}`, 'a1', `j${sample.cols}`, 'j1'].sort());
 
+  expect(offeredOf(await samplesOf(page)), 'demo-board is the one sample offered (#200)').toEqual(['demo-board']);
+
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
-  await pickSample(page, 'demo-board');
-  await expect.poll(() => sent.length, { message: 'the sample is sent with no taps and no Looks right' }).toBe(1);
+  await expect.poll(() => sent.length, { message: 'the sample is sent with no picker, no taps and no Looks right' }).toBe(1);
+  await expect(page.locator('#photo-samples'), 'one sample: no picker').toBeHidden();
   await expect(page.locator('#photo-corners'), 'the sample skips the corner step').toBeHidden();
   await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen (#141)').toBeVisible();
   expect(await page.evaluate(() => window.PhotoCapture.lastReading)).toEqual(MOCK_READING);
@@ -303,7 +315,7 @@ test('Use sample photo → the picker\'s demo-board tile → /api/photo gets sam
 
 // ── The sample picker (#182) ───────────────────────────────────────────────
 
-test('Use sample photo opens a picker with a tile per sample (its photo, title and credit), sending nothing; Escape and Cancel close it; a tile sends its own sample and board size, and its confirm screen shows its credit and no other', async ({ page }) => {
+test('with 2 samples offered, Use sample photo opens a picker with a tile per offered sample only (its photo, title and credit), sending nothing; Escape and Cancel close it; a tile sends its own sample and board size, and its confirm screen shows its credit and no other', async ({ page }) => {
   const errors = watchErrors(page);
   const sent = [];
   await page.route('**/api/photo', route => {
@@ -311,9 +323,12 @@ test('Use sample photo opens a picker with a tile per sample (its photo, title a
     return route.fulfill({ json: MOCK_RESPONSE });
   });
   await openEditor(page);
+  await offer(page, ['resistors']);
   const samples = await samplesOf(page);
   const ids = Object.keys(samples);
   expect(ids, 'PhotoSamples holds demo-board and the 4 new samples').toEqual(expect.arrayContaining(['demo-board', ...NEW_SAMPLES]));
+  const offered = offeredOf(samples);
+  expect(offered.sort(), 'demo-board, and resistors offered here').toEqual(['demo-board', 'resistors']);
 
   const openPicker = async () => {
     await page.locator('#photo-btn').click();
@@ -328,8 +343,8 @@ test('Use sample photo opens a picker with a tile per sample (its photo, title a
   await expect(page.locator('#photo-corners')).toBeHidden();
   await expect(page.locator('#photo-confirm')).toBeHidden();
   const listed = await page.locator('#photo-samples [data-sample]').evaluateAll(ts => ts.map(t => t.dataset.sample));
-  expect(listed.sort(), 'one tile per sample, demo-board included').toEqual([...ids].sort());
-  for (const id of ids) {
+  expect(listed.sort(), 'one tile per offered sample, none for the others').toEqual([...offered].sort());
+  for (const id of offered) {
     await expect(tile(page, id), `the ${id} tile`).toBeVisible();
     await expect(tile(page, id), `the ${id} tile shows its title`).toContainText(samples[id].title);
     await expect(tile(page, id), `the ${id} tile shows its credit`).toContainText(samples[id].credit);
@@ -373,13 +388,16 @@ test('Use sample photo opens a picker with a tile per sample (its photo, title a
 // Unstubbed: the e2e server runs PHOTO_PROVIDERS=fixture, so /api/photo and
 // /api/photo/leads replay test/fixtures/photo/piranha.json and
 // leads/piranha.json (recorded live, step 3) and never reach an AI.
-test('"Piranha LEDs", unstubbed: /api/photo replays its recording (provider fixture, key piranha), the confirm screen lists its recorded parts and wires with its credit, and the crop round lands the recorded legs', async ({ page }) => {
+// Piranha is off the picker (#200: its circuit is open); offered here, its
+// recording still exercises the crop round.
+test('"Piranha LEDs" (offered here), unstubbed: /api/photo replays its recording (provider fixture, key piranha), the confirm screen lists its recorded parts and wires with its credit, and the crop round lands the recorded legs', async ({ page }) => {
   const errors = watchErrors(page);
   const recorded = name => JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'photo', name), 'utf8'));
   const reading  = recorded('piranha.json').reading;
   const legs     = recorded(path.join('leads', 'piranha.json')).items;
   const isPath   = p => r => new URL(r.url()).pathname === p && r.request().method() === 'POST';
   await openEditor(page);                              // stubs /api/ask only
+  await offer(page, ['piranha']);
   const credit = await page.evaluate(() => window.PhotoSamples.piranha.credit);
 
   await page.locator('#photo-btn').click();
@@ -430,7 +448,7 @@ test('"Piranha LEDs", unstubbed: /api/photo replays its recording (provider fixt
   expect(errors).toEqual([]);
 });
 
-test('a sample that fails shows the error card; its Use sample photo opens the same picker, and the demo-board tile sends the default sample', async ({ page }) => {
+test('with 2 samples offered, a sample that fails shows the error card; its Use sample photo opens the same picker, and the demo-board tile sends the default sample', async ({ page }) => {
   const errors = watchErrors(page);
   const sent = [];
   await page.route('**/api/photo', route => {
@@ -439,7 +457,8 @@ test('a sample that fails shows the error card; its Use sample photo opens the s
     return route.fulfill({ json: MOCK_RESPONSE });
   });
   await openEditor(page);
-  const ids = Object.keys(await samplesOf(page));
+  await offer(page, ['piranha']);
+  const ids = offeredOf(await samplesOf(page));
 
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
@@ -452,7 +471,7 @@ test('a sample that fails shows the error card; its Use sample photo opens the s
   await page.locator('#photo-error-sample').click();
   await expect(page.locator('#photo-samples'), 'the error card\'s Use sample photo opens the picker').toBeVisible();
   const listed = await page.locator('#photo-samples [data-sample]').evaluateAll(ts => ts.map(t => t.dataset.sample));
-  expect(listed.sort(), 'the same picker: every sample').toEqual([...ids].sort());
+  expect(listed.sort(), 'the same picker: every offered sample').toEqual([...ids].sort());
   expect(sent.length, 'nothing sent until a tile is chosen').toBe(1);
   await pickSample(page, 'demo-board');
   await expect.poll(() => sent.length).toBe(2);
@@ -476,15 +495,13 @@ test('an error shows the reply with Use sample photo; a stalled /api/photo gives
   expect(await page.evaluate(() => window.PhotoCapture && window.PhotoCapture.timeoutMs), 'PHOTO_PAGE_TIMEOUT_MS').toBe(60000);
 
   await page.locator('#photo-btn').click();
-  await page.locator('#photo-sample').click();
-  await pickSample(page, 'demo-board');
+  await page.locator('#photo-sample').click();            // one offered sample: sent at once (#200)
   await expect(page.locator('#photo-status')).toContainText(TIMEOUT_REPLY);
   await expect(page.locator('#photo-error-sample')).toBeVisible();
   await expect(page.locator('#photo-error-sample')).toHaveText(/Use sample photo/);
 
   // The page shows whatever reply the server sends.
   await page.locator('#photo-error-sample').click();
-  await pickSample(page, 'demo-board');
   await expect(page.locator('#photo-status')).toContainText(NO_BOARD_REPLY);
   expect(sent[1].sample).toBe('demo-board');
   await expect(page.locator('#photo-error-sample')).toBeVisible();
@@ -492,7 +509,6 @@ test('an error shows the reply with Use sample photo; a stalled /api/photo gives
   // A hang: the page's own timeout, shortened, ends it with the AI_TIMEOUT message.
   await page.evaluate(() => { window.PhotoCapture.timeoutMs = 500; });
   await page.locator('#photo-error-sample').click();
-  await pickSample(page, 'demo-board');
   await expect(page.locator('#photo-status')).toContainText('Reading your board');
   await expect(page.locator('#photo-status')).toContainText(TIMEOUT_REPLY, { timeout: 5000 });
   await expect(page.locator('#photo-error-sample')).toBeVisible();

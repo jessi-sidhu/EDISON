@@ -49,9 +49,16 @@
       }
     }
 
+    // Undoes the last step and forgets it, with nothing to redo: an AI fix
+    // that failed part-way is taken back whole (#199).
+    function revert() {
+      if (!undoStack.length) return false;
+      apply(undoStack.pop());
+      return true;
+    }
     function clear() { undoStack.length = 0; redoStack.length = 0; }
 
-    return { push, undo, redo, batch, clear, size: () => undoStack.length };
+    return { push, undo, redo, revert, batch, clear, size: () => undoStack.length };
   }
 
   return { createHistory };

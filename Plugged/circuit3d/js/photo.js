@@ -11,9 +11,10 @@
 //    📷 → Choose photo / drop on the chat → corner step (a1, aN, jN, j1,
 //         a live labelled grid) → Looks right
 //    📷 → Use sample photo (or the error card's) → the sample picker
-//         (#photo-samples, #182): a tile per window.PhotoSamples entry,
-//         its photo, title and credit → its stored taps, sent as
-//         `sample: <id>`; Escape or Cancel closes it, nothing sent
+//         (#photo-samples, #182): a tile per offered window.PhotoSamples
+//         entry (all but offered: false, #200), its photo, title and credit
+//         → its stored taps, sent as `sample: <id>`; Escape or Cancel closes
+//         it, nothing sent. One offered sample: no picker, straight to it
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
 //    → the Reading opens the confirm screen (PhotoConfirm.open) at once, on
 //      the same flattened image, with the box round's placeholders (#173),
@@ -361,12 +362,18 @@
   const _clearAll  = App.clearAll;
   App.clearAll = function (opts) { clearFlags(); return _clearAll.call(this, opts); };
 
-  // The sample picker (#182): a tile per sample, built the first time it opens.
+  // The samples the picker offers (#200): every one but offered: false.
+  const offered = () => Object.entries(window.PhotoSamples).filter(([, s]) => s.offered !== false);
+
+  // The sample picker (#182): a tile per offered sample, built the first time
+  // it opens. With one sample there is nothing to pick: it goes straight to it.
   function showSamples() {
+    const samples = offered();
+    if (samples.length === 1) return sendSample(samples[0][0]);
     nextJob();
     open();
     if (!picker.childElementCount) {
-      for (const [id, s] of Object.entries(window.PhotoSamples)) {
+      for (const [id, s] of samples) {
         const tile = document.createElement('button');
         tile.className = 'photo-tile';
         tile.dataset.sample = id;
@@ -378,14 +385,14 @@
         const by = document.createElement('small');
         by.textContent = s.credit;
         tile.append(pic, title, by);
-        tile.addEventListener('click', () => useSample(id));
+        tile.addEventListener('click', () => sendSample(id));
         picker.appendChild(tile);
       }
     }
     picker.hidden = false;
   }
 
-  async function useSample(id) {
+  async function sendSample(id) {
     const my = nextJob();
     open();
     showStatus(READING, false);

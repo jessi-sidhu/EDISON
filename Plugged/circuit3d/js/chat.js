@@ -554,10 +554,19 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
 
     const result = Chat.acceptBuild(actions, board);
     const { applied, failed } = result;
+    // A fix lands whole or not at all (#199): a step that no longer matches
+    // the board (it changed since Edison read it) takes the whole fix back.
+    if (failed) {
+      App.history.revert();
+      settleHistory(actions, false);
+      const total = failed + applied;
+      const what  = failed === total ? (total === 1 ? "Edison's change" : `Edison's ${total} changes`) : `${failed} of Edison's ${total} changes`;
+      sparkyAddMsg(`Nothing was changed: ${what} didn't match your board. Ask again.`, 'system');
+      return;
+    }
     settleHistory(actions, true, result.failedActions);
     if (Chat.placesParts(actions)) App.frameCircuit();   // new parts: big enough to see and click (#67)
-    sparkyAddMsg(`✓ Applied ${applied} change${applied !== 1 ? 's' : ''} to your circuit.` +
-      (failed ? ` ${failed} could not be applied.` : ''), 'system');
+    sparkyAddMsg(`✓ Applied ${applied} change${applied !== 1 ? 's' : ''} to your circuit.`, 'system');
   }
 
   function sparkyDeclineChanges() {

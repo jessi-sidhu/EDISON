@@ -68,7 +68,7 @@ const STRETCHED_BUILD = {
   ],
 };
 
-test('accepting an AI build with an over-stretched resistor shows the refusal and counts it as failed', async ({ page }) => {
+test('accepting an AI build with an over-stretched resistor shows the refusal and changes nothing (a build lands whole or not at all, #199)', async ({ page }) => {
   const errors = watchErrors(page);
   await openEditor(page, STRETCHED_BUILD);
   await page.getByRole('button', { name: /Build an LED circuit/ }).click();
@@ -78,8 +78,8 @@ test('accepting an AI build with an over-stretched resistor shows the refusal an
   const system = page.locator('.chat-msg.system');
   await expect(system.filter({ hasText: '3–5' }), 'a visible note with the allowed range').toHaveCount(1);
   await expect(system.filter({ hasText: '3–5' })).toContainText("a resistor's leads must be 3–5 columns apart; a3 to a33 is 30.");
-  await expect(system.last()).toHaveText('✓ Applied 1 change to your circuit. 1 could not be applied.');
-  expect(await page.evaluate(() => App.state.components.map(c => c.type))).toEqual(['battery']);
+  await expect(system.last()).toHaveText("Nothing was changed: 1 of Edison's 2 changes didn't match your board. Ask again.");
+  expect(await page.evaluate(() => App.state.components.map(c => c.type))).toEqual([]);
   expect(errors).toEqual([]);
 });
 

@@ -262,7 +262,7 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
       } else {
         const action = { tool: c.function.name, ...args };
         const dup = ctx.duplicate ? ctx.duplicate(action, actions, board) : null;   // a wire already there (#85)
-        const why = dup ? null : ctx.refusal ? ctx.refusal(action, actions) : null;
+        const why = dup ? null : ctx.refusal ? ctx.refusal(action, actions, board) : null;
         if (dup) result = `Refused: ${dup}`;
         else if (why) result = `Refused: ${why} Nothing was queued; fix it and place it again.`;
         else {
