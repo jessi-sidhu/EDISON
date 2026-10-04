@@ -98,12 +98,24 @@ The element `pins` name the part's pins, or internal nodes written `'#name'` (pr
 | `I` | `pins:[from,to], amps` | Arrives with the first part that needs it. |
 | `SW` | `pins:[a,b], closed` | Closed = 1 mΩ, open = removed. Never an ideal short. |
 | `D` | `pins:[anode,cathode], vf, ron, vz?` | Mode block: `off` / `on` / (`breakdown` if `vz`). Replaces today's LED special case. |
-| `E` | `out:[+,−], ctrl:[+,−], gain, clamp?:[lo,hi]` | Voltage-controlled voltage source. `clamp` makes it a mode block (`linear` / `low` / `high`): the op-amp's rails. Arrives with dependent sources. |
+| `E` | `out:[+,−], ctrl:[+,−], gain, rout?, rails?:[vneg,vpos], headroom?, ilim?` | Voltage-controlled voltage source: `gain·(V(ctrl+) − V(ctrl−))` behind `rout` Ω (default 0). Adds one unknown, its output current. `rails` name pins whose voltages bound the output, `headroom` (V, default 0) keeps it inside them, `ilim` (A) limits its current. With `rails` or `ilim` it is a mode block (table below); without, always linear. `r.current[id]` is **+ when the E sources current out of `out+`** (not pin order). Not a `ref` source. |
 | `G` | `out:[from,to], ctrl:[+,−], gain` | Voltage-controlled current source. Arrives with dependent sources. |
 | `C` | `pins:[a,b], farads, vmax?, polarised?` | Open in a plain solve. With `analyze(components, wires, { dt, state })` it is the backward-Euler companion: `G = C/h` plus a current source `G·v_prev`. `vmax` and `polarised` are for the mistake checker. |
 | `L` | none | **Reserved.** Rejected until Phase 5–6. |
 
-**Mode blocks** (`D`, and `E` with `clamp`) are solved by one generic loop:
+**`E` modes** (`r.modes[id]`). Levels are node voltages: the drive `u = V(out−) + gain·vd`, `hi = V(vpos) − headroom`, `lo = V(vneg) + headroom` (±∞ with no `rails`; `ilim` ∞ when missing). `I` is the output current, + out of `out+`.
+
+| Mode | Output | Consistent when |
+|---|---|---|
+| `linear` | `u` behind `rout` | `lo ≤ u ≤ hi` and `|I| ≤ ilim` |
+| `high` | `hi` behind `rout` | `u ≥ hi` and `|I| ≤ ilim` |
+| `low` | `lo` behind `rout` | `u ≤ lo` and `|I| ≤ ilim` |
+| `isrc+` | `I = +ilim` | `V(out+) ≤ clamp(u, lo, hi) − rout·ilim` (the clipped drive would push more) |
+| `isrc−` | `I = −ilim` | `V(out+) ≥ clamp(u, lo, hi) + rout·ilim` |
+
+A board with no `E` solves exactly as before.
+
+**Mode blocks** (`D`, and `E` with `rails` or `ilim`) are solved by one generic loop:
 1. Solve.
 2. Find the mode block most inconsistent with the result, and flip it.
 3. Repeat, up to `4·n + 10` rounds, with anti-cycling.

@@ -248,9 +248,11 @@
     if (el.kind === 'R' && Number.isFinite(el.ohms) && el.ohms <= 0) bad(`${at} (R) ohms must be above 0; got ${el.ohms}`);
     if (el.kind === 'SW' && typeof el.closed !== 'boolean') bad(`${at} (SW) closed must be true or false`);
     if (el.kind === 'D' && el.vz !== undefined && !Number.isFinite(el.vz)) bad(`${at} (D) vz must be a number`);
-    if (el.kind === 'E' && el.clamp !== undefined) {
-      const c = el.clamp;
-      if (!Array.isArray(c) || c.length !== 2 || !c.every(Number.isFinite) || c[0] >= c[1]) bad(`${at} (E) clamp must be [lo, hi], lo below hi`);
+    if (el.kind === 'E') {
+      const pinOk = n => typeof n === 'string' && ((pins || []).includes(n) || /^#[A-Za-z0-9_]+$/.test(n));
+      if (el.rails !== undefined && (!Array.isArray(el.rails) || el.rails.length !== 2 || !el.rails.every(pinOk))) bad(`${at} (E) rails must name 2 pins, [vneg, vpos]`);
+      for (const f of ['rout', 'headroom']) if (el[f] !== undefined && !(Number.isFinite(el[f]) && el[f] >= 0)) bad(`${at} (E) ${f} must be a number, 0 or more`);
+      if (el.ilim !== undefined && !(Number.isFinite(el.ilim) && el.ilim > 0)) bad(`${at} (E) ilim must be a number above 0`);
     }
   }
 
@@ -321,7 +323,7 @@
       const id = isObj(el) && el.id !== undefined ? el.id : i;
       r.current[id] = 0;
       if (isObj(el) && el.kind === 'D') r.modes[id] = 'off';
-      if (isObj(el) && el.kind === 'E' && el.clamp) r.modes[id] = 'linear';
+      if (isObj(el) && el.kind === 'E' && (el.rails !== undefined || el.ilim !== undefined)) r.modes[id] = 'linear';
     });
 
     let m = {};

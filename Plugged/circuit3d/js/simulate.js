@@ -164,7 +164,10 @@
         const values = partValues(def, comp), controls = partControls(def, comp);
         const els = def.elements(values, controls);
         const node = p => (p[0] === '#' ? `int_${ci}_${p.slice(1)}` : g.nodes[def.pins.indexOf(p)]);
-        g.part = { def, values, controls, els: els.map(el => ({ el, nodes: (el.pins || []).map(node) })) };
+        // An E's nodes are its out pair; its sensed ctrl pair and rails ride alongside.
+        g.part = { def, values, controls, els: els.map(el => (el.kind === 'E'
+          ? { el, nodes: el.out.map(node), ctrl: el.ctrl.map(node), rails: el.rails && el.rails.map(node) }
+          : { el, nodes: (el.pins || []).map(node) })) };
       }
       return g;
     });
@@ -176,8 +179,9 @@
   // ── Nodal analysis ──────────────────────────────────────────
   //
   //  Modified nodal analysis: one unknown per node voltage plus one per
-  //  V element's current. A mode block (a D element) is piecewise linear:
-  //  open when off, Vf in series with ron when on. The modes are found by
+  //  V or E element's current. A mode block (a D element, or an E with
+  //  rails or ilim) is piecewise linear: a D is open when off, Vf in series
+  //  with ron when on; an E is linear, clipped or current-limited. The modes are found by
   //  settleModes, flipping the single most inconsistent block until none
   //  is, so the same circuit always gives the same answer.
   const GMIN       = 1e-12;   // S from every node to ground, keeps floating parts solvable
@@ -220,20 +224,23 @@
 
   // One linear solve with every mode block in a fixed mode.
   // grounds: Set of nodes held at 0 V, one per connected circuit.
-  // modeOf:  Map(element entry -> 'off' | 'on' | 'breakdown').
+  // modeOf:  Map(element entry -> 'off' | 'on' | 'breakdown' for a D,
+  //          'linear' | 'high' | 'low' | 'isrc+' | 'isrc−' for an E).
   // skip:    Set of V element entries left out (the later sources of a
   //          parallel group, parallelSources); optional.
-  // Returns { v(node), vCurrent: Map(V element entry -> amps) } or null.
+  // Returns { v(node), vCurrent: Map(V element entry -> amps),
+  // eCurrent: Map(E element entry -> amps out of out+) } or null.
   function solveMNA(graph, grounds, modeOf, skip) {
     const index = new Map();
     const add = n => { if (n != null && !grounds.has(n) && !index.has(n)) index.set(n, index.size); };
     graph.forEach(g => {
       g.nodes.forEach(add);
-      if (g.part) g.part.els.forEach(e => e.nodes.forEach(add));
+      if (g.part) g.part.els.forEach(e => { e.nodes.forEach(add); if (e.ctrl) e.ctrl.forEach(add); if (e.rails) e.rails.forEach(add); });
     });
     const els = allElements(graph);
     const vs  = els.filter(e => e.el.kind === 'V' && !(skip && skip.has(e)));
-    const N = index.size, size = N + vs.length;
+    const es  = els.filter(e => e.el.kind === 'E');
+    const N = index.size, size = N + vs.length + es.length;
     const A = Array.from({ length: size }, () => new Array(size).fill(0));
     const b = new Array(size).fill(0);
     const at = n => (grounds.has(n) ? -1 : index.get(n));
@@ -280,10 +287,32 @@
       b[row] = e.el.volts || 0;
     });
 
+    // E: one more unknown, its output current j, + out of out+ into the
+    // circuit and back in at out−. Its row is the mode's law, rout in series:
+    //   linear  V(out+) − V(out−) − gain·(V(ctrl+) − V(ctrl−)) + rout·j = 0
+    //   high    V(out+) − V(vpos) + rout·j = −headroom
+    //   low     V(out+) − V(vneg) + rout·j = +headroom
+    //   isrc±   j = ±ilim
+    // An E that is not a mode block (no rails, no ilim) is always linear.
+    es.forEach((e, k) => {
+      const row = N + vs.length + k, el = e.el, [op, om] = e.nodes;
+      const put = (n, c) => { const i = at(n); if (i >= 0) A[row][i] += c; };
+      if (at(op) >= 0) A[at(op)][row] -= 1;
+      if (at(om) >= 0) A[at(om)][row] += 1;
+      const mode = modeOf.get(e) || 'linear';
+      if (mode === 'isrc+' || mode === 'isrc−') { A[row][row] = 1; b[row] = mode === 'isrc+' ? el.ilim : -el.ilim; return; }
+      A[row][row] = el.rout || 0;
+      put(op, 1);
+      if (mode === 'high')     { put(e.rails[1], -1); b[row] = -(el.headroom || 0); }
+      else if (mode === 'low') { put(e.rails[0], -1); b[row] = el.headroom || 0; }
+      else { put(om, -1); put(e.ctrl[0], -el.gain); put(e.ctrl[1], el.gain); }
+    });
+
     const x = solveLinear(A, b);
     if (!x) return null;
     const vCurrent = new Map(vs.map((e, k) => [e, x[N + k]]));
-    return { v: n => (grounds.has(n) ? 0 : x[index.get(n)]), vCurrent };
+    const eCurrent = new Map(es.map((e, k) => [e, x[N + vs.length + k]]));
+    return { v: n => (grounds.has(n) ? 0 : x[index.get(n)]), vCurrent, eCurrent };
   }
 
   // Amps through one of a registry part's elements, + in its pin order.
@@ -292,6 +321,7 @@
     if (el.kind === 'R' && el.ohms > 0) return (sol.v(a) - sol.v(b)) / el.ohms;
     if (el.kind === 'SW') return el.closed ? (sol.v(a) - sol.v(b)) / SW_OHMS : 0;
     if (el.kind === 'V') return sol.vCurrent.get(e) || 0;
+    if (el.kind === 'E') return sol.eCurrent.get(e) || 0;   // + out of out+
     if (el.kind === 'I') return el.amps;
     if (el.kind === 'C') return e.cap ? e.cap.G * (sol.v(a) - sol.v(b) - e.cap.vPrev) : 0;
     if (el.kind === 'D') {
@@ -312,6 +342,37 @@
     else {
       by = vd - el.vf; to = 'on';
       if (el.vz !== undefined && -vd - el.vz > by) { by = -vd - el.vz; to = 'breakdown'; }
+    }
+    return by > MODE_EPS ? { by, to } : null;
+  }
+
+  // An E with rails or ilim is a mode block (linear / high / low / isrc+ /
+  // isrc−). Levels are node voltages: the drive u = V(out−) + gain·vd (what
+  // linear asks for), hi = V(vpos) − headroom, lo = V(vneg) + headroom (±∞
+  // with no rails), ilim ∞ when missing. isrc± holds while the clipped
+  // drive behind rout would push more than ilim. As checkDiode: null if
+  // consistent, else { by, to }; 1 mA past the limit weighs as 1 V.
+  const isModeE = e => e.el.kind === 'E' && (e.el.rails !== undefined || e.el.ilim !== undefined);
+  function checkE(e, sol, mode) {
+    const { el, nodes: [op, om], ctrl: [cp, cm], rails } = e;
+    const rout = el.rout || 0, hr = el.headroom || 0;
+    const ilim = el.ilim !== undefined ? el.ilim : Infinity;
+    const u    = sol.v(om) + el.gain * (sol.v(cp) - sol.v(cm));
+    const hi   = rails ? sol.v(rails[1]) - hr : Infinity;
+    const lo   = rails ? sol.v(rails[0]) + hr : -Infinity;
+    const want = Math.min(hi, Math.max(lo, u));
+    const asks = u >= hi ? 'high' : u <= lo ? 'low' : 'linear';
+    const j    = sol.eCurrent.get(e);
+    let by = 0, to = null;
+    const worse = (b, t) => { if (b > by) { by = b; to = t; } };
+    if (mode === 'isrc+')      worse(sol.v(op) - (want - rout * ilim), asks);
+    else if (mode === 'isrc−') worse(want + rout * ilim - sol.v(op), asks);
+    else {
+      if (mode === 'linear') { worse(u - hi, 'high'); worse(lo - u, 'low'); }
+      if (mode === 'high') worse(hi - u, asks);
+      if (mode === 'low')  worse(u - lo, asks);
+      worse((j - ilim) * 1000, 'isrc+');
+      worse((-j - ilim) * 1000, 'isrc−');
     }
     return by > MODE_EPS ? { by, to } : null;
   }
@@ -610,10 +671,12 @@
       return done({ status: 'unsolvable', lines: withHeads(null) });
     }
 
-    // Every mode block (D element) in board order, and the loop that settles them.
+    // Every mode block (D, and E with rails or ilim) in board order, and the loop that settles them.
     const { grounds } = groundCircuits(graph);
-    const blockEls = els.filter(e => e.el.kind === 'D');
-    const blocks   = blockEls.map(e => ({ initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
+    const blockEls = els.filter(e => e.el.kind === 'D' || isModeE(e));
+    const blocks   = blockEls.map(e => (e.el.kind === 'E'
+      ? { initial: 'linear', check: (sol, mode) => checkE(e, sol, mode) }
+      : { initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
     const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]));
     const solveFor = modes => solveMNA(graph, grounds, modesOf(modes), parallel.skip);
 
@@ -653,7 +716,11 @@
     });
     // What each mode block would see on its own: every block off. Leaving
     // the others on would let a parallel LED pin the shared node near Vf.
-    const openSol = blockEls.length ? solveFor(blockEls.map(() => 'off')) : sol;
+    // An E has no off: it keeps its settled mode, but isrc± becomes the rail
+    // it pushes toward (linear with no rails), so ±ilim into a node only
+    // GMIN holds can't read ~1e10 V.
+    const openMode = (e, m) => (m === 'isrc+' || m === 'isrc−' ? (!e.rails ? 'linear' : m === 'isrc+' ? 'high' : 'low') : m);
+    const openSol = blockEls.length ? solveFor(blockEls.map((e, i) => (e.el.kind === 'E' ? openMode(e, solved.modes[i]) : 'off'))) : sol;
 
     const nodeVoltages = {};
     graph.forEach(g => g.nodes.forEach(n => { nodeVoltages[n] = sol.v(n); }));
