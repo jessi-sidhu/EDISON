@@ -4,7 +4,8 @@
     "studio": "remotion studio",
     "build": "remotion render src/index.ts SparkyDemo out/sparky-demo.mp4",
     "check": "biome lint --error-on-warnings",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "ai-eval": "node scripts/ai-eval.js"
   },
   "dependencies": {
     "@react-three/fiber": "^8.18.0",

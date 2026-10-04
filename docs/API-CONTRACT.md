@@ -160,6 +160,31 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
 //   { type: 'toggle_switch', label: 'SW1', holes: ['a10','a12'], controls: { closed: true } }
 ```
 
+### Board model (`circuit3d/js/board-model.js`, `window.Board`; #81)
+The board as plain data, no THREE or DOM, so an AI build can be applied and simulated in Node.
+```js
+{ parts: [ { type, label, holes?, values?, controls? } ],   // an Example part
+  wires: [ { id: 'W1', from: 'BAT1.0', to: 'tp_50' } ] }    // ends: a hole or LABEL.k
+```
+- `Board.empty()` → `{ parts: [], wires: [] }`.
+- `Board.fromExample(ex)` → a board: parts copied, wires `[from, to]` numbered `W1…Wn` in order.
+- `Board.apply(board, actions)` → `{ board, errors }`. Never mutates its input. Actions run in order:
+  - `delete_all`: empty board; labels and wire ids start again at 1.
+  - `place_<type>`: label by `Ids.nextLabel` (highest number in use + 1, as `Chat.predictLabels`). `span` → `holes: [holeA, holeB]`; `footprint` → `Parts.footprintLegs(type, hole, Board.ROTATION[direction])`; `offboard` → no holes. Args that are the part's value keys go into `values`.
+  - `add_wire { from, to }` → `{ id: 'W<n>', from, to }`, n = highest wire number in use + 1 (ids are never renumbered). A `LABEL.k` end is stored with the part's own label (`bat1.0` → `BAT1.0`), and a hole in lower case (`TP_3` → `tp_3`, as span holes are too).
+  - `delete_part { part }`: removes the part and every wire with an end on one of its `LABEL.k` pins.
+  - `delete_wire { wire }`, `set_value { part, ... }` and `set_control { part, ... }` (merged into `values` / `controls`).
+  - A null argument is ignored: it neither sets a value nor clears one.
+  - Errors: `errors.push({ index, tool, why })` (0-based action index); the action is skipped and the rest still apply. An action is an error when it has:
+    - an unknown part label, wire id or tool
+    - a wire end that is neither a board hole nor `LABEL.k` (e.g. the old `battery_0_pin0`), or that names no part or no such pin of that part
+    - a span place missing `holeA` or `holeB`, or with a span hole that isn't a board address
+    - a footprint place with a bad direction, or any leg off the board (outside columns 1…COLS or rows a–j)
+    - an `add_wire` missing `from` or `to`
+  - No range or placement-legality checks: the server does those.
+- `Board.toSim(board)` → `{ components, wires }` for `Sim.analyze(components, wires)`, with values filled in from the part's defaults. Throws on a hole that isn't a board address or a wire end that names no pin.
+- `Board.ROTATION` = `{ right: 0, down: 90, left: 180, up: 270 }`, the same as `Chat.ROTATION`.
+
 ### Placed-part record (runtime) and saved record
 ```js
 // runtime (state.components[i])

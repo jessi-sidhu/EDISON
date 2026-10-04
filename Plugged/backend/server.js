@@ -1212,4 +1212,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems };
+module.exports = { server, ask, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems };

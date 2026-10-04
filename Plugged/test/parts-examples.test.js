@@ -12,14 +12,16 @@
 //   form: "BAT1.0" (pin index) or "LED1.anode" (pin name).
 // - example.expect: { [label]: { [measure() field]: exact value | [lo, hi] } }.
 // - Sim.analyze(...).parts[label] = { r, m, warnings } for registry parts.
-// The adapter below builds the records the way App.place* leaves them: a
-// label, one pin per leg, holeRefs as { col (0-based), row }, and a
-// registry part's values filled in from its defaults.
+// Board.toSim(Board.fromExample(ex)) (circuit3d/js/board-model.js, #81)
+// builds the records the way App.place* leaves them: a label, one pin per
+// leg, holeRefs as { col (0-based), row }, and a registry part's values
+// filled in from its defaults.
 
 const assert = require('node:assert');
 
 const Parts = require('../circuit3d/js/parts');
 const Sim   = require('../circuit3d/js/simulate.js');
+const Board = require('../circuit3d/js/board-model.js');
 
 // ── Example → components and wires ──────────────────────────────────────
 
@@ -30,67 +32,10 @@ function parseHole(s) {
   return m[1] ? { col: Number(m[2]) - 1, row: m[1] } : { col: Number(m[4]) - 1, row: m[3] };
 }
 
-// A registry part's defaults, as elements() gets them: a choice's overrides
-// sit beside the choice's name.
-function defaultValues(def) {
-  const out = {};
-  for (const [key, spec] of Object.entries(def.values || {})) {
-    out[key] = spec.default;
-    if (spec.choices && spec.choices[spec.default]) Object.assign(out, spec.choices[spec.default]);
-  }
-  return out;
-}
-
-function valuesOf(p) {
-  const def = Parts.get(p.type);
-  if (def) {
-    const v = Object.assign(defaultValues(def), p.values || {});
-    for (const [key, val] of Object.entries(p.values || {})) {
-      const spec = def.values && def.values[key];
-      if (spec && spec.choices && spec.choices[val]) Object.assign(v, spec.choices[val]);
-    }
-    return v;
-  }
-  // A part not in the registry: its own values as given. (Sim.PROPS, the
-  // old per-type defaults, is gone since #26, when every part is a
-  // registry part.)
-  return p.values ? Object.assign({}, p.values) : undefined;
-}
-
+// The example as Sim.analyze's components and wires; a bad hole or wire end
+// fails with the example's name.
 function toCircuit(ex) {
-  const byLabel = new Map();
-  const components = ex.parts.map(p => {
-    const def = Parts.get(p.type);
-    const n = def ? def.pins.length : 2;   // every pre-registry part has 2 pins
-    const holeRefs = p.holes ? p.holes.map(h => {
-      const ref = parseHole(h);
-      assert.ok(ref, `${ex.name}: ${p.label} hole "${h}" is not a board address`);
-      return ref;
-    }) : null;
-    if (holeRefs) assert.equal(holeRefs.length, n, `${ex.name}: ${p.label} needs one hole per pin (${n})`);
-    const comp = { type: p.type, label: p.label, pins: Array.from({ length: n }, () => ({ x: 0, y: 0, z: 0 })),
-                   holeRefs, values: valuesOf(p) };
-    if (comp.values === undefined) delete comp.values;
-    // A part may set its controls, in the saved record's shape (#26), e.g.
-    // a pressed button: { type: 'button', ..., controls: { pressed: true } }.
-    if (p.controls) comp.controls = Object.assign({}, p.controls);
-    byLabel.set(p.label, { comp, def });
-    return comp;
-  });
-
-  const end = (s, side) => {
-    const hole = parseHole(s);
-    if (hole) return { [side + 'Hole']: hole };
-    const m = /^([A-Za-z]+\d+)\.(\w+)$/.exec(String(s));
-    assert.ok(m, `${ex.name}: wire end "${s}" is neither a hole nor LABEL.pin`);
-    const owner = byLabel.get(m[1]);
-    assert.ok(owner, `${ex.name}: wire end "${s}" names no part in the example`);
-    const idx = /^\d+$/.test(m[2]) ? Number(m[2]) : owner.def ? owner.def.pins.indexOf(m[2]) : -1;
-    assert.ok(idx >= 0 && idx < owner.comp.pins.length, `${ex.name}: wire end "${s}" names no pin of ${m[1]}`);
-    return { [side + 'Comp']: owner.comp, [side + 'PinIdx']: idx };
-  };
-  const wires = ex.wires.map(([a, b]) => Object.assign({}, end(a, 'start'), end(b, 'end')));
-  return { components, wires };
+  try { return Board.toSim(Board.fromExample(ex)); } catch (e) { throw new Error(`${ex.name}: ${e.message}`); }
 }
 
 // Every hole an example uses, part legs and wire ends alike.

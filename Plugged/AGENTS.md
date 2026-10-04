@@ -13,6 +13,7 @@ Plugged is a browser 3D breadboard editor with a circuit simulator and an AI tut
 | Unit tests | `npm test` (Vitest; no key, no browser) |
 | Browser tests | `npm run e2e` (Playwright; starts its own server on :5090) |
 | Run with no AI cost | `AI_PROVIDER=fixture node server.js` (replays recorded answers only) |
+| Real-AI eval (costs money) | `npm run ai-eval -- --only demo` (3 runs), or `npm run ai-eval` for every case: grades DeepSeek's builds in the simulator |
 
 ## How a request flows
 ```
@@ -41,7 +42,7 @@ board → App.exportMarkdown() → POST /api/ask → ai-providers (DeepSeek / Ge
 ## Config and secrets
 - **AI keys:** `backend/.env`, which is gitignored. Agents are blocked from reading or writing it, so a person edits it. It's read only at startup, so restart the server after changing it. Variable names are listed in `../.env.example`.
 - **Firebase config:** `firebase-config.js` is public by design, and it's the **only** copy, so don't paste it into pages. The Firestore rules are `firestore.rules`, and a person publishes them in the Firebase console.
-- **AI cost:** about a cent per build on DeepSeek. Never write loops or scripts that send real prompts; use `AI_PROVIDER=fixture` or stubs.
+- **AI cost:** about a cent per build on DeepSeek. Never write loops or scripts that send real prompts; use `AI_PROVIDER=fixture` or stubs. The one exception is `scripts/ai-eval.js` (`npm run ai-eval`), run deliberately by a person or the orchestrator, never from `npm test`, e2e or CI.
 
 ## Before saying it works
 Run `npm run check`, `npm test`, and `npm run e2e` if UI changed. For anything visible, open it in a real browser and check the console for errors.
