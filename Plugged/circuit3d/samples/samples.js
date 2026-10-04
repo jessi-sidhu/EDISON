@@ -73,6 +73,36 @@ window.PhotoSamples = {
       { tool: 'add_wire', from: 'j11', to: 'bn_11', color: 'black' },
     ],
   },
+  // Aarmen's own build of his bench photo (a TL072 comparator), from his saved project, 2026-10-04.
+  'ensc-lab': {
+    file: 'samples/ensc-lab.jpg',
+    cols: 63,
+    title: 'ENSC 220 lab bench',
+    credit: 'Photo: Aarmen, ENSC 220 lab',
+    board: [
+      { tool: 'place_resistor', holeA: 'd29', holeB: 'd34', resistance: 10000 },
+      { tool: 'place_bench_supply', voltage: 12, limit: 0.05, voltage2: 12, limit2: 0.5 },
+      { tool: 'place_resistor', holeA: 'h29', holeB: 'h33', resistance: 470 },
+      { tool: 'place_tl072', hole: 'f57', direction: 'right' },
+      { tool: 'place_resistor', holeA: 'g55', holeB: 'g59', resistance: 470 },
+      { tool: 'place_function_generator', amplitude: 5, frequency: 1, offset: 0 },
+      { tool: 'add_wire', from: 'c34', to: 'd40', color: 'white' },
+      { tool: 'add_wire', from: 'PS1.0', to: 'tp_1', color: 'red' },      // PS1 pins: pos com neg com2
+      { tool: 'add_wire', from: 'PS1.1', to: 'tn_1', color: 'black' },
+      { tool: 'add_wire', from: 'PS1.3', to: 'tn_2', color: 'white' },
+      { tool: 'add_wire', from: 'PS1.2', to: 'bn_1', color: 'blue' },
+      { tool: 'add_wire', from: 'tn_3', to: 'bp_3', color: 'black' },
+      { tool: 'add_wire', from: 'e40', to: 'f41', color: 'black' },
+      { tool: 'add_wire', from: 'i33', to: 'h41', color: 'black' },
+      { tool: 'add_wire', from: 'd57', to: 'tp_58', color: 'red' },
+      { tool: 'add_wire', from: 'FG1.1', to: 'tn_38', color: 'black' },   // FG1 pins: out com
+      { tool: 'add_wire', from: 'FG1.0', to: 'f55', color: 'red' },
+      { tool: 'add_wire', from: 'tp_29', to: 'a29', color: 'green' },
+      { tool: 'add_wire', from: 'bp_29', to: 'j29', color: 'green' },
+      { tool: 'add_wire', from: 'j60', to: 'bn_60', color: 'green' },
+      { tool: 'add_wire', from: 'g41', to: 'h58', color: 'green' },
+    ],
+  },
   piranha: {
     file: 'samples/piranha.jpg',
     cols: 30,

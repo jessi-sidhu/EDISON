@@ -9,7 +9,8 @@
 //
 // The page the builder matches:
 //   - Use sample photo opens the picker (#photo-samples, #182): one tile
-//     [data-sample=<id>] per offered sample, demo-board and leds-buttons.
+//     [data-sample=<id>] per offered sample, demo-board, leds-buttons and
+//     (#16) ensc-lab.
 //   - The leds-buttons tile: #photo-modal shows the sample's own photo as it
 //     is, not flattened (a visible <img> of its file, or a canvas drawn with
 //     it at the photo's own aspect ratio), and #photo-status reads "Reading
@@ -21,12 +22,18 @@
 //     (nothing typed). Nothing is posted to /api/photo.
 //   - Escape (or Cancel) during that second closes the overlay and builds
 //     nothing (photo.js's job guard).
+//   - The ensc-lab tile (#16), Aarmen's ENSC 220 bench photo, builds its
+//     board the same way: U1 (a TL072), PS1, FG1 and R1–R3. Its wire ends on
+//     PS1 and FG1 may be written by pin name or index (PS1.pos or PS1.0);
+//     the page exports indices, so the board is compared by pin name.
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const Board = require('../circuit3d/js/board-model.js');
+const Parts = require('../circuit3d/js/parts');
 
 const ID        = 'leds-buttons';
+const LAB       = 'ensc-lab';                             // issue #16
 const READING   = 'Reading your board…';                // photo.js READING
 const DEFAULT_Q = "What's wrong with my circuit?";
 const READ_MS   = 1000;                                   // photo.js SAMPLE_READ_MS
@@ -70,16 +77,26 @@ async function openPicker(page) {
 const tile = (page, id) => page.locator(`#photo-samples [data-sample="${id}"]`);
 const samplesOf = page => page.evaluate(() => JSON.parse(JSON.stringify(window.PhotoSamples || {})));
 
+// A wire end with an off-board part's pin by name: PS1.0 and PS1.pos are the
+// same end (the page exports the index).
+function endName(board, end) {
+  const m = /^([A-Z]+\d+)\.(\w+)$/.exec(String(end));
+  const part = m && board.parts.find(p => p.label === m[1]);
+  if (!part) return String(end);
+  const pins = Parts.get(part.type).pins;
+  return `${m[1]}.${/^\d+$/.test(m[2]) ? pins[Number(m[2])] : m[2]}`;
+}
+
 // The board as [label, type, holes sorted] and each wire's ends sorted.
 const shape = board => ({
   parts: board.parts.map(p => [p.label, p.type, (p.holes || []).slice().sort()]).sort((x, y) => x[0].localeCompare(y[0])),
-  wires: board.wires.map(w => [w.from, w.to].sort().join(' ~ ')).sort(),
+  wires: board.wires.map(w => [endName(board, w.from), endName(board, w.to)].sort().join(' ~ ')).sort(),
 });
 const boardNow = page => page.evaluate(() => App.exportBoard()).then(shape);
 
 // ── The picker ─────────────────────────────────────────────────────────────
 
-test('Use sample photo shows a picker of 2 tiles, demo-board and leds-buttons, each with its photo, title and credit; Escape while leds-buttons reads builds nothing', async ({ page }) => {
+test('Use sample photo shows a picker of 3 tiles, demo-board, ensc-lab and leds-buttons, each with its photo, title and credit; Escape while leds-buttons reads builds nothing', async ({ page }) => {
   test.setTimeout(60_000);   // software WebGL
   const errors = watchErrors(page);
   const api = await watchApi(page);
@@ -88,7 +105,7 @@ test('Use sample photo shows a picker of 2 tiles, demo-board and leds-buttons, e
 
   await openPicker(page);
   const listed = await page.locator('#photo-samples [data-sample]').evaluateAll(ts => ts.map(t => t.dataset.sample));
-  expect(listed.sort(), 'a tile each for demo-board and leds-buttons').toEqual(['demo-board', ID]);
+  expect(listed.sort(), 'a tile each for demo-board, ensc-lab and leds-buttons').toEqual(['demo-board', LAB, ID]);
   for (const id of listed) {
     await expect(tile(page, id), `the ${id} tile shows its title`).toContainText(samples[id].title);
     await expect(tile(page, id), `the ${id} tile shows its credit`).toContainText(samples[id].credit);
@@ -214,5 +231,37 @@ test('the leds-buttons tile shows its photo with "Reading your board…", then b
   await expect(page.locator('#photo-redo'), 'Redo is back').toBeVisible();
   await expect(page.locator('#photo-ok'), 'Looks right is back').toBeVisible();
   await expect(page.locator('#photo-ok'), 'Looks right waits for 4 taps').toBeDisabled();
+  expect(errors).toEqual([]);
+});
+
+// ── ensc-lab (#16) ─────────────────────────────────────────────────────────
+
+test('the ensc-lab tile builds its board (U1 the TL072, PS1, FG1 and R1–R3, each in the 3D scene) with no /api/photo and no console error; Edison is asked', async ({ page }) => {
+  test.setTimeout(90_000);   // software WebGL
+  const errors = watchErrors(page);
+  const api = await watchApi(page);
+  await openEditor(page);
+  const sample = (await samplesOf(page))[LAB];
+  expect(sample && Array.isArray(sample.board), `PhotoSamples['${LAB}'] has a board`).toBe(true);
+  const { board: want, errors: wrong } = Board.apply(Board.empty(), sample.board);
+  expect(wrong, 'the sample\'s board applies in Node').toEqual([]);
+  const placed = sample.board.filter(a => typeof a.tool === 'string' && a.tool.startsWith('place_')).length;
+
+  await openPicker(page);
+  await tile(page, LAB).click();
+  await expect(page.locator('#photo-status'), 'the tile shows the reading status').toHaveText(READING);
+  await expect(page.locator('#photo-modal'), 'then the overlay closes for the board').toBeHidden({ timeout: 15_000 });
+  await expect.poll(() => boardNow(page), { message: 'the page builds the sample\'s board exactly' }).toEqual(shape(want));
+
+  const parts = await page.evaluate(() => App.exportBoard().parts.map(p => [p.label, p.type]).sort((x, y) => x[0].localeCompare(y[0])));
+  expect(parts, 'the TL072, the bench supply, the function generator and 3 resistors')
+    .toEqual([['FG1', 'function_generator'], ['PS1', 'bench_supply'], ['R1', 'resistor'], ['R2', 'resistor'], ['R3', 'resistor'], ['U1', 'tl072']]);
+  expect(await page.evaluate(() => App.state.components.every(c => c.group && c.group.parent === App.scene)), 'every part is in the 3D scene').toBe(true);
+  await expect(page.locator('#sparky-messages .chat-msg.system'), 'one note for the build, no refusal notes').toHaveText([BUILT_NOTE(placed)]);
+  await expect.poll(() => page.evaluate(() => App.simRunning === true), { message: 'the simulation is running' }).toBe(true);
+
+  await expect.poll(() => api.asks.length, { message: 'Edison is asked once' }).toBe(1);
+  expect(api.asks[0].message.startsWith(DEFAULT_Q), api.asks[0].message).toBe(true);
+  expect(api.photo, 'no /api/photo request').toEqual([]);
   expect(errors).toEqual([]);
 });

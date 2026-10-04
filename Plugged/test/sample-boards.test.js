@@ -33,6 +33,25 @@
 //           j11 → bn_11 (black: R1's far end to the − rail)
 //   So + → SWn → LEDn's anode → its cathode → R1 → −: pressing SWn lights
 //   only LEDn.
+// - PhotoSamples['ensc-lab'] (issue #16): photo 11, Aarmen's ENSC 220 bench
+//   photo, offered, after leds-buttons: { file: 'samples/ensc-lab.jpg',
+//   title: 'ENSC 220 lab bench', credit naming Aarmen ("Photo: Aarmen, ENSC
+//   220 lab"), board }. Its board is his saved build (Board.toActions, holes
+//   +1, the no-op PS1.com → PS1.com wire and the set_control mode: series
+//   step dropped), a TL072 comparator:
+//     PS1 ±12 V series: + → tp_1, COM → tn_1, COM2 → tn_2, − → bn_1;
+//         tn_3 → bp_3 puts the bottom + rail (bp) on ground
+//     U1 TL072 at f57 facing right: OUT1 f57, IN1− f58, IN1+ f59, V− f60,
+//         IN2+ e60, IN2− e59, OUT2 e58, V+ e57; d57 → tp_58 (V+ +12 V),
+//         j60 → bn_60 (V− −12 V)
+//     R1 10 kΩ d29–d34, tp_29 → a29 (+12 V)
+//     R2 470 Ω h29–h33, bp_29 → j29 (ground)
+//     the divider node: cols 34 (a–e) → c34–d40 → 40 → e40–f41 → 41 (f–j),
+//         33 (f–j) → i33–h41 → 41; g41 → h58 takes it to IN1−
+//     R3 470 Ω g55–g59, FG1.out → f55: the generator into IN1+
+//     FG1 5 V, 1 Hz sine, offset 0; COM → tn_38
+//   A wire end on PS1 or FG1 may be written by pin name or index (PS1.pos or
+//   PS1.0): the tests compare names.
 
 const assert = require('node:assert');
 const fs     = require('node:fs');
@@ -79,9 +98,11 @@ function built(id) {
   return board;
 }
 
-// Every sample with a board, leds-buttons always among them (so its tests
-// run, and fail, before it exists).
-const BOARD_IDS = [...new Set([ID, ...Object.entries(loadSamples()).filter(([, s]) => s.board).map(([id]) => id)])];
+const LAB = 'ensc-lab';   // issue #16
+
+// Every sample with a board, leds-buttons and ensc-lab always among them (so
+// their tests run, and fail, before they exist).
+const BOARD_IDS = [...new Set([ID, LAB, ...Object.entries(loadSamples()).filter(([, s]) => s.board).map(([id]) => id)])];
 
 // ATTRIBUTION.md's table: file → { author, licence }, links and "(site)"
 // notes stripped (as test/photo-samples.test.js reads it).
@@ -320,4 +341,126 @@ test('leds-buttons as built has no problem rows and nothing for the server\'s ch
   const rows = Readings.from(r, sim).problems();
   assert.deepStrictEqual(rows.map(p => `${p.kind}: ${p.labels}`), [], 'no row in the mistakes panel');
   assert.deepStrictEqual(checkBuild([{ tool: 'delete_all' }, ...boardOf(ID)], null), [], 'the server\'s checker finds nothing');
+});
+
+// ── ensc-lab (issue #16) ───────────────────────────────────────────────────
+
+test('ensc-lab is offered, titled "ENSC 220 lab bench", its photo samples/ensc-lab.jpg on disk (a JPEG of its own) and its credit naming Aarmen', () => {
+  const samples = loadSamples();
+  const s = samples[LAB];
+  assert.ok(s, `PhotoSamples has '${LAB}': got ${JSON.stringify(Object.keys(samples))}`);
+  assert.notEqual(s.offered, false, `${LAB} is offered on the picker`);
+  assert.equal(s.title, 'ENSC 220 lab bench', `${LAB}'s tile title`);
+  assert.equal(s.file, 'samples/ensc-lab.jpg');
+  const file = path.join(CIRCUIT3D, s.file);
+  assert.ok(fs.existsSync(file), `circuit3d/${s.file} exists`);
+  const bytes = fs.readFileSync(file);
+  assert.ok(bytes.length > 1000 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff, `circuit3d/${s.file} is a JPEG`);
+  for (const [id, o] of Object.entries(samples)) {
+    if (id === LAB || !o.file || !fs.existsSync(path.join(CIRCUIT3D, o.file))) continue;
+    assert.ok(!bytes.equals(fs.readFileSync(path.join(CIRCUIT3D, o.file))), `${LAB}'s photo is its own, not a copy of ${id}'s ${o.file}`);
+  }
+  assert.ok(String(s.credit || '').includes('Aarmen'), `${LAB}.credit names Aarmen: ${JSON.stringify(s.credit)}`);
+});
+
+// A wire end with an off-board part's pin by name: PS1.0 and PS1.pos are the
+// same end (the page's own add_wire takes either).
+function endName(board, end) {
+  const m = /^([A-Z]+\d+)\.(\w+)$/.exec(String(end));
+  const part = m && board.parts.find(p => p.label === m[1]);
+  if (!part) return String(end);
+  const pins = Parts.get(part.type).pins;
+  return `${m[1]}.${/^\d+$/.test(m[2]) ? pins[Number(m[2])] : m[2]}`;
+}
+
+const LAB_WIRES = [['PS1.pos', 'tp_1'], ['PS1.com', 'tn_1'], ['PS1.com2', 'tn_2'], ['PS1.neg', 'bn_1'], ['tn_3', 'bp_3'],
+                   ['d57', 'tp_58'], ['j60', 'bn_60'],                               // U1's V+ and V−
+                   ['tp_29', 'a29'], ['bp_29', 'j29'],                               // the divider's ends
+                   ['c34', 'd40'], ['e40', 'f41'], ['i33', 'h41'], ['g41', 'h58'],   // its node to IN1−
+                   ['FG1.com', 'tn_38'], ['FG1.out', 'f55']];                       // the generator, into R3
+
+test('ensc-lab is exactly U1 (a TL072 at f57, facing right), PS1 at 12 V, FG1 (a 5 V, 1 Hz sine, offset 0) and R1 10 kΩ, R2 470 Ω, R3 470 Ω at their holes, plus its 15 wires', () => {
+  const board = built(LAB);
+  const values = Object.fromEntries(board.parts.map(p => [p.label, p.values || {}]));
+  // U1 in pin order (OUT1 IN1− IN1+ V− IN2+ IN2− OUT2 V+); a resistor's holes sorted.
+  const got  = board.parts.map(p => [p.label, p.type, p.type === 'tl072' ? p.holes : sorted(p.holes || [])]);
+  const want = [['U1', 'tl072', ['f57', 'f58', 'f59', 'f60', 'e60', 'e59', 'e58', 'e57']],
+                ['PS1', 'bench_supply', []], ['FG1', 'function_generator', []],
+                ['R1', 'resistor', ['d29', 'd34']], ['R2', 'resistor', ['h29', 'h33']], ['R3', 'resistor', ['g55', 'g59']]];
+  const byLabel = list => list.slice().sort((x, y) => x[0].localeCompare(y[0]));
+  assert.deepStrictEqual(byLabel(got), byLabel(want), 'the parts, by label: [label, type, holes]');
+
+  assert.equal(Number(values.R1.resistance), 10000, 'R1 is 10 kΩ');
+  assert.equal(Number(values.R2.resistance), 470, 'R2 is 470 Ω');
+  assert.equal(Number(values.R3.resistance), 470, 'R3 is 470 Ω');
+  assert.equal(Number(values.PS1.voltage), 12, 'PS1 is set to 12 V');
+  assert.deepStrictEqual({ amplitude: Number(values.FG1.amplitude), frequency: Number(values.FG1.frequency), offset: Number(values.FG1.offset) },
+    { amplitude: 5, frequency: 1, offset: 0 }, 'FG1 is a 5 V, 1 Hz sine with no offset');
+
+  assert.deepStrictEqual(sorted(board.wires.map(w => pair(endName(board, w.from), endName(board, w.to)))),
+    sorted(LAB_WIRES.map(([a, b]) => pair(a, b))), 'the wires, ends by pin name');
+});
+
+// The board solved once (a plain solve: FG1 reads its offset).
+function solveLab(actions) {
+  const { board, errors } = Board.apply(Board.empty(), actions);
+  assert.deepStrictEqual(errors, [], `Board.apply errors: ${JSON.stringify(errors)}`);
+  const sim = Board.toSim(board);
+  const r = Sim.analyze(sim.components, sim.wires);
+  assert.equal(r.status, 'ok', `status ${r.status}; ${(r.lines || []).map(l => l.text).join(' | ')}`);
+  assert.ok(r.parts.U1 && r.parts.R1 && r.parts.R2, `U1, R1 and R2 solved: got ${JSON.stringify(Object.keys(r.parts))}`);
+  return r;
+}
+
+// Hand calculation. PS1 in series puts tp at +12 V and bn at −12 V against
+// COM (tn), and tn_3 → bp_3 puts bp on ground too. R1 (10 kΩ) from +12 V and
+// R2 (470 Ω) to ground in series; IN1− draws nothing (JFET inputs), so
+//   I(R1) = I(R2) = 12 / 10 470 = 1.1461 mA
+//   IN1−  = 12 · 470 / 10 470   = 0.5387 V
+const SUPPLY   = 12;
+const DIV_MA   = SUPPLY / (10000 + 470) * 1000;   // 1.1461 mA
+const DIV_V    = SUPPLY * 470 / (10000 + 470);    // 0.5387 V
+
+test('ensc-lab: R1 carries 12 V / 10.47 kΩ ≈ 1.146 mA, the divider puts IN1− (U1 pin 2) at 12·470/10 470 ≈ 0.539 V, and U1 sits on ±12 V', () => {
+  const r = solveLab(boardOf(LAB));
+  assert.ok(Math.abs(r.parts.R1.m.current - DIV_MA) < 0.001, `R1: expected ${DIV_MA.toFixed(4)} mA, got ${r.parts.R1.m.current}`);
+  assert.ok(Math.abs(r.parts.R2.m.current - DIV_MA) < 0.001, `R2 carries R1's current (IN1− draws none): expected ${DIV_MA.toFixed(4)} mA, got ${r.parts.R2.m.current}`);
+  const pins = r.parts.U1.r.pins;
+  assert.ok(typeof pins.in1n === 'number' && Math.abs(pins.in1n - DIV_V) < 0.005, `IN1−: expected ${DIV_V.toFixed(4)} V, got ${pins.in1n}`);
+  assert.ok(Math.abs(pins.vpos - SUPPLY) < 0.01, `V+ (pin 8) on +12 V, got ${pins.vpos}`);
+  assert.ok(Math.abs(pins.vneg + SUPPLY) < 0.01, `V− (pin 4) on −12 V, got ${pins.vneg}`);
+});
+
+// The comparator, on a copy of the board with FG1 held at a DC level
+// (amplitude 0, offset = the level). IN1+ = the offset: no input current,
+// so no drop across the generator's 50 Ω or R3. Open loop (gain 200 000),
+// OUT1 sits at a clip, HEADROOM (1.5 V, parts/tl072.js) inside its rails:
+//   IN1+ below 0.5387 V → V− + 1.5 = −10.5 V
+//   IN1+ above 0.5387 V → V+ − 1.5 = +10.5 V
+// OUT1 drives nothing (column 57 f–j holds only pin 1), so no drop across
+// its 50 Ω. 0.5 V and 0.6 V bracket the reference, so the threshold is the
+// divider's, not ground's.
+const HEADROOM = Parts.get('tl072').elements()[0].headroom;
+const CLIP     = SUPPLY - HEADROOM;   // 10.5 V
+const LEVELS = [
+  [0,   'below', -CLIP, 'low'],
+  [0.5, 'below', -CLIP, 'low'],
+  [0.6, 'above', +CLIP, 'high'],
+  [1,   'above', +CLIP, 'high'],
+];
+
+test.each(LEVELS)('ensc-lab as a comparator: FG1 at %s V DC (%s IN1− ≈ 0.539 V) puts OUT1 at %s V, the clip', (offset, side, vout, mode) => {
+  const own = boardOf(LAB);
+  const before = JSON.stringify(own);
+  const fg = own.filter(a => a.tool === 'place_function_generator');
+  assert.equal(fg.length, 1, `${LAB} places one function generator`);
+  const copy = own.map(a => (a.tool === 'place_function_generator' ? { ...a, amplitude: 0, offset } : a));
+
+  const r = solveLab(copy);
+  const pins = r.parts.U1.r.pins, m = r.parts.U1.m;
+  assert.ok(Math.abs(pins.in1p - offset) < 0.005, `IN1+ follows FG1: expected ${offset} V, got ${pins.in1p}`);
+  assert.ok(Math.abs(pins.in1n - DIV_V) < 0.005, `IN1− stays at the divider's ${DIV_V.toFixed(4)} V, got ${pins.in1n}`);
+  assert.ok(typeof m.vout1 === 'number' && Math.abs(m.vout1 - vout) < 0.01, `FG1 at ${offset} V (${side}): OUT1 expected ${vout} V, got ${m.vout1}`);
+  assert.equal(m.mode1, mode, `FG1 at ${offset} V: op-amp 1 clipped ${mode}`);
+  assert.equal(JSON.stringify(own), before, 'the sample\'s own board is not changed');
 });
