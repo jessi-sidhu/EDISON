@@ -4,6 +4,11 @@
 // tested in Node by test/hole-map.test.js), and every part has one leg per
 // pin. The map is never saved. /api/ask is stubbed with the recorded LED
 // build; no AI is called. Guest only.
+//
+// The build is the one-lead-per-hole recipe (test/fixtures/recipes.js
+// ONE_LED): R1 b2–b6, LED1 cathode c8 / anode c6, tp_3 → a2, a8 → tn_8. The
+// old stacked build put the LED anode on R1's a6, which the registry LED
+// refuses since #25.
 const { test, expect } = require('@playwright/test');
 
 const LED_BUILD = {
@@ -11,11 +16,11 @@ const LED_BUILD = {
   actions: [
     { tool: 'delete_all' },
     { tool: 'place_battery' },
-    { tool: 'add_wire', from: 'battery_0_pin0', to: 'tp_2', color: 'red' },
-    { tool: 'add_wire', from: 'battery_0_pin1', to: 'tn_8', color: 'black' },
-    { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
-    { tool: 'place_led', holeA: 'a8', holeB: 'a6' },
-    { tool: 'add_wire', from: 'tp_2', to: 'a2', color: 'red' },
+    { tool: 'add_wire', from: 'battery_0_pin0', to: 'tp_63', color: 'red' },
+    { tool: 'add_wire', from: 'battery_0_pin1', to: 'tn_63', color: 'black' },
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6' },
+    { tool: 'place_led', holeA: 'c8', holeB: 'c6' },
+    { tool: 'add_wire', from: 'tp_3', to: 'a2', color: 'red' },
     { tool: 'add_wire', from: 'a8', to: 'tn_8', color: 'black' },
   ],
 };
@@ -71,8 +76,12 @@ test('App.holeMap() equals a fresh rebuild after an AI build, place, delete, und
   await page.getByRole('button', { name: 'Accept' }).click();
   await expect(page.locator('.chat-msg.system').last()).toHaveText('✓ Applied 8 changes to your circuit.');
   let map = await expectConsistent(page, 'AI build');
-  expect(map.get('a2')).toEqual({ label: 'R1', pin: 'lead1' });
-  expect(map.get('a8')).toEqual({ label: 'LED1', pin: '0' });
+  expect(map.get('b2')).toEqual({ label: 'R1', pin: 'lead1' });
+  expect(map.get('b6')).toEqual({ label: 'R1', pin: 'lead2' });
+  expect(map.get('c8')).toEqual({ label: 'LED1', pin: 'cathode' });
+  expect(map.get('c6')).toEqual({ label: 'LED1', pin: 'anode' });
+  expect(map.get('a2')).toMatchObject({ end: 'to' });     // the tp_3 → a2 wire
+  expect(map.get('a8')).toMatchObject({ end: 'from' });   // the a8 → tn_8 wire
 
   // Place R2 at d20–d24.
   await page.evaluate(() => {
@@ -109,7 +118,11 @@ test('App.holeMap() equals a fresh rebuild after an AI build, place, delete, und
   await page.evaluate(e => App.loadCircuitData(e), entry);
   map = await expectConsistent(page, 'reload');
   expect(map.get('d20')).toEqual({ label: 'R2', pin: 'lead1' });
-  expect(map.get('a2')).toEqual({ label: 'R1', pin: 'lead1' });
+  expect(map.get('b2')).toEqual({ label: 'R1', pin: 'lead1' });
+  expect(map.get('c8')).toEqual({ label: 'LED1', pin: 'cathode' });
+  expect(map.get('c6')).toEqual({ label: 'LED1', pin: 'anode' });
+  const led = entry.components.find(c => c.label === 'LED1');
+  expect(led.holeRefs).toEqual([{ pin: 'cathode', col: 7, row: 'c' }, { pin: 'anode', col: 5, row: 'c' }]);
 
   expect(errors).toEqual([]);
 });

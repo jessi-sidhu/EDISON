@@ -258,7 +258,8 @@ test('analyze() with a placeholder on the board still lights the LED at 14.9 mA 
   assertPlaceholder(components[2], 'the op_amp');
   const r = Sim.analyze(components, wires);
   assert.equal(r.status, 'ok');
-  assert.equal(r.ledsOn.length, 1);
+  // ledsOn is gone (#26): one "LED ON" line says the one LED is lit.
+  assert.equal(r.lines.filter(l => l.text.startsWith('  💡 LED ON')).length, 1, r.lines.map(l => l.text).join(' | '));
   assert.ok(r.lines.some(l => l.text.includes('LED ON  (14.9 mA)')), r.lines.map(l => l.text).join(' | '));
 });
 
@@ -312,8 +313,8 @@ test('a file with no components list backfills to an empty list', () => {
 // each carry their pin name ({ pin: 'lead1', col, row }), and a wire end on
 // a registry part names its pin (startPin / endPin) next to the index.
 // Loading matches by name, and falls back to the index only when the name
-// is missing. Legacy parts (LED, battery, buzzer, button) stay index-only
-// until #25/#26 move them into the registry.
+// is missing. The LED joined in #25 (pins cathode, anode); the battery
+// ('0', '1'), buzzer and button (lead1, lead2) join in #26.
 //
 // Pure helpers board-io.js adds (app.js's serializeBoard / wireRecords /
 // rebuildBoard call them):
@@ -352,15 +353,14 @@ test('saving a resistor writes each hole with its pin name, lead1 then lead2 (#2
   assert.deepStrictEqual(need('saveHoleRefs')(r1), [{ pin: 'lead1', col: 1, row: 'a' }, { pin: 'lead2', col: 5, row: 'a' }]);
 });
 
-test('legacy parts stay index-only: an LED saves bare holes, a battery saves null (#24)', () => {
+test('an LED saves each hole with its pin name, cathode then anode (#25); a battery saves null (#24)', () => {
   const led1 = runtime('led', 'LED1', [h(9, 'a'), h(8, 'a')]);
   const saved = need('saveHoleRefs')(led1);
-  assert.deepStrictEqual(saved, [h(9, 'a'), h(8, 'a')]);
-  assert.ok(saved.every(ref => !('pin' in ref)), `LED holes carry no pin names yet: ${JSON.stringify(saved)}`);
+  assert.deepStrictEqual(saved, [{ pin: 'cathode', col: 9, row: 'a' }, { pin: 'anode', col: 8, row: 'a' }]);
   assert.equal(need('saveHoleRefs')(runtime('battery', 'BAT1', null)), null);
 });
 
-test('a wire end on a resistor pin saves its name next to the index; legacy and hole ends save none (#24)', () => {
+test('a wire end on a part pin saves its name next to the index, the battery\'s too since #26; hole ends save none (#24, #25, #26)', () => {
   const bat = runtime('battery', 'BAT1', null);
   const r1  = runtime('resistor', 'R1', [h(1, 'a'), h(5, 'a')]);
   const led1 = runtime('led', 'LED1', [h(9, 'a'), h(5, 'b')]);
@@ -372,7 +372,9 @@ test('a wire end on a resistor pin saves its name next to the index; legacy and 
   assert.equal(aiWire.endCompIdx, 1);
   assert.equal(aiWire.endPinIdx, 1);
   assert.equal(aiWire.endPin, 'lead2', `the resistor end is named: ${JSON.stringify(aiWire)}`);
-  assert.ok(!('startPin' in aiWire), `a battery end stays index-only: ${JSON.stringify(aiWire)}`);
+  // #26: the battery is a registry part (pins '0', '1'), so its end is named too.
+  assert.equal(aiWire.startPin, '0', `a battery end names its pin: ${JSON.stringify(aiWire)}`);
+  assert.equal(aiWire.startPinIdx, 0);
 
   // Drawn by hand from R1's first pin sphere (hole a2 and the part) to the rail.
   const hand = wireRecord(drawn(h(1, 'a'), h(1, 'tp'), r1, 0), comps);
@@ -381,9 +383,10 @@ test('a wire end on a resistor pin saves its name next to the index; legacy and 
   assert.deepStrictEqual(hand.startHole, h(1, 'a'));
   assert.ok(!('endPin' in hand), `a plain hole end has no pin name: ${JSON.stringify(hand)}`);
 
-  // From an LED pin: the LED is not a registry part yet.
+  // From an LED pin: the LED is a registry part since #25.
   const fromLed = wireRecord(drawn(h(9, 'a'), h(9, 'tn'), led1, 0), comps);
-  assert.ok(!('startPin' in fromLed), `LED ends stay index-only: ${JSON.stringify(fromLed)}`);
+  assert.equal(fromLed.startPin, 'cathode', `an LED end is named: ${JSON.stringify(fromLed)}`);
+  assert.equal(fromLed.startPinIdx, 0);
 
   // Hole to hole.
   const plain = wireRecord(drawn(h(2, 'tp'), h(1, 'b')), comps);
@@ -420,7 +423,9 @@ test('pinName and pinIndex: names for registry pins, the index when a file has n
   const led1 = runtime('led', 'LED1', [h(9, 'a'), h(8, 'a')]);
   assert.equal(need('pinName')(r1, 0), 'lead1');
   assert.equal(need('pinName')(r1, 1), 'lead2');
-  assert.equal(need('pinName')(led1, 1), undefined, 'the LED has no pin names until #25');
+  assert.equal(need('pinName')(led1, 0), 'cathode', 'the LED names its pins since #25');
+  assert.equal(need('pinName')(led1, 1), 'anode');
+  assert.equal(need('pinIndex')(led1, 'anode', 0), 1, 'the name wins over a stale index');
   assert.equal(need('pinIndex')(r1, 'lead2', 0), 1, 'the name wins over a stale index');
   assert.equal(need('pinIndex')(r1, 'lead1', 1), 0);
   assert.equal(need('pinIndex')(r1, undefined, 1), 1, 'no name: the saved index');
@@ -567,4 +572,190 @@ test('a valid file flags nothing: a part never clashes with its own legs or wire
   assert.ok(!comps[1].flag, `R1 should carry no flag, got "${comps[1].flag}"`);
   const r = Sim.analyze(comps, wires);
   assert.ok(!r.lines.some(l => /\bR1\b/.test(l.text) && l.cls === 'sim-warn'), r.lines.map(l => l.text).join(' | '));
+});
+
+// ── Old saved LEDs, issue #25 ─────────────────────────────────────────────
+// The LED moved into the registry. A file saved by the build before #25 has
+// its holes by index (pin 0 cathode, pin 1 anode) and its values as that
+// build's componentValues wrote them: { color, forwardVoltage,
+// thresholdCurrent, maxCurrent }, or just { color } from older builds and
+// AI actions. It must load with the same colour on the same pins and
+// simulate to the same current.
+//
+// The one-LED recipe layout (test/fixtures/recipes.js ONE_LED), one lead per
+// hole: R1 b2–b6, LED1 cathode c8 / anode c6, tp_3 → a2, a8 → tn_8, and the
+// battery on the rails at column 63.
+function oldLedFile(ledValues) {
+  return {
+    components: [
+      { type: 'battery',  label: 'BAT1', values: { voltage: 9 }, holeRefs: null, position: { x: 15.8, z: 0 } },
+      { type: 'resistor', label: 'R1', values: { resistance: 470 }, holeRefs: [h(1, 'b'), h(5, 'b')], position: { x: 0, z: 0 } },
+      { type: 'led',      label: 'LED1', values: ledValues, holeRefs: [h(7, 'c'), h(5, 'c')], position: { x: 0, z: 0 } },
+    ],
+    wires: [
+      { startHole: null, endHole: h(62, 'tp'), startCompIdx: 0, startPinIdx: 0, endCompIdx: -1, endPinIdx: -1, color: 0xef4444 },
+      { startHole: null, endHole: h(62, 'tn'), startCompIdx: 0, startPinIdx: 1, endCompIdx: -1, endPinIdx: -1, color: 0x111111 },
+      { startHole: h(2, 'tp'), endHole: h(1, 'a'), startCompIdx: -1, startPinIdx: -1, endCompIdx: -1, endPinIdx: -1, color: 0xef4444 },
+      { startHole: h(7, 'a'), endHole: h(7, 'tn'), startCompIdx: -1, startPinIdx: -1, endCompIdx: -1, endPinIdx: -1, color: 0x111111 },
+    ],
+  };
+}
+
+// Today's numbers, 9 V through 470 Ω.
+const OLD_LED_MA = { red: 14.8904, yellow: 14.6777, green: 14.4650, blue: 12.3378, white: 11.9124 };
+const OLD_LED_VF = { red: 2.0, yellow: 2.1, green: 2.2, blue: 3.2, white: 3.4 };
+
+test('an LED saved before #25 (holes by index, full values) loads on the same pins and lights at today\'s current (#25)', () => {
+  for (const [color, want] of Object.entries(OLD_LED_MA)) {
+    const values = { color, forwardVoltage: OLD_LED_VF[color], thresholdCurrent: 0.001, maxCurrent: 0.020 };
+    const file = oldLedFile(values);
+    assert.deepStrictEqual(need('loadHoleRefs')(file.components[2]).map(cr), [h(7, 'c'), h(5, 'c')], 'cathode c8, anode c6');
+    const { comps, wires } = loadFile(file);
+    assert.deepStrictEqual(need('flagPlacements')(comps, wires), [], `${color}: a valid old file flags nothing`);
+
+    const r = Sim.analyze(comps, wires);
+    assert.equal(r.status, 'ok');
+    const got = -r.currents[2] * 1000;
+    assert.ok(Math.abs(got - want) < 0.01, `${color}: expected ${want} mA, got ${got}`);
+    assert.ok(r.parts.LED1, `${color}: parts.LED1; got ${JSON.stringify(Object.keys(r.parts))}`);
+    assert.equal(r.parts.LED1.r.values.color, color);
+    assert.equal(r.parts.LED1.m.on, true);
+    assert.ok(Math.abs(r.parts.LED1.m.current - want) < 0.01, `${color}: parts.LED1.m.current ${r.parts.LED1.m.current}`);
+  }
+});
+
+test('an LED saved with only its colour ({ color: "blue" }) simulates as a blue LED, 12.3 mA (#25)', () => {
+  const { comps, wires } = loadFile(oldLedFile({ color: 'blue' }));
+  const r = Sim.analyze(comps, wires);
+  assert.ok(r.lines.some(l => l.text === '  💡 LED ON  (12.3 mA)'), r.lines.map(l => l.text).join(' | '));
+  assert.ok(r.parts.LED1, `parts.LED1; got ${JSON.stringify(Object.keys(r.parts))}`);
+  assert.equal(r.parts.LED1.r.values.color, 'blue');
+  assert.equal(r.parts.LED1.r.values.vf, 3.2);
+});
+
+test('an old LED saves back with pin names, and reloads the same (#25)', () => {
+  const { comps } = loadFile(oldLedFile({ color: 'green', forwardVoltage: 2.2, thresholdCurrent: 0.001, maxCurrent: 0.020 }));
+  const saved = need('saveHoleRefs')(comps[2]);
+  assert.deepStrictEqual(saved, [{ pin: 'cathode', col: 7, row: 'c' }, { pin: 'anode', col: 5, row: 'c' }]);
+  assert.deepStrictEqual(need('loadHoleRefs')({ type: 'led', holeRefs: saved }).map(cr), [h(7, 'c'), h(5, 'c')]);
+});
+
+// The old stacked AI build: R1 a2–a6 and the LED at a8/a6, with the rail
+// wires in a2 and a8. Files saved from it still exist. They load flagged
+// (warn only), never moved or dropped, and the LED still lights.
+test('an old file with the stacked LED build loads with LED1 flagged, and the LED still lights at 14.9 mA (#25)', () => {
+  const file = {
+    components: [
+      { type: 'battery',  label: 'BAT1', values: { voltage: 9 }, holeRefs: null, position: { x: 15.8, z: 0 } },
+      { type: 'resistor', label: 'R1', values: { resistance: 470 }, holeRefs: [h(1, 'a'), h(5, 'a')] },
+      { type: 'led',      label: 'LED1', values: { color: 'red', forwardVoltage: 2.0, thresholdCurrent: 0.001, maxCurrent: 0.020 },
+        holeRefs: [h(7, 'a'), h(5, 'a')] },
+    ],
+    wires: [
+      { startHole: null, endHole: h(1, 'tp'), startCompIdx: 0, startPinIdx: 0, endCompIdx: -1, endPinIdx: -1 },
+      { startHole: null, endHole: h(7, 'tn'), startCompIdx: 0, startPinIdx: 1, endCompIdx: -1, endPinIdx: -1 },
+      { startHole: h(1, 'tp'), endHole: h(1, 'a'), startCompIdx: -1, startPinIdx: -1, endCompIdx: -1, endPinIdx: -1 },
+      { startHole: h(7, 'a'), endHole: h(7, 'tn'), startCompIdx: -1, startPinIdx: -1, endCompIdx: -1, endPinIdx: -1 },
+    ],
+  };
+  const { comps, wires } = loadFile(file);
+  assert.equal(comps.length, 3);
+  const lines = need('flagPlacements')(comps, wires);
+  const ledFlag = lines.find(l => /^LED1: /.test(l));
+  assert.ok(ledFlag, `LED1 should be flagged: ${JSON.stringify(lines)}`);
+  assert.equal(comps[2].flag, ledFlag);
+  assert.deepStrictEqual(comps[2].holeRefs.map(cr), [h(7, 'a'), h(5, 'a')], 'never auto-fixed');
+
+  const r = Sim.analyze(comps, wires);
+  assert.ok(r.lines.some(l => l.text === '  💡 LED ON  (14.9 mA)'), r.lines.map(l => l.text).join(' | '));
+  assert.ok(r.lines.some(l => l.text === '  ⚠ ' + ledFlag && l.cls === 'sim-warn'), r.lines.map(l => l.text).join(' | '));
+  assert.ok(r.parts.LED1 && r.parts.LED1.warnings.includes(ledFlag), `parts.LED1.warnings: ${JSON.stringify(r.parts.LED1 && r.parts.LED1.warnings)}`);
+});
+
+// ── Old saved batteries, buzzers and buttons, issue #26 ───────────────────
+// The battery, buzzer and button moved into the registry: battery pins
+// '0' (+) / '1' (−), buzzer and button pins lead1 / lead2. Files saved by the
+// build before #26 have their holes by index (no pin names) and their values
+// as that build's componentValues wrote them from Sim.PROPS: a battery
+// { voltage }, a buzzer { resistance: 42, thresholdCurrent: 0.001 }, a
+// button {} (its pressed state was never saved). They must load on the same
+// pins and simulate the same. A pressed button is the record's
+// controls.pressed (momentary, never saved).
+
+// BAT1 → tp_3 → a4, R1 b4–b8, BZ1 c8–c10 (index-only), a10 → tn_10.
+// I = 9 / (470 + 42) = 17.6 mA.
+function oldBuzzerFile(batValues) {
+  return {
+    components: [
+      { type: 'battery',  label: 'BAT1', values: batValues || { voltage: 9 }, holeRefs: null, position: { x: 15.8, z: 0 } },
+      { type: 'resistor', label: 'R1', values: { resistance: 470 }, holeRefs: [h(3, 'b'), h(7, 'b')], position: { x: 0, z: 0 } },
+      { type: 'buzzer',   label: 'BZ1', values: { resistance: 42, thresholdCurrent: 0.001 }, holeRefs: [h(7, 'c'), h(9, 'c')], position: { x: 0, z: 0 } },
+    ],
+    wires: [
+      { startHole: null, endHole: h(62, 'tp'), startCompIdx: 0, startPinIdx: 0, endCompIdx: -1, endPinIdx: -1, color: 0xef4444 },
+      { startHole: null, endHole: h(62, 'tn'), startCompIdx: 0, startPinIdx: 1, endCompIdx: -1, endPinIdx: -1, color: 0x111111 },
+      { startHole: h(2, 'tp'), endHole: h(3, 'a'), startCompIdx: -1, startPinIdx: -1, endCompIdx: -1, endPinIdx: -1, color: 0xef4444 },
+      { startHole: h(9, 'a'), endHole: h(9, 'tn'), startCompIdx: -1, startPinIdx: -1, endCompIdx: -1, endPinIdx: -1, color: 0x111111 },
+    ],
+  };
+}
+
+test('an old buzzer (holes by index, today\'s values) loads on the same pins, flags nothing, and sounds at 17.6 mA (#26)', () => {
+  const file = oldBuzzerFile();
+  assert.deepStrictEqual(need('loadHoleRefs')(file.components[2]).map(cr), [h(7, 'c'), h(9, 'c')], 'lead1 c8, lead2 c10');
+  const { comps, wires } = loadFile(file);
+  assert.deepStrictEqual(need('flagPlacements')(comps, wires), [], 'a valid old file flags nothing');
+  const r = Sim.analyze(comps, wires);
+  assert.equal(r.status, 'ok');
+  assert.ok(r.parts.BZ1, `parts.BZ1; got ${JSON.stringify(Object.keys(r.parts))}`);
+  assert.equal(r.parts.BZ1.m.sounding, true);
+  assert.ok(Math.abs(r.parts.BZ1.m.current - 17.578) < 0.01, `9 V / 512 Ω: ${r.parts.BZ1.m.current}`);
+  assert.ok(r.lines.some(l => l.text === '  🔔 BUZZER ON  (17.6 mA)' && l.cls === 'sim-on'), r.lines.map(l => l.text).join(' | '));
+  assert.ok(r.parts.BAT1, 'parts.BAT1: the battery is a registry part');
+});
+
+test('an old battery saved with { voltage: 6 } and a position simulates at 6 V: "Battery 1: 6V", 11.7 mA (#26)', () => {
+  const { comps, wires } = loadFile(oldBuzzerFile({ voltage: 6 }));
+  const r = Sim.analyze(comps, wires);
+  assert.ok(r.lines.some(l => l.text === 'Battery 1: 6V' && l.cls === 'sim-info'), r.lines.map(l => l.text).join(' | '));
+  assert.ok(r.parts.BAT1, `parts.BAT1; got ${JSON.stringify(Object.keys(r.parts))}`);
+  assert.equal(r.parts.BAT1.r.values.voltage, 6);
+  assert.ok(Math.abs(r.parts.BZ1.m.current - 11.719) < 0.01, `6 V / 512 Ω: ${r.parts.BZ1.m.current}`);
+});
+
+test('a buzzer and a button save each hole with its pin name, lead1 then lead2; wire ends on them are named (#26)', () => {
+  const bz = runtime('buzzer', 'BZ1', [h(7, 'c'), h(9, 'c')]);
+  const sw = runtime('button', 'SW1', [h(11, 'b'), h(14, 'b')]);
+  assert.deepStrictEqual(need('saveHoleRefs')(bz), [{ pin: 'lead1', col: 7, row: 'c' }, { pin: 'lead2', col: 9, row: 'c' }]);
+  assert.deepStrictEqual(need('saveHoleRefs')(sw), [{ pin: 'lead1', col: 11, row: 'b' }, { pin: 'lead2', col: 14, row: 'b' }]);
+  const bat = runtime('battery', 'BAT1', null);
+  assert.equal(need('saveHoleRefs')(bat), null, 'the battery is off the board');
+  assert.equal(need('pinName')(bat, 1), '1');
+  assert.equal(need('pinIndex')(bat, '1', 0), 1, 'the name wins over a stale index');
+  const rec = need('wireRecord')(drawn(null, h(14, 'a'), bat, 1, sw, 1), [bat, sw]);
+  assert.equal(rec.startPin, '1');
+  assert.equal(rec.endPin, 'lead2');
+});
+
+// demo.sparky, the "Try it out" circuit: saved before labels and pin names
+// (ids battery_0 … button_3, holes by index). BAT1 → tp_4 → a3, R1 b3–b7,
+// LED1 cathode c9 / anode c7, a9 → a12, SW1 b12–b15, a15 → tn_15.
+test('demo.sparky loads with no flag; released it is open, and pressing SW1 lights LED1 at 14.9 mA (#26)', () => {
+  const demo = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'demo.sparky'), 'utf8'));
+  const { comps, wires } = loadFile(demo);
+  assert.deepStrictEqual(comps.map(c => c.label), ['BAT1', 'R1', 'LED1', 'SW1']);
+  assert.deepStrictEqual(need('flagPlacements')(comps, wires), [], 'the demo breaks no placement rule');
+
+  const sw1 = comps[3];
+  sw1.controls = { pressed: false };
+  const open = Sim.analyze(comps, wires);
+  assert.ok(open.lines.some(l => l.text.includes('Circuit open')), open.lines.map(l => l.text).join(' | '));
+  assert.ok(open.parts.SW1, `parts.SW1; got ${JSON.stringify(Object.keys(open.parts))}`);
+
+  sw1.controls = { pressed: true };   // what App.toggleButton sets
+  const lit = Sim.analyze(comps, wires);
+  assert.ok(lit.lines.some(l => l.text === 'Button 1: 🟢 CLOSED (current flowing)'), lit.lines.map(l => l.text).join(' | '));
+  assert.ok(lit.lines.some(l => l.text === '  💡 LED ON  (14.9 mA)'), lit.lines.map(l => l.text).join(' | '));
+  assert.ok(Math.abs(lit.parts.LED1.m.current - 14.89) < 0.01, `LED1 ${lit.parts.LED1.m.current}`);
+  assert.ok(Math.abs(Math.abs(lit.currents[3]) * 1000 - 14.89) < 0.01, `SW1 carries the loop current: ${lit.currents[3]}`);
 });

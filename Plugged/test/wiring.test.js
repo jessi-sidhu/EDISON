@@ -46,13 +46,15 @@ test('the Clear All confirmation says it can be undone, because it can', () => {
 
 // Issue #23: the viewer builds a saved resistor through the registry helper
 // App.buildPart (the resistor's view.build), not the old App.buildResistor.
-test('the showcase viewer draws saved resistor values (via App.buildPart) and LED colours', () => {
+// Issue #25: a saved LED goes the same way, its colour in c.values; the old
+// App.buildLED is gone.
+test('the showcase viewer draws saved resistor values and LED colours via App.buildPart', () => {
   const src = read('circuit3d/viewer.html');
   assert.doesNotMatch(src, /App\.buildResistor\(/, 'viewer.html still builds resistors with App.buildResistor');
   assert.match(src, /App\.buildPart\(\s*['"]resistor['"]|App\.buildPart\(\s*c\.type\b/,
     'viewer.html should build a saved resistor with App.buildPart(type, legs, values)');
   assert.match(src, /c\.values/, 'the saved values are passed on');
-  assert.match(src, /App\.buildLED\(hA, hB, c\.values\?\.color\)/);
+  assert.doesNotMatch(src, /App\.buildLED\(/, 'viewer.html still builds LEDs with App.buildLED; a saved LED is a registry part (#25)');
 });
 
 test('the dashboard signs users in and out through storage.js and never deletes circuits', () => {
@@ -313,4 +315,149 @@ test('App.placeResistor keeps its signature and goes through the registry', () =
 test("breadboard.js no longer carries the unused per-hole 'occupied' flag", () => {
   const hits = read('circuit3d/js/breadboard.js').split('\n').filter(l => /\boccupied\b/.test(l)).map(l => l.trim());
   assert.deepStrictEqual(hits, [], 'breadboard.js still mentions occupied');
+});
+
+// ── The LED in the parts registry, issue #25 ────────────────────
+//  parts/led.js holds the LED's model, its ghost (the same view.build) and
+//  its glow / dim (view.update). components.js and simulate.js lose their
+//  LED-only code, including the "the only transparent mesh is the dome"
+//  convention that lightUpLED / dimLED relied on.
+
+test('parts/index.js lists led.js, so both 3D pages load it after registry.js', () => {
+  assert.ok(partFiles().includes('led.js'), `parts/index.js FILES should list led.js: ${JSON.stringify(partFiles())}`);
+});
+
+test("components.js no longer carries the LED's model, colour table or ghost branch", () => {
+  const src = read('circuit3d/js/components.js');
+  assert.doesNotMatch(src, /function buildLED\s*\(/, 'buildLED moved to parts/led.js (view.build)');
+  assert.doesNotMatch(src, /\bLED_TYPES\b/, 'the LED colour table moved to parts/led.js');
+  const preview = functionSource(src, /function buildPreview\s*\(/);
+  assert.ok(preview, 'components.js must keep function buildPreview');
+  assert.doesNotMatch(preview, /['"]led['"]/, 'buildPreview still has an LED branch; the LED ghost is its view.build');
+});
+
+test('simulate.js no longer lights LEDs itself: no lightUpLED / dimLED / getDomeColor, no transparent-dome convention', () => {
+  const src = read('circuit3d/js/simulate.js');
+  for (const fn of ['lightUpLED', 'dimLED', 'getDomeColor']) {
+    assert.doesNotMatch(src, new RegExp(`function ${fn}\\s*\\(`), `${fn} moved to parts/led.js view.update`);
+  }
+  assert.doesNotMatch(src, /material\.transparent/, 'no code may find the dome as "the transparent mesh"');
+});
+
+test("parts/led.js holds the LED's model and glow, drawing only through ctx", () => {
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'circuit3d/js/parts/led.js')), 'circuit3d/js/parts/led.js must exist');
+  const src = read('circuit3d/js/parts/led.js');
+  assert.match(src, /\bview\s*:/, 'a view: { build, update } section');
+  assert.match(src, /\bupdate\b/, 'view.update glows / dims the LED');
+  for (const hex of ['ff2222', 'ffd21f', '35d94a', '3b82f6', 'f5f5f5']) {
+    assert.match(src, new RegExp(hex, 'i'), `the dome colour ${hex} lives here`);
+  }
+  assert.doesNotMatch(src, /\bApp\b/, 'the part file must not reach into App; use ctx');
+  assert.doesNotMatch(src, /\bdocument\b/, 'the part file must not touch document');
+});
+
+test('App.placeLED keeps its signature and goes through the registry', () => {
+  const src = read('circuit3d/js/app.js');
+  const fn = functionSource(src, /App\.placeLED\s*=\s*function\s*\(holeA, holeB, values, opts\)/);
+  assert.ok(fn, 'App.placeLED = function (holeA, holeB, values, opts) must stay');
+  assert.match(fn, /checkValue\(/, 'values are checked with Parts.checkValue');
+  assert.match(fn, /buildPart\(/, 'the model is built with App.buildPart');
+  assert.doesNotMatch(fn, /buildLED/, 'no App.buildLED');
+});
+
+// ── Battery, buzzer and button in the parts registry, issue #26 ─────────
+//  The last three parts move into parts/battery.js, buzzer.js and button.js,
+//  and the old per-type code goes: simulate.js keeps no part-type literals,
+//  no PROPS and no ledsOn / buzzersOn; its buzzer audio moves to the buzzer's
+//  view.update and its button click handler to the gesture dispatcher
+//  (circuit3d/js/gestures.js, wired up by app.js / interaction.js).
+//  components.js loses the three models; rebuildBoard loses its per-type
+//  table. The App.place* wrappers stay (issue #27 removes them).
+
+const TYPE_LITERAL = /(['"])(battery|buzzer|button|led|resistor)\1/g;
+
+test('parts/index.js lists battery.js, buzzer.js and button.js, so both 3D pages load them after registry.js', () => {
+  const files = partFiles();
+  for (const f of ['battery.js', 'buzzer.js', 'button.js']) {
+    assert.ok(files.includes(f), `parts/index.js FILES should list ${f}: ${JSON.stringify(files)}`);
+  }
+});
+
+test("simulate.js names no part type: no 'battery', 'buzzer', 'button', 'led' or 'resistor' literal", () => {
+  const src = read('circuit3d/js/simulate.js');
+  const hits = src.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => new RegExp(TYPE_LITERAL.source).test(l))
+    .map(([n, l]) => `${n}: ${l.trim()}`);
+  assert.deepStrictEqual(hits, [], 'part-type literals left in simulate.js');
+});
+
+test('PROPS, ledsOn and buzzersOn are gone from every editor and viewer file', () => {
+  const files = [
+    ...editorSources(),
+    ...fs.readdirSync(path.join(__dirname, '..', JS_DIR, 'parts')).filter(f => f.endsWith('.js'))
+      .map(f => ({ file: `${JS_DIR}/parts/${f}`, src: read(`${JS_DIR}/parts/${f}`) })),
+    { file: 'circuit3d/viewer.html', src: read('circuit3d/viewer.html') },
+  ];
+  for (const name of ['PROPS', 'ledsOn', 'buzzersOn']) {
+    const hits = files.filter(({ src }) => new RegExp(`\\b${name}\\b`).test(src)).map(x => x.file);
+    assert.deepStrictEqual(hits, [], `${name} still in`);
+  }
+});
+
+test('simulate.js no longer plays buzzers or handles button clicks: no AudioContext, capMesh, toggleButton or .pressed', () => {
+  const src = read('circuit3d/js/simulate.js');
+  assert.doesNotMatch(src, /AudioContext/, "the buzzer's tone moved to parts/buzzer.js view.update");
+  assert.doesNotMatch(src, /\bcapMesh\b/, "the button's cap moved to parts/button.js view.update");
+  assert.doesNotMatch(src, /\btoggleButton\b/, 'button clicks go through the gesture dispatcher');
+  assert.doesNotMatch(src, /\.pressed\b/, "a button's state is its controls, read generically through elements()");
+});
+
+test('the editor loads js/gestures.js before js/app.js, and the page creates the dispatcher with Gestures.create', () => {
+  const order = scriptOrder(read('circuit3d/index.html'));
+  const g = order.indexOf('js/gestures.js');
+  assert.ok(g >= 0, `circuit3d/index.html must load js/gestures.js: ${order.join(', ')}`);
+  assert.ok(g < order.indexOf('js/app.js'), `gestures.js must load before app.js: ${order.join(', ')}`);
+  const wiring = read('circuit3d/js/app.js') + read('circuit3d/js/interaction.js');
+  assert.match(wiring, /Gestures\.create\(/, 'app.js or interaction.js creates the dispatcher');
+});
+
+test('rebuildBoard has no per-type table: no PLACE map, no part-type literal', () => {
+  const fn = functionSource(read('circuit3d/js/app.js'), /function rebuildBoard\s*\(/);
+  assert.ok(fn, 'app.js must keep function rebuildBoard');
+  assert.doesNotMatch(fn, /\bPLACE\s*=\s*\{/, 'rebuildBoard still keeps its own type → place* table');
+  assert.doesNotMatch(fn, new RegExp(TYPE_LITERAL.source), 'rebuildBoard still names part types');
+});
+
+test('App.placeBattery, placeBuzzer and placeButton keep their signatures and go through the registry', () => {
+  const src = read('circuit3d/js/app.js');
+  for (const [name, args, old] of [['placeBattery', 'wx, wz, values, opts', 'buildBattery'],
+                                   ['placeBuzzer', 'holeA, holeB, values, opts', 'buildBuzzer'],
+                                   ['placeButton', 'holeA, holeB, values, opts', 'buildButton']]) {
+    const fn = functionSource(src, new RegExp(`App\\.${name}\\s*=\\s*function\\s*\\(${args}\\)`));
+    assert.ok(fn, `App.${name} = function (${args}) must stay`);
+    assert.match(fn, /buildPart\(/, `App.${name}: the model is built with App.buildPart`);
+    assert.doesNotMatch(fn, new RegExp(`\\b${old}\\b`), `App.${name}: no App.${old}`);
+  }
+});
+
+test('App.toggleButton stays, as a wrapper that flips controls.pressed', () => {
+  const fn = functionSource(read('circuit3d/js/app.js'), /App\.toggleButton\s*=\s*function\s*\(comp\)/);
+  assert.ok(fn, 'App.toggleButton = function (comp) must stay (e2e and the AI use it)');
+  assert.match(fn, /controls\.pressed/, 'it sets the momentary control');
+  assert.doesNotMatch(fn, /comp\.pressed\b/, 'no comp.pressed of its own');
+  assert.doesNotMatch(fn, /requestAnimationFrame/, "the cap animation moved to parts/button.js view.update");
+});
+
+test("components.js no longer carries the battery, buzzer or button models, or their ghost branches", () => {
+  const src = read('circuit3d/js/components.js');
+  for (const fn of ['buildBattery', 'buildBuzzer', 'buildButton']) {
+    assert.doesNotMatch(src, new RegExp(`function ${fn}\\s*\\(`), `${fn} moved to its part file's view.build`);
+  }
+  const preview = functionSource(src, /function buildPreview\s*\(/);
+  assert.ok(preview, 'components.js must keep function buildPreview');
+  assert.doesNotMatch(preview, /['"](battery|buzzer|button)['"]/, 'buildPreview still has a battery / buzzer / button branch');
+});
+
+test('the showcase viewer draws saved batteries, buzzers and buttons through App.buildPart', () => {
+  const src = read('circuit3d/viewer.html');
+  assert.doesNotMatch(src, /App\.build(Battery|Buzzer|Button)\(/, 'viewer.html still uses the old per-type builders');
 });

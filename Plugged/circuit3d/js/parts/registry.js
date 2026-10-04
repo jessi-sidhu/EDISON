@@ -20,7 +20,8 @@
   const CATEGORIES = ['Passives', 'Sources', 'Semiconductors', 'I/O', 'Instruments'];
   const UNITS      = ['Ω', 'V', 'A', 'F', 'H', '%', '°C', 'lux'];
   const FIELDS     = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'ref', 'place', 'values',
-                      'controls', 'gestures', 'elements', 'measure', 'warnings', 'report', 'ai', 'view', 'examples'];
+                      'controls', 'gestures', 'elements', 'measure', 'warnings', 'report', 'headline', 'line',
+                      'ai', 'view', 'examples'];
   const REQUIRED   = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'place',
                       'elements', 'report', 'ai', 'view', 'examples'];
   const TYPE_RE    = /^[a-z][a-z0-9_]*$/;
@@ -319,6 +320,11 @@
         if (typeof s !== 'string') bad('warnings() must return a list of strings');
         else if (s.length > 120) bad(`warnings() lines must be at most 120 characters; got ${s.length}`);
       }
+    }
+    // Optional results-panel lines: headline(r, m) → { text, cls },
+    // line(r, m) → { text, cls } | null. Only their type is checked here.
+    for (const f of ['headline', 'line']) {
+      if (def[f] !== undefined && typeof def[f] !== 'function') bad(`${f} must be a function (r, m) → { text, cls }`);
     }
     const rep = run('report', def.report);
     if (typeof def.report === 'function' && rep !== undefined) {

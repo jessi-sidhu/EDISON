@@ -9,17 +9,19 @@ const BROWN = 0x7b3f00, BLACK = 0x1a1a1a, RED = 0xd62828, GOLD = 0xd4af37;
 const YELLOW = 0xfcbf49, VIOLET = 0x7c3aed;
 const LED_GREEN = 0x35d94a, LED_RED = 0xff2222;
 
-// The recorded single-LED build, with optional values on its parts.
+// The recorded single-LED build, with optional values on its parts. One lead
+// per hole (test/fixtures/recipes.js ONE_LED): the old stacked build put the
+// LED anode on R1's a6, which the registry LED refuses since #25.
 const ledBuild = (vals = {}) => ({
   reply: 'Built a single LED with a current-limiting resistor.',
   actions: [
     { tool: 'delete_all' },
     { tool: 'place_battery', ...('voltage' in vals ? { voltage: vals.voltage } : {}) },
-    { tool: 'add_wire', from: 'BAT1.0', to: 'tp_2', color: 'red' },
-    { tool: 'add_wire', from: 'BAT1.1', to: 'tn_8', color: 'black' },
-    { tool: 'place_resistor', holeA: 'a2', holeB: 'a6', ...('resistance' in vals ? { resistance: vals.resistance } : {}) },
-    { tool: 'place_led', holeA: 'a8', holeB: 'a6', ...('color' in vals ? { color: vals.color } : {}) },
-    { tool: 'add_wire', from: 'tp_2', to: 'a2', color: 'red' },
+    { tool: 'add_wire', from: 'BAT1.0', to: 'tp_63', color: 'red' },
+    { tool: 'add_wire', from: 'BAT1.1', to: 'tn_63', color: 'black' },
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6', ...('resistance' in vals ? { resistance: vals.resistance } : {}) },
+    { tool: 'place_led', holeA: 'c8', holeB: 'c6', ...('color' in vals ? { color: vals.color } : {}) },
+    { tool: 'add_wire', from: 'tp_3', to: 'a2', color: 'red' },
     { tool: 'add_wire', from: 'a8', to: 'tn_8', color: 'black' },
   ],
 });

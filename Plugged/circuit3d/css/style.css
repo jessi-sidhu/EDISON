@@ -433,7 +433,14 @@ canvas {
   pointer-events: none;
   box-shadow: 0 2px 12px rgba(0,0,0,0.1);
   transition: opacity 0.2s;
-  white-space: nowrap;
+  /* Long hints wrap instead of running under Clear All (top right).
+     The box is centred, so the room comes off both sides. max-content
+     keeps short hints on one line; left: 50% would otherwise cap the
+     shrink-to-fit width at half the canvas. */
+  white-space: normal;
+  text-align: center;
+  width: max-content;
+  max-width: calc(100% - 260px);
 }
 
 .hint-hidden {

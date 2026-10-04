@@ -192,125 +192,167 @@
     refreshCounts();
   };
 
+  // A thin wrapper over the parts registry (parts/led.js), like
+  // placeResistor. holeA = cathode (−), holeB = anode (+). Only the LED's
+  // own values are checked: its vf follows the colour, and older files'
+  // derived keys (vf, forwardVoltage) are left for componentValues to redo.
   App.placeLED = function (holeA, holeB, values, opts) {
     pushHistory();
-    const vals = App.componentValues('led', values);
-    const { group, pins } = App.buildLED(holeA, holeB, vals.color);
+    const specs = Parts.get('led').values;
+    const given = {};
+    for (const [key, v] of Object.entries(values || {})) {
+      if (key === 'vf' || key === 'forwardVoltage') continue;
+      const check = Parts.checkValue('led', key, v);
+      if (check.ok) given[key] = check.value;
+      else if (Object.hasOwn(specs, key)) console.warn('LED value ignored: ' + check.reason);
+    }
+    const vals = App.componentValues('led', given);
+    const holeRefs = [{ col: holeA.col, row: holeA.row },   // cathode
+                      { col: holeB.col, row: holeB.row }];  // anode
+    const { group, pinPositions: pins } = App.buildPart('led', Parts.legsOf({ type: 'led', holeRefs }), vals);
     App.scene.add(group);
     const record = {
-      type: 'led', label: partLabel('led', opts), group, pins, pinMeshes: [], values: vals,
-      // pin 0 = cathode (−), pin 1 = anode (+)
-      holeRefs: [{ col: holeA.col, row: holeA.row },   // cathode
-                 { col: holeB.col, row: holeB.row }],   // anode
+      type: 'led', label: partLabel('led', opts), group, pins, pinMeshes: [], values: vals, holeRefs,
     };
     addPinMarkers(record);
     state.components.push(record);
     refreshCounts();
   };
 
+  // ── Registry placement ──────────────────────────────────────
+  // The values a part keeps from `values`: each of its own keys that
+  // Parts.checkValue accepts. A refused one is dropped with a warning, so
+  // the part keeps its default; keys it doesn't have (an old file's derived
+  // or retired ones, such as a buzzer's resistance) are dropped quietly.
+  function checkedValues(type, values) {
+    const def = Parts.get(type);
+    const given = {};
+    for (const [key, v] of Object.entries(values || {})) {
+      if (!Object.hasOwn(def.values || {}, key)) continue;
+      const check = Parts.checkValue(type, key, v);
+      if (check.ok) given[key] = check.value;
+      else console.warn(`${def.name} value ignored: ${check.reason}`);
+    }
+    return App.componentValues(type, given);
+  }
+
+  // A new record's controls, each at its default; undefined for a part with none.
+  function controlDefaults(type) {
+    const specs = Parts.get(type).controls;
+    if (!specs) return undefined;
+    const out = {};
+    for (const [key, c] of Object.entries(specs)) out[key] = c.default;
+    return out;
+  }
+
+  // An off-board part sits at least BATTERY_MARGIN past either end of the board.
+  function offboardX(wx) {
+    const margin = state.breadboard.BOARD_W / 2 + App.BATTERY_MARGIN;
+    return wx >= 0 ? Math.max(wx, margin) : Math.min(wx, -margin);
+  }
+
+  // An off-board model is drawn around (0, 0, 0): move it, and its pins, to (x, z).
+  function atSpot(built, x, z) {
+    built.group.position.set(x, 0, z);
+    return { group: built.group, pinPositions: built.pinPositions.map(p => p.clone().add(built.group.position)) };
+  }
+
+  // Puts a model built by App.buildPart on the board as a new record.
+  // holeRefs: one { col, row } per pin, or null off the board.
+  function addPart(type, built, values, holeRefs, opts) {
+    App.scene.add(built.group);
+    const record = {
+      type, label: partLabel(type, opts), group: built.group, pins: built.pinPositions, pinMeshes: [], values, holeRefs,
+    };
+    const controls = controlDefaults(type);
+    if (controls) record.controls = controls;
+    addPinMarkers(record);
+    state.components.push(record);
+    refreshCounts();
+    return record;
+  }
+
+  // One placement for every registry part; rebuilding a board (load, undo)
+  // uses it. where: the board holes, one per pin, or { x, z } off the board.
+  App.placePart = function (type, where, values, opts) {
+    const def = Parts.get(type);
+    if (!def) return null;
+    pushHistory();
+    const vals = checkedValues(type, values);
+    if (def.place.kind === 'offboard') {
+      const built = App.buildPart(type, Parts.legsOf({ type, holeRefs: null }), vals);
+      return addPart(type, atSpot(built, offboardX(where.x), where.z), vals, null, opts);
+    }
+    const holeRefs = where.map(h => ({ col: h.col, row: h.row }));
+    return addPart(type, App.buildPart(type, Parts.legsOf({ type, holeRefs }), vals), vals, holeRefs, opts);
+  };
+
+  // Thin wrappers over the parts registry (parts/buzzer.js, button.js,
+  // battery.js), kept for chat.js's PLACE until #27.
   App.placeBuzzer = function (holeA, holeB, values, opts) {
     pushHistory();
-    const { group, pins } = App.buildBuzzer(holeA, holeB);
-    App.scene.add(group);
-    const record = {
-      type: 'buzzer', label: partLabel('buzzer', opts), group, pins, pinMeshes: [],
-      values: App.componentValues('buzzer', values),
-      holeRefs: [{ col: holeA.col, row: holeA.row },
-                 { col: holeB.col, row: holeB.row }],
-    };
-    addPinMarkers(record);
-    state.components.push(record);
-    refreshCounts();
+    const vals = checkedValues('buzzer', values);
+    const holeRefs = [{ col: holeA.col, row: holeA.row }, { col: holeB.col, row: holeB.row }];
+    addPart('buzzer', App.buildPart('buzzer', Parts.legsOf({ type: 'buzzer', holeRefs }), vals), vals, holeRefs, opts);
   };
 
+  // A button record carries controls: { pressed: false } (momentary, never saved).
   App.placeButton = function (holeA, holeB, values, opts) {
     pushHistory();
-    const { group, pins, capMesh } = App.buildButton(holeA, holeB);
-    App.scene.add(group);
-    const record = {
-      type: 'button', label: partLabel('button', opts), group, pins, pinMeshes: [],
-      values: App.componentValues('button', values),
-      holeRefs: [{ col: holeA.col, row: holeA.row },
-                 { col: holeB.col, row: holeB.row }],
-      pressed: false,
-      capMesh,
-    };
-    if (capMesh) capMesh.userData.ownerComp = record;
-    addPinMarkers(record);
-    state.components.push(record);
-    refreshCounts();
+    const vals = checkedValues('button', values);
+    const holeRefs = [{ col: holeA.col, row: holeA.row }, { col: holeB.col, row: holeB.row }];
+    addPart('button', App.buildPart('button', Parts.legsOf({ type: 'button', holeRefs }), vals), vals, holeRefs, opts);
   };
 
-  // ── Toggle button pressed state ──────────────────────────────
-  // Animates the cap smoothly down (press) or back up (release).
+  // Flips a button's momentary control. Kept for the tests and the AI; a
+  // click on the button while simulating goes through App.partGesture. The
+  // cap moves in the button's view.update, after the next simulation.
   App.toggleButton = function (comp) {
-    if (comp.type !== 'button') return;
-    comp.pressed = !comp.pressed;
-
-    const cap = comp.capMesh;
-    if (cap) {
-      // Ensure the cap has its own material so we can tint it independently
-      if (!cap.userData.matCloned) {
-        cap.material = cap.material.clone();
-        cap.userData.matCloned = true;
-      }
-
-      const targetY   = comp.pressed ? cap.userData.capPressY : cap.userData.capRestY;
-      const targetCol = comp.pressed ? 0x44cc44 : 0xe5e5e5;
-      const targetEmi = comp.pressed ? 0x115511 : 0x000000;
-      const targetEmiI = comp.pressed ? 0.6 : 0;
-
-      // Kill any in-progress animation on this cap
-      if (cap.userData._animId) cancelAnimationFrame(cap.userData._animId);
-
-      const startY   = cap.position.y;
-      const startCol = cap.material.color.getHex();
-      const startEmi = cap.material.emissive.getHex();
-      const startEmiI = cap.material.emissiveIntensity;
-      const duration  = 80; // ms — snappy but visible
-      const t0        = performance.now();
-
-      const colA = new THREE.Color(startCol);
-      const colB = new THREE.Color(targetCol);
-      const emiA = new THREE.Color(startEmi);
-      const emiB = new THREE.Color(targetEmi);
-
-      function tick(now) {
-        const p = Math.min((now - t0) / duration, 1);
-        // Ease out cubic
-        const e = 1 - Math.pow(1 - p, 3);
-
-        cap.position.y = startY + (targetY - startY) * e;
-        cap.material.color.lerpColors(colA, colB, e);
-        cap.material.emissive.lerpColors(emiA, emiB, e);
-        cap.material.emissiveIntensity = startEmiI + (targetEmiI - startEmiI) * e;
-
-        if (p < 1) {
-          cap.userData._animId = requestAnimationFrame(tick);
-        } else {
-          cap.userData._animId = null;
-        }
-      }
-
-      cap.userData._animId = requestAnimationFrame(tick);
-    }
-
+    if (!comp || comp.type !== 'button') return;
+    comp.controls = comp.controls || {};
+    comp.controls.pressed = !comp.controls.pressed;
   };
 
+  // The battery sits beside the board, never over it.
   App.placeBattery = function (wx, wz, values, opts) {
     pushHistory();
-    const margin = state.breadboard.BOARD_W / 2 + App.BATTERY_MARGIN;
-    const placedX = wx >= 0 ? Math.max(wx, margin) : Math.min(wx, -margin);
-    const { group, pins } = App.buildBattery(placedX, wz);
-    App.scene.add(group);
-    const record = {
-      type: 'battery', label: partLabel('battery', opts), group, pins, pinMeshes: [],
-      values: App.componentValues('battery', values),
-      holeRefs: null, // not on breadboard
-    };
-    addPinMarkers(record);
-    state.components.push(record);
-    refreshCounts();
+    const vals = checkedValues('battery', values);
+    const built = App.buildPart('battery', Parts.legsOf({ type: 'battery', holeRefs: null }), vals);
+    addPart('battery', atSpot(built, offboardX(wx), wz), vals, null, opts);
+  };
+
+  // ── Gestures ─────────────────────────────────────────────────
+  // A click (or a scroll) on a part's model while the simulation runs
+  // moves the control its `gestures` names. gestures.js throttles the
+  // re-simulation and makes one gesture one undo step. A control that
+  // isn't saved (a button's press) leaves nothing to undo, so it records
+  // no step: undo would only stop the simulation.
+  let gestureSaved = false;
+  const gestures = Gestures.create({
+    now:          () => performance.now(),
+    setTimeout:   (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: id => clearTimeout(id),
+    simulate:     () => { if (App.simRunning) App.runSimulation(); },
+    pushHistory:  () => { if (gestureSaved) pushHistory(); },
+  });
+
+  // kind: 'click' | 'scroll'; dir: +1 / −1 for a scroll. false when comp
+  // has no control for that gesture.
+  App.partGesture = function (comp, kind, dir) {
+    const def = comp && Parts.get(comp.type);
+    const key = def && def.gestures && def.gestures[kind];
+    if (!key) return false;
+    const spec = def.controls[key];
+    gestureSaved = spec.saved;
+    gestures.tick(kind, () => {
+      comp.controls = comp.controls || {};
+      const now = Object.hasOwn(comp.controls, key) ? comp.controls[key] : spec.default;
+      comp.controls[key] = spec.type === 'slider'
+        ? Math.min(spec.max, Math.max(spec.min, now + (dir || 1) * spec.step))
+        : !now;
+    });
+    if (kind === 'click') gestures.release();
+    return true;
   };
 
   // ── Pin Markers ──────────────────────────────────────────────
@@ -602,19 +644,18 @@
     // index: null for a known part that could not be rebuilt (dropped), a
     // placeholder for a type this build doesn't know. rebuildComponents
     // fills in labels missing from files saved before labels existed.
-    const PLACE = { resistor: App.placeResistor, led: App.placeLED,
-                    buzzer: App.placeBuzzer, button: App.placeButton };
-    const knows = t => t === 'battery' || !!PLACE[t];
+    const knows = t => !!Parts.get(t);
     const rebuilt = App.rebuildComponents(data.components, c => {
       const before = state.components.length;
       const opts   = { label: c.label };
-      if (c.type === 'battery' && c.position) {
-        App.placeBattery(c.position.x, c.position.z, c.values, opts);
-      } else if (PLACE[c.type] && c.holeRefs?.length === 2) {
-        const refs = App.loadHoleRefs(c);   // pin order: by name, or by index in older files
-        const hA = refs[0] && bb.getHole(refs[0].col, refs[0].row);
-        const hB = refs[1] && bb.getHole(refs[1].col, refs[1].row);
-        if (hA && hB) PLACE[c.type](hA, hB, c.values, opts);
+      const def    = Parts.get(c.type);
+      if (!def) return null;               // kept as a placeholder
+      if (def.place.kind === 'offboard') {
+        if (c.position) App.placePart(c.type, c.position, c.values, opts);
+      } else if (c.holeRefs?.length === def.pins.length) {
+        const refs  = App.loadHoleRefs(c);   // pin order: by name, or by index in older files
+        const holes = refs.map(r => r && bb.getHole(r.col, r.row));
+        if (holes.every(Boolean)) App.placePart(c.type, holes, c.values, opts);
       }
       return state.components.length > before ? state.components[state.components.length - 1] : null;
     }, knows);
@@ -834,8 +875,8 @@
       const v = c.values || App.componentValues(c.type);
       if (c.type === 'led') {
         obj.color = v.color;
-        obj.value = v.forwardVoltage + 'V';
-      } else if (c.type === 'resistor' || c.type === 'buzzer') {
+        obj.value = v.vf + 'V';
+      } else if (c.type === 'resistor') {
         obj.value = v.resistance + 'Ω';
       } else if (c.type === 'battery') {
         obj.value = v.voltage + 'V';

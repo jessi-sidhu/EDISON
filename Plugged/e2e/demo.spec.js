@@ -32,17 +32,20 @@ test('Try it out loads the demo; its button opens and closes the circuit', async
   expect((await simLines(page)).join(' | ')).toContain('LED ON  (14.9 mA)');
 });
 
-// The recorded single-LED build, served in place of a real AI call.
+// The recorded single-LED build, served in place of a real AI call. One lead
+// per hole (test/fixtures/recipes.js ONE_LED): R1 b2–b6, LED cathode c8 /
+// anode c6, tp_3 → a2, a8 → tn_8. The old stacked build put the LED anode on
+// R1's a6, which the registry LED refuses since #25.
 const LED_BUILD = {
   reply: 'Built a single LED with a current-limiting resistor.',
   actions: [
     { tool: 'delete_all' },
     { tool: 'place_battery' },
-    { tool: 'add_wire', from: 'battery_0_pin0', to: 'tp_2', color: 'red' },
-    { tool: 'add_wire', from: 'battery_0_pin1', to: 'tn_8', color: 'black' },
-    { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
-    { tool: 'place_led', holeA: 'a8', holeB: 'a6' },
-    { tool: 'add_wire', from: 'tp_2', to: 'a2', color: 'red' },
+    { tool: 'add_wire', from: 'battery_0_pin0', to: 'tp_63', color: 'red' },
+    { tool: 'add_wire', from: 'battery_0_pin1', to: 'tn_63', color: 'black' },
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6' },
+    { tool: 'place_led', holeA: 'c8', holeB: 'c6' },
+    { tool: 'add_wire', from: 'tp_3', to: 'a2', color: 'red' },
     { tool: 'add_wire', from: 'a8', to: 'tn_8', color: 'black' },
   ],
 };

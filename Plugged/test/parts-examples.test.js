@@ -6,7 +6,7 @@
 // parts/index.js lists it.
 //
 // Shapes these tests assume (docs/API-CONTRACT.md → "Example"):
-// - example.parts: [{ type, label, holes?, values? }]. `holes` are addresses
+// - example.parts: [{ type, label, holes?, values?, controls? }]. `holes` are addresses
 //   ("a2", "tp_50"), one per pin in pin order; off-board parts have none.
 // - example.wires: [[from, to]], each end a hole address or a pin in label
 //   form: "BAT1.0" (pin index) or "LED1.anode" (pin name).
@@ -51,9 +51,10 @@ function valuesOf(p) {
     }
     return v;
   }
-  // A part not in the registry yet (battery, LED… until their issues land):
-  // the simulator's own defaults, as the app records them.
-  return p.values ? Object.assign({}, Sim.PROPS[p.type] || {}, p.values) : undefined;
+  // A part not in the registry: its own values as given. (Sim.PROPS, the
+  // old per-type defaults, is gone since #26, when every part is a
+  // registry part.)
+  return p.values ? Object.assign({}, p.values) : undefined;
 }
 
 function toCircuit(ex) {
@@ -70,6 +71,9 @@ function toCircuit(ex) {
     const comp = { type: p.type, label: p.label, pins: Array.from({ length: n }, () => ({ x: 0, y: 0, z: 0 })),
                    holeRefs, values: valuesOf(p) };
     if (comp.values === undefined) delete comp.values;
+    // A part may set its controls, in the saved record's shape (#26), e.g.
+    // a pressed button: { type: 'button', ..., controls: { pressed: true } }.
+    if (p.controls) comp.controls = Object.assign({}, p.controls);
     byLabel.set(p.label, { comp, def });
     return comp;
   });
@@ -131,6 +135,16 @@ test('require("circuit3d/js/parts") registers the resistor', () => {
   const types = Parts.all().map(d => d.type);
   assert.ok(Parts.get('resistor'), `Parts.get('resistor') is null; registered: ${JSON.stringify(types)}`);
   assert.ok(types.includes('resistor'), `Parts.all() should list the resistor; got ${JSON.stringify(types)}`);
+});
+
+// Issue #26: all five of today's parts are registry parts, so each has its
+// examples run below.
+test('the registry holds all five parts, each with at least one example (#26)', () => {
+  for (const type of ['resistor', 'led', 'battery', 'buzzer', 'button']) {
+    const def = Parts.get(type);
+    assert.ok(def, `Parts.get('${type}') is null; registered: ${JSON.stringify(Parts.all().map(d => d.type))}`);
+    assert.ok(def.examples.length >= 1, `${type} has no examples`);
+  }
 });
 
 // ── Every registered part's examples ────────────────────────────────────

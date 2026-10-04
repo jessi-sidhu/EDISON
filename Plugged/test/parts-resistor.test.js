@@ -79,13 +79,18 @@ test('measure(): current in mA, a positive magnitude either way through', () => 
   }
 });
 
-test('report(): one short line with the current, e.g. "14.9 mA"', () => {
+// Issue #26: the AI summary's part lines are now `- <label>: <report>`, so
+// the report carries today's summary wording ("470 ohm resistor, 14.9 mA"),
+// not #23's "470 Ω, 14.9 mA".
+test('report(): today\'s summary wording, "470 ohm resistor, 14.9 mA" (#26)', () => {
   const def = resistor();
   const r = result(def, 14.894);
   const line = def.report(r, def.measure(r));
   assert.equal(typeof line, 'string');
   assert.ok(line.length <= 80, line);
-  assert.match(line, /14\.9 mA/);
+  assert.equal(line, '470 ohm resistor, 14.9 mA');
+  const k = result(def, 7.0, { resistance: 1000 });
+  assert.equal(def.report(k, def.measure(k)), '1000 ohm resistor, 7.0 mA');
 });
 
 test('warnings: none for a resistor in a working circuit', () => {

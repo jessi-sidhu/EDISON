@@ -11,9 +11,10 @@
 const { test, expect } = require('@playwright/test');
 const Parts = require('../circuit3d/js/parts');
 
-// The resistor is listed even before its file exists, so this spec fails
-// (rather than running nothing) until it is registered.
-const TYPES = [...new Set(['resistor', ...Parts.all().map(d => d.type)])];
+// The resistor (#23), the LED (#25) and the battery, buzzer and button (#26)
+// are listed even before their files exist, so this spec fails (rather than
+// running nothing) until each is registered.
+const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', ...Parts.all().map(d => d.type)])];
 
 // Resistor colours, as the model has always drawn them.
 const BODY = 0xd4a96a, LEAD = 0xc0c0c0, GHOST_LEAD = 0xcccccc;
@@ -302,5 +303,55 @@ test('viewer.html opens a saved circuit with resistors: registry loaded, each dr
     [BROWN, BLACK, RED, GOLD],
     [YELLOW, VIOLET, BROWN, GOLD],
   ]);
+  expect(errors).toEqual([]);
+});
+
+// Testing contract item 8, issue #26: the viewer loads a circuit that uses
+// every part, each drawn by its own view.build (App.buildPart), none by the
+// old per-type builders.
+const EVERY_PART = {
+  version: 1, name: 'Every part',
+  components: [
+    { type: 'battery',  label: 'BAT1', values: { voltage: 9 }, holeRefs: null, position: { x: 15.8, z: 0 } },
+    { type: 'resistor', label: 'R1',  holeRefs: [{ pin: 'lead1', ...h(1, 'b') }, { pin: 'lead2', ...h(5, 'b') }] },
+    { type: 'led',      label: 'LED1', values: { color: 'red' }, holeRefs: [{ pin: 'cathode', ...h(7, 'c') }, { pin: 'anode', ...h(5, 'c') }] },
+    { type: 'buzzer',   label: 'BZ1', holeRefs: [h(10, 'b'), h(12, 'b')] },     // saved before pin names
+    { type: 'button',   label: 'SW1', holeRefs: [h(15, 'b'), h(18, 'b')] },
+  ],
+  wires: [
+    { startHole: null, endHole: h(62, 'tp'), startCompIdx: 0, startPinIdx: 0, endCompIdx: -1, endPinIdx: -1, color: 0xef4444 },
+    { startHole: null, endHole: h(62, 'tn'), startCompIdx: 0, startPinIdx: 1, endCompIdx: -1, endPinIdx: -1, color: 0x111111 },
+  ],
+};
+
+test('viewer.html opens a circuit with every part: all five registered, each drawn through App.buildPart, no errors', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.addInitScript(() => {
+    window.__built = [];
+    let app;
+    Object.defineProperty(window, 'App', {
+      configurable: true,
+      get: () => app,
+      set: v => {
+        app = v;
+        if (!v || v.__buildPartWatched) return;
+        v.__buildPartWatched = true;
+        let buildPart;
+        Object.defineProperty(app, 'buildPart', {
+          configurable: true,
+          get: () => (buildPart ? (type, ...rest) => { window.__built.push(type); return buildPart(type, ...rest); } : buildPart),
+          set: f => { buildPart = f; },
+        });
+      },
+    });
+  });
+  await page.route('**/demo.sparky', route => route.fulfill({ json: EVERY_PART }));
+  await page.goto('/circuit3d/viewer.html');
+  await page.waitForFunction(() => window.App && App.scene);
+
+  const types = await page.evaluate(() => (window.Parts ? Parts.all().map(d => d.type).sort() : null));
+  expect(types, 'window.Parts in the viewer').toEqual(['battery', 'button', 'buzzer', 'led', 'resistor']);
+  await expect.poll(() => page.evaluate(() => window.__built.slice().sort()), { message: 'each saved part drawn with App.buildPart' })
+    .toEqual(['battery', 'button', 'buzzer', 'led', 'resistor']);
   expect(errors).toEqual([]);
 });

@@ -246,6 +246,27 @@ for (const [what, def] of AT_LIMIT) {
   });
 }
 
+// ── Optional headline and line, issue #26 ─────────────────────────────────
+//   headline?: (r, m) → { text, cls }         one line at the top of the results
+//   line?:     (r, m) → { text, cls } | null  replaces the generic "💡 NAME ON" line
+// Both are optional; when given, each must be a function.
+
+test('define accepts a part with headline(r, m) and line(r, m) functions (#26)', () => {
+  const define = need('define');
+  const def = variant(testSpan, d => {
+    d.headline = () => ({ text: 'Test 1: ok', cls: 'sim-info' });
+    d.line     = () => null;
+  });
+  let err = null;
+  try { define(def); } catch (e) { err = e; }
+  assert.strictEqual(err, null, `headline and line are optional PartDefinition fields; define() threw: ${err && err.message}`);
+});
+
+test('define refuses a headline or line that is not a function (#26)', () => {
+  rejects(variant(testSpan, d => { d.headline = 'Battery 1: 9V'; }), [/test_span/, /headline/, /function/]);
+  rejects(variant(testSpan, d => { d.line = { text: 'x', cls: 'sim-on' }; }), [/test_span/, /\bline\b/, /function/]);
+});
+
 test('the error lists every broken rule, not just the first', () => {
   rejects(variant(testSpan, d => {
     d.name = 'N'.repeat(30);

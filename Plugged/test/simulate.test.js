@@ -33,6 +33,11 @@ const mA = i => i * 1000;
 function texts(result) { return result.lines.map(l => l.text); }
 function hasLine(result, substr) { return texts(result).some(t => t.includes(substr)); }
 
+// How many LEDs the results panel says are lit. analyze() no longer returns
+// ledsOn / buzzersOn (#26): the page reads parts[label].m, and a lit LED
+// has its "💡 LED ON" line.
+const litLEDs = r => texts(r).filter(t => t.startsWith('  💡 LED ON')).length;
+
 
 // Forward current through an LED: pin 1 (anode) to pin 0 (cathode).
 // currents[] is positive from pin 0 to pin 1 inside a part, so negate it.
@@ -51,7 +56,7 @@ test('series battery, resistor, LED: (9-2)/470', () => {
 
   assert.equal(r.status, 'ok');
   assert.ok(Math.abs(mA(ledI(r, 2)) - 14.894) < 0.01, `got ${mA(ledI(r, 2))}`);
-  assert.equal(r.ledsOn.length, 1);
+  assert.equal(litLEDs(r), 1);
   assert.ok(hasLine(r, 'LED ON  (14.9 mA)'), texts(r).join(' | '));
 });
 
@@ -68,7 +73,7 @@ test('parallel LEDs behind one resistor split its current (#8)', () => {
   assert.ok(Math.abs(mA(r.currents[1]) - 14.894) < 0.01, `resistor ${mA(r.currents[1])}`);
   assert.ok(Math.abs(mA(ledI(r, 2)) - 7.447) < 0.01, `led1 ${mA(ledI(r, 2))}`);
   assert.ok(Math.abs(mA(ledI(r, 3)) - 7.447) < 0.01, `led2 ${mA(ledI(r, 3))}`);
-  assert.equal(r.ledsOn.length, 2);
+  assert.equal(litLEDs(r), 2);
 });
 
 // ── Voltage divider: 9V - 470R - X - 470R - GND (#9) ──────────
@@ -96,7 +101,7 @@ test('reversed LED: stays dark and says so (#10)', () => {
   const wires = [wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn'))];
   const r = Sim.analyze([bat, res, led], wires);
 
-  assert.equal(r.ledsOn.length, 0);
+  assert.equal(litLEDs(r), 0);
   assert.ok(hasLine(r, 'backwards'), texts(r).join(' | '));
 });
 
@@ -108,7 +113,7 @@ test('LED across the battery with no resistor is reported as a short', () => {
   const r = Sim.analyze([bat, led], []);
 
   assert.equal(r.shorted, true);
-  assert.equal(r.ledsOn.length, 0);
+  assert.equal(litLEDs(r), 0);
   assert.ok(hasLine(r, 'Short circuit'), texts(r).join(' | '));
 });
 
@@ -128,7 +133,7 @@ test('resistor and LED not wired to the battery leave the circuit open', () => {
   const r = Sim.analyze([bat, res, led], []);
 
   assert.equal(r.status, 'ok');
-  assert.equal(r.ledsOn.length, 0);
+  assert.equal(litLEDs(r), 0);
   assert.ok(hasLine(r, 'Circuit open'), texts(r).join(' | '));
   assert.ok(hasLine(r, 'Battery terminals not connected'), texts(r).join(' | '));
 });
@@ -165,12 +170,13 @@ test('over-current advice for parallel LEDs never suggests a smaller resistor', 
 test('red and green LEDs in parallel: only the lower-Vf red one lights', () => {
   const bat   = battery();
   const res   = comp('resistor', [h(5, 'a'), h(10, 'a')]);
-  const red   = comp('led', [h(1, 'tn'), h(10, 'a')]);
+  const red   = comp('led', [h(1, 'tn'), h(10, 'a')], { label: 'LED1' });
   const green = comp('led', [h(3, 'tn'), h(10, 'a')],
-    { values: { color: 'green', forwardVoltage: 2.2, thresholdCurrent: 0.001, maxCurrent: 0.020 } });
+    { label: 'LED2', values: { color: 'green', forwardVoltage: 2.2, thresholdCurrent: 0.001, maxCurrent: 0.020 } });
   const r = Sim.analyze([bat, res, red, green], [wire(h(2, 'tp'), h(5, 'a'))]);
 
-  assert.deepEqual(r.ledsOn, [red]);
+  // Was r.ledsOn === [red]; ledsOn is gone (#26), so read parts[label].m.
+  assert.deepEqual(Object.keys(r.parts).filter(l => r.parts[l].m.on), ['LED1']);
 });
 
 test('a floating resistor does not disturb the circuit', () => {
@@ -188,14 +194,14 @@ test('a floating resistor does not disturb the circuit', () => {
 test('a push button opens and closes the circuit', () => {
   const build = pressed => {
     const bat = battery();
-    const btn = comp('button', [h(3, 'a'), h(6, 'a')], { pressed });
+    const btn = comp('button', [h(3, 'a'), h(6, 'a')], { controls: { pressed } });
     const res = comp('resistor', [h(6, 'a'), h(10, 'a')]);
     const led = comp('led', [h(15, 'a'), h(10, 'a')]);
     const wires = [wire(h(2, 'tp'), h(3, 'a')), wire(h(15, 'a'), h(2, 'tn'))];
     return Sim.analyze([bat, btn, res, led], wires);
   };
-  assert.equal(build(false).ledsOn.length, 0);
-  assert.equal(build(true).ledsOn.length, 1);
+  assert.equal(litLEDs(build(false)), 0);
+  assert.equal(litLEDs(build(true)), 1);
 });
 
 // The demo circuit: the button is on the ground side, so releasing it leaves
@@ -204,10 +210,10 @@ test('an LED whose return path is broken by a released button just reports an op
   const bat = battery();
   const res = comp('resistor', [h(1, 'tp'), h(6, 'a')]);
   const led = comp('led', [h(11, 'a'), h(6, 'a')]);
-  const btn = comp('button', [h(11, 'a'), h(1, 'tn')], { pressed: false });
+  const btn = comp('button', [h(11, 'a'), h(1, 'tn')], { controls: { pressed: false } });
   const r = Sim.analyze([bat, res, led, btn], []);
 
-  assert.equal(r.ledsOn.length, 0);
+  assert.equal(litLEDs(r), 0);
   assert.ok(hasLine(r, 'Circuit open'), texts(r).join(' | '));
   assert.ok(!hasLine(r, 'current too low'), texts(r).join(' | '));
 });
@@ -235,7 +241,7 @@ test('solveLinear solves a 2x2 system and reports a singular one as null', () =>
 test('empty board and battery-less board report their own status', () => {
   assert.equal(Sim.analyze([], []).status, 'empty');
   const noBat = Sim.analyze([comp('resistor', [h(5, 'a'), h(10, 'a')])], []);
-  assert.equal(noBat.status, 'no-battery');
+  assert.equal(noBat.status, 'no-source', "#26: 'no-source' replaces 'no-battery'");
   assert.ok(hasLine(noBat, 'No battery in circuit.'));
 });
 
@@ -274,7 +280,7 @@ test('one-LED recipe: the LED lights at (9-2)/470 (#10)', () => {
   const [led] = ledIdx(components);
 
   assert.equal(r.status, 'ok');
-  assert.equal(r.ledsOn.length, 1, texts(r).join(' | '));
+  assert.equal(litLEDs(r), 1, texts(r).join(' | '));
   assert.ok(Math.abs(mA(ledI(r, led)) - 14.89) < 0.05, `got ${mA(ledI(r, led))}`);
 });
 
@@ -287,7 +293,7 @@ test('parallel recipe: both LEDs lit, sharing both nodes and the current (#10)',
   assert.equal(graph[a].nodes[1], graph[b].nodes[1], 'the anodes share a node');
   assert.equal(graph[a].nodes[0], graph[b].nodes[0], 'the cathodes share a node');
   assert.equal(r.status, 'ok');
-  assert.equal(r.ledsOn.length, 2, texts(r).join(' | '));
+  assert.equal(litLEDs(r), 2, texts(r).join(' | '));
   assert.ok(Math.abs(mA(ledI(r, a)) - 7.45) < 0.2, `LED1 ${mA(ledI(r, a))}`);
   assert.ok(Math.abs(mA(ledI(r, b)) - 7.45) < 0.2, `LED2 ${mA(ledI(r, b))}`);
 });
@@ -299,7 +305,7 @@ test('series recipe: both LEDs lit with equal current (9-4)/470 (#10)', () => {
 
   assert.equal(graph[a].nodes[0], graph[b].nodes[1], "LED1's cathode is LED2's anode");
   assert.equal(r.status, 'ok');
-  assert.equal(r.ledsOn.length, 2, texts(r).join(' | '));
+  assert.equal(litLEDs(r), 2, texts(r).join(' | '));
   assert.ok(Math.abs(mA(ledI(r, a)) - mA(ledI(r, b))) < 1e-6, `LED1 ${mA(ledI(r, a))}, LED2 ${mA(ledI(r, b))}`);
   assert.ok(Math.abs(mA(ledI(r, a)) - 10.63) < 0.05, `got ${mA(ledI(r, a))}`);
 });
@@ -370,7 +376,7 @@ test('a column wired only to another floating column reads null (#4)', () => {
 test('voltageAt exists and returns null when analyze returns early (#4)', () => {
   const early = {
     empty:       Sim.analyze([], []),
-    'no-battery': Sim.analyze([comp('resistor', [h(5, 'a'), h(10, 'a')])], []),
+    'no-source':  Sim.analyze([comp('resistor', [h(5, 'a'), h(10, 'a')])], []),
     'wire short': Sim.analyze([battery()], [wire(h(4, 'tp'), h(4, 'tn'))]),
     unsolvable:  Sim.analyze([battery(), comp('battery', [h(9, 'tp'), h(9, 'tn')], { values: { voltage: 6 } })], []),
   };
@@ -380,14 +386,14 @@ test('voltageAt exists and returns null when analyze returns early (#4)', () => 
   }
 });
 
-test('analyze keeps its existing result fields and adds voltageAt (#4) and parts (#23)', () => {
+test('analyze keeps its result fields, adds voltageAt (#4) and parts (#23), and drops ledsOn / buzzersOn (#26)', () => {
   const { components, wires } = seriesLedCircuit();
   const r = Sim.analyze(components, wires);
 
   assert.deepEqual(Object.keys(r).sort(),
-    ['buzzersOn', 'currents', 'ledsOn', 'lines', 'nodeVoltages', 'parts', 'shorted', 'status', 'voltageAt']);
+    ['currents', 'lines', 'nodeVoltages', 'parts', 'shorted', 'status', 'voltageAt']);
   assert.equal(r.status, 'ok');
-  assert.equal(r.ledsOn.length, 1);
+  assert.equal(litLEDs(r), 1);
   assert.equal(r.shorted, false);
 });
 
@@ -419,21 +425,26 @@ test('an LED whose leads sit in unwired columns reads null (#4)', () => {
   nearV(vAt(r, h(5, 'd')), 9, 'the main circuit still reads');
 });
 
-test('a second battery wired to nothing reads null, not ±4.5 V (#4)', () => {
+// #26 (contract `ref` row, decision 4): a lone battery is a connected circuit
+// with a source (its V joins + and −), so it gets its own ground at its −
+// pin. It reads 9 V / 0 V from that ground, never ±4.5 V (the GMIN float) or
+// a value tied to BAT1's circuit.
+test('a second battery wired to nothing reads 9 V / 0 V from its own ground, not ±4.5 V (#4, #26)', () => {
   const { components, wires } = seriesLedCircuit();
   components.push(comp('battery', [h(40, 'a'), h(45, 'a')])); // pin0 +, pin1 −
   const r = Sim.analyze(components, wires);
 
   assert.equal(r.status, 'ok');
-  assert.strictEqual(vAt(r, h(40, 'c')), null, 'column 40, the loose battery +');
-  assert.strictEqual(vAt(r, h(45, 'c')), null, 'column 45, the loose battery −');
+  nearV(vAt(r, h(40, 'c')), 9, 'column 40, the loose battery +, from its own ground');
+  nearV(vAt(r, h(45, 'c')), 0, 'column 45, the loose battery −, its own ground');
   nearV(vAt(r, h(5, 'd')), 9, 'the main circuit still reads');
+  nearV(vAt(r, h(40, 'tn')), 0, 'the main circuit keeps its own ground');
 });
 
 test('the column behind a released button reads null, and 9 V once pressed (#4)', () => {
   const build = pressed => {
     const { components, wires } = seriesLedCircuit();
-    components.push(comp('button', [h(5, 'b'), h(40, 'b')], { pressed })); // col 5 sits at 9 V
+    components.push(comp('button', [h(5, 'b'), h(40, 'b')], { controls: { pressed } })); // col 5 sits at 9 V
     return Sim.analyze(components, wires);
   };
 
@@ -572,7 +583,7 @@ test('summary uses the button’s pressed state: released → LED dark, pressed 
     const bat = offBoardBattery('BAT1');
     const components = [
       bat,
-      comp('button',   [h(3, 'a'),  h(6, 'a')],  { label: 'SW1', pressed }),
+      comp('button',   [h(3, 'a'),  h(6, 'a')],  { label: 'SW1', controls: { pressed } }),
       comp('resistor', [h(6, 'a'),  h(10, 'a')], { label: 'R1' }),
       comp('led',      [h(15, 'a'), h(10, 'a')], { label: 'LED1' }),
     ];
@@ -598,7 +609,10 @@ test('summary uses the button’s pressed state: released → LED dark, pressed 
   assert.ok(stateOf(pressed, 'SW1').some(l => /pressed|closed/i.test(l) && !/not pressed|released|\bopen\b/i.test(l)),
     `SW1 should read pressed/closed${show(pressed)}`);
   assert.ok(stateOf(pressed, 'LED1').some(isOn), `LED1 should read ON with the button pressed${show(pressed)}`);
-  assert.ok(!/NaN|undefined|null/.test(pressed.join('\n')), `a pressed button has no current; no NaN/null${show(pressed)}`);
+  assert.ok(!/NaN|undefined|null/.test(pressed.join('\n')), `no NaN/null${show(pressed)}`);
+  // #26: a pressed button is a closed SW (1 mΩ) and reports its real current.
+  assertLine(pressed, /^- SW1: button pressed \(closed\), 14\.9 mA$/, 'a pressed button reports its current (#26)');
+  assertLine(released, /^- SW1: button released \(open\), 0\.0 mA$/, 'a released button reports 0.0 mA');
 });
 
 test('summary carries the analysis messages: open circuit and short circuit (#5)', () => {
@@ -672,13 +686,20 @@ test('an LED straight across the battery: "short circuit", no reading above 1000
   assertNoAbsurdCurrent(lines);
 });
 
-test('when shorted, each part still has its state line, just without a current (#20)', () => {
+// #26: with no readings, each part's line is `- <label>: <lower-case name>`
+// (the part's report needs readings), so "- LED1: led" and "- BAT1: battery".
+test('when shorted, each part still has its state line, just without a current (#20, #26)', () => {
   const { bat, wires } = wiredBattery();
   const led = comp('led', [h(3, 'a'), h(1, 'a')], { label: 'LED1' });
   const lines = summary([bat, led], wires.concat([wire(h(2, 'tp'), h(1, 'a')), wire(h(3, 'a'), h(2, 'tn'))]));
+  const nameOf = type => {
+    const d = Parts().get(type);
+    assert.ok(d, `Parts.get('${type}') is null`);
+    return d.name.toLowerCase();
+  };
 
-  assertLine(lines, /\bLED1: LED (ON|OFF)\b/, 'LED1 state line');
-  assertLine(lines, /\bBAT1: 9\.00 V battery\b/, 'BAT1 state line');
+  assertLine(lines, new RegExp(`^- LED1: ${nameOf('led')}$`), 'LED1 state line');
+  assertLine(lines, new RegExp(`^- BAT1: ${nameOf('battery')}$`), 'BAT1 state line');
   for (const label of ['LED1', 'BAT1']) {
     const state = lines.filter(l => new RegExp(`\\b${label}:`).test(l));
     state.forEach(l => assert.doesNotMatch(l, /\d mA\b/, `${label}'s state line should carry no current when shorted${show(lines)}`));
@@ -703,8 +724,8 @@ test('not shorted, the series summary still gives each part its current (#20 gua
 //
 //  Keying: parts is keyed by comp.label. A registry part with no label is
 //  simulated as usual but left out of parts (never an "undefined" key).
-//  Parts not yet in the registry (battery, LED, buzzer, button until issues
-//  B and C) are not in parts.
+//  The LED joins in issue #25, and the battery, buzzer and button in #26
+//  (tests at the end of this file), so every labelled part is in parts.
 
 const Parts = () => require('../circuit3d/js/parts');
 const partsOf = r => {
@@ -781,7 +802,7 @@ test('a loose registry resistor: floating pins read null, no current (#23)', () 
 test('an unlabelled registry part simulates but gets no "undefined" key in parts (#23)', () => {
   const { components, wires } = seriesLedCircuit();   // no labels
   const r = Sim.analyze(components, wires);
-  assert.equal(r.ledsOn.length, 1);
+  assert.equal(litLEDs(r), 1);
   assert.ok(!Object.keys(partsOf(r)).includes('undefined'), JSON.stringify(Object.keys(r.parts)));
 });
 
@@ -789,7 +810,7 @@ test('parts is {} when analyze returns before solving (#23)', () => {
   const R1 = () => comp('resistor', [h(5, 'a'), h(10, 'a')], { label: 'R1' });
   const early = {
     empty:        Sim.analyze([], []),
-    'no-battery': Sim.analyze([R1()], []),
+    'no-source':  Sim.analyze([R1()], []),
     'wire short': Sim.analyze([battery(), R1()], [wire(h(4, 'tp'), h(4, 'tn'))]),
     unsolvable:   Sim.analyze([battery(), comp('battery', [h(9, 'tp'), h(9, 'tn')], { values: { voltage: 6 } }), R1()], []),
   };
@@ -814,4 +835,651 @@ test('under Node, requiring simulate.js alone is enough for registry parts (#23)
   const m = JSON.parse(out);
   assert.ok(m, 'require("simulate.js") alone gives no parts.R1: simulate.js must require ./parts under Node');
   assert.ok(Math.abs(m.current - 19.149) < 0.01, `9 V across 470 Ω: ${m.current}`);
+});
+
+// ── The LED in the registry, one generic mode loop, issue #25 ────────────
+//  The LED is a registry part (parts/led.js) with one D element; the solver
+//  stamps D blocks (off / on) and settles them with one generic loop. Every
+//  LED number and message above is unchanged. The results panel's LED lines
+//  now come from the part through one rule in simulate.js:
+//    m.on === true      → '  💡 LED ON  (<mA>.toFixed(1) mA)'   sim-on
+//    each warning       → '  ' + text; sim-err if m.on, else sim-warn
+//    battery shorted through the LED's D (> 1 A): the LED's warnings replace
+//    the generic short line, the first sim-err, the rest sim-info.
+//  parts.LED1 = { r, m: { on, current }, warnings }, with r.modes[id]
+//  'on' / 'off', r.current[id] in mA + anode → cathode, and r.open[id] the
+//  volts across the D (anode − cathode) with every mode block off.
+//  currents[i] keeps its sign (+ from pin 0 to pin 1, so a lit LED is < 0).
+
+const BACKWARDS_LINE = '  LED is backwards. Current cannot flow from cathode to anode. Flip it around.';
+const SHORT_LINES = [
+  'Short circuit. The LED sits straight across the battery with no current-limiting resistor.',
+  'Put a resistor in series: at least 350 ohm, so use a 470 ohm.',
+];
+
+function ledDef() {
+  const def = Parts().get('led');
+  assert.ok(def, "Parts.get('led') is null: parts/led.js must be registered (parts/index.js)");
+  return def;
+}
+// The key the LED's D is reported under in r.current / r.modes / r.open.
+function dId() {
+  const els = ledDef().elements({ color: 'red', vf: 2.0, maxCurrent: 0.02, thresholdCurrent: 0.001 }, {});
+  const k = els.findIndex(e => e.kind === 'D');
+  assert.ok(k >= 0, 'the LED has a D element');
+  return els[k].id !== undefined ? els[k].id : k;
+}
+function led1(r) {
+  const p = partsOf(r).LED1;
+  assert.ok(p, `analyze().parts should have LED1; got ${JSON.stringify(Object.keys(r.parts))}`);
+  assert.ok(p.r && p.r.open && typeof p.r.open === 'object', `parts.LED1.r.open should hold the open-circuit volts per mode block; got ${JSON.stringify(p.r && p.r.open)}`);
+  return p;
+}
+const plainLines = r => r.lines.map(l => ({ text: l.text, cls: l.cls }));
+
+// The series circuit with one labelled LED of the given values.
+function seriesWith(ledValues, ohms) {
+  const { components, wires } = labelledSeries();
+  if (ledValues) components[2].values = ledValues;
+  if (ohms) components[1].values = { resistance: ohms };
+  return { components, wires };
+}
+
+test('series: parts.LED1 is lit at 14.9 mA, D on, + anode → cathode, open 9 V, no warnings (#25)', () => {
+  const { components, wires } = labelledSeries();
+  const r = Sim.analyze(components, wires);
+  const L = led1(r);
+  const id = dId();
+
+  assert.equal(L.m.on, true);
+  assert.ok(Math.abs(L.m.current - 14.894) < 0.01, `m.current ${L.m.current}`);
+  assert.equal(L.r.modes[id], 'on', `r.modes: ${JSON.stringify(L.r.modes)}`);
+  assert.ok(Math.abs(L.r.current[id] - 14.894) < 0.01, `r.current is + anode → cathode, in mA: ${L.r.current[id]}`);
+  nearV(L.r.open[id], 9, 'r.open: the LED alone would see the whole 9 V');
+  assert.ok(Math.abs(L.r.pins.anode - 2.0) < 0.01, `anode ${L.r.pins.anode}`);
+  nearV(L.r.pins.cathode, 0, 'cathode');
+  assert.deepStrictEqual(L.warnings, []);
+  assert.ok(Math.abs(r.currents[2] + 0.014894) < 1e-5, `currents[] keeps its sign: a lit LED is negative, got ${r.currents[2]}`);
+  assert.equal(litLEDs(r), 1, 'one lit LED');
+  assert.deepStrictEqual(plainLines(r), [
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: '  💡 LED ON  (14.9 mA)', cls: 'sim-on' },
+  ]);
+});
+
+// Today's numbers, 9 V through 470 Ω, from components.js LED_TYPES.
+const TODAY_MA = { red: 14.8904, yellow: 14.6777, green: 14.4650, blue: 12.3378, white: 11.9124 };
+const TODAY_VF = { red: 2.0, yellow: 2.1, green: 2.2, blue: 3.2, white: 3.4 };
+
+test("each colour lights at today's current, from a record that saves only its colour (#25)", () => {
+  for (const [color, want] of Object.entries(TODAY_MA)) {
+    const { components, wires } = seriesWith({ color });
+    const r = Sim.analyze(components, wires);
+    const got = mA(ledI(r, 2));
+    assert.ok(Math.abs(got - want) < 0.01, `${color}: expected ${want} mA, got ${got}; ${texts(r).join(' | ')}`);
+    assert.ok(hasLine(r, `LED ON  (${want.toFixed(1)} mA)`), `${color}: ${texts(r).join(' | ')}`);
+    const L = led1(r);
+    assert.equal(L.r.values.color, color);
+    assert.equal(L.r.values.vf, TODAY_VF[color], `${color}: r.values.vf`);
+    assert.ok(Math.abs(L.m.current - want) < 0.01, `${color}: m.current ${L.m.current}`);
+  }
+});
+
+test('backwards: parts.LED1 is off with the backwards warning, one sim-warn line (#25)', () => {
+  const bat = offBoardBattery('BAT1');
+  const components = [
+    bat,
+    comp('resistor', [h(5, 'a'),  h(10, 'a')], { label: 'R1' }),
+    comp('led',      [h(10, 'a'), h(15, 'a')], { label: 'LED1' }),   // cathode toward the resistor
+  ];
+  const wires = [batWire(bat, 0, h(1, 'tp')), batWire(bat, 1, h(1, 'tn')),
+                 wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn'))];
+  const r = Sim.analyze(components, wires);
+  const L = led1(r);
+
+  assert.equal(L.m.on, false);
+  assert.equal(L.r.modes[dId()], 'off');
+  nearV(L.r.open[dId()], -9, 'r.open is anode − cathode: the anode is on ground, the cathode at 9 V');
+  assert.deepStrictEqual(L.warnings, [BACKWARDS_LINE.trim()]);
+  assert.equal(litLEDs(r), 0);
+  assert.deepStrictEqual(plainLines(r), [
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: BACKWARDS_LINE, cls: 'sim-warn' },
+  ]);
+});
+
+test('over-current: the ON line, then the rating line in sim-err, the same text in parts.LED1.warnings (#25)', () => {
+  const { components, wires } = seriesWith(null, 150);
+  const r = Sim.analyze(components, wires);
+  const L = led1(r);
+  const over = 'LED is over its 20 mA rating at 46.6 mA. Needs at least 350 ohm in series, so use 470 ohm.';
+
+  assert.equal(L.m.on, true);
+  assert.ok(Math.abs(L.m.current - 46.636) < 0.01, `m.current ${L.m.current}`);
+  nearV(L.r.open[dId()], 9, 'r.open with every diode off');
+  assert.deepStrictEqual(L.warnings, [over]);
+  assert.deepStrictEqual(plainLines(r), [
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: '  💡 LED ON  (46.6 mA)', cls: 'sim-on' },
+    { text: '  ' + over, cls: 'sim-err' },
+  ]);
+});
+
+test("parallel LEDs over their rating: each LED's advice uses its own open voltage, 350 → 470 (#25)", () => {
+  const bat  = comp('battery', [h(1, 'tp'), h(1, 'tn')], { label: 'BAT1' });   // #26: headlines name parts by label
+  const res  = comp('resistor', [h(5, 'a'), h(10, 'a')], { label: 'R1', values: { resistance: 150 } });
+  const a    = comp('led', [h(1, 'tn'), h(10, 'a')], { label: 'LED1' });
+  const b    = comp('led', [h(3, 'tn'), h(10, 'a')], { label: 'LED2' });
+  const r = Sim.analyze([bat, res, a, b], [wire(h(2, 'tp'), h(5, 'a'))]);
+  const over = 'LED is over its 20 mA rating at 23.3 mA. Needs at least 350 ohm in series, so use 470 ohm.';
+
+  for (const label of ['LED1', 'LED2']) {
+    const L = partsOf(r)[label];
+    assert.ok(L, `parts.${label}`);
+    nearV(L.r.open[dId()], 9, `${label} r.open: every diode off, not the other LED pinning the node`);
+    assert.deepStrictEqual(L.warnings, [over], label);
+  }
+  assert.deepStrictEqual(plainLines(r).slice(1), [
+    { text: '  💡 LED ON  (23.3 mA)', cls: 'sim-on' },
+    { text: '  ' + over, cls: 'sim-err' },
+    { text: '  💡 LED ON  (23.3 mA)', cls: 'sim-on' },
+    { text: '  ' + over, cls: 'sim-err' },
+  ]);
+});
+
+test("short: the LED's two lines replace the generic one, sim-err then sim-info, from parts.LED1.warnings (#25)", () => {
+  const bat = comp('battery', [h(1, 'tp'), h(1, 'tn')], { label: 'BAT1' });
+  const led = comp('led', [h(1, 'tn'), h(1, 'tp')], { label: 'LED1' });   // cathode on −, anode on +
+  const r = Sim.analyze([bat, led], []);
+
+  assert.equal(r.shorted, true);
+  assert.equal(litLEDs(r), 0);
+  assert.deepStrictEqual(plainLines(r), [
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: '  ' + SHORT_LINES[0], cls: 'sim-err' },
+    { text: '  ' + SHORT_LINES[1], cls: 'sim-info' },
+  ]);
+  assert.ok(!hasLine(r, 'no resistance in path'), 'not the generic wire-short line');
+  assert.deepStrictEqual(led1(r).warnings, SHORT_LINES);
+});
+
+test('current too low: 10 kΩ holds the LED at 0.7 mA, not lit, "LED: current too low." in sim-warn (#25)', () => {
+  const { components, wires } = seriesWith(null, 10000);
+  const r = Sim.analyze(components, wires);
+  const L = led1(r);
+
+  assert.equal(L.m.on, false);
+  assert.deepStrictEqual(L.warnings, ['LED: current too low.']);
+  assert.equal(litLEDs(r), 0);
+  assert.deepStrictEqual(plainLines(r), [
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: '  LED: current too low.', cls: 'sim-warn' },
+    { text: '  No output components in circuit path.', cls: 'sim-info' },
+  ]);
+});
+
+test('a backwards LED and a lit one: each its own line, in board order (#25)', () => {
+  const bat = comp('battery', [h(1, 'tp'), h(1, 'tn')], { label: 'BAT1' });   // #26: "Battery 1" comes from the label
+  const components = [
+    bat,
+    comp('resistor', [h(5, 'a'),  h(10, 'a')], { label: 'R1' }),
+    comp('led',      [h(10, 'a'), h(15, 'a')], { label: 'LED1' }),   // backwards
+    comp('led',      [h(20, 'a'), h(10, 'a')], { label: 'LED2' }),   // lit
+  ];
+  const wires = [wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn')), wire(h(20, 'a'), h(2, 'tn'))];
+  const r = Sim.analyze(components, wires);
+
+  assert.deepStrictEqual(plainLines(r), [
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: BACKWARDS_LINE, cls: 'sim-warn' },
+    { text: '  💡 LED ON  (14.9 mA)', cls: 'sim-on' },
+  ]);
+  const { LED1, LED2 } = partsOf(r);
+  assert.ok(LED1 && LED2, `parts should have LED1 and LED2; got ${JSON.stringify(Object.keys(r.parts))}`);
+  assert.equal(LED1.m.on, false, 'LED1 backwards');
+  assert.equal(LED2.m.on, true, 'LED2 lit');
+  assert.equal(litLEDs(r), 1);
+});
+
+test('a loose LED reads floating pins, off, no warnings (#25)', () => {
+  const { components, wires } = labelledSeries();
+  components.push(comp('led', [h(35, 'a'), h(33, 'a')], { label: 'LED2' }));
+  const L2 = partsOf(Sim.analyze(components, wires)).LED2;
+  assert.ok(L2, 'parts.LED2');
+  assert.deepStrictEqual(L2.r.pins, { cathode: null, anode: null });
+  assert.equal(L2.m.on, false);
+  assert.deepStrictEqual(L2.warnings, []);
+});
+
+// ── settleModes: the generic mode loop, issue #25 ─────────────────────────
+//  settleModes(blocks, solveFor) → { modes, sol, settled } | null
+//    blocks[i]   = { initial: 'off', check(sol, mode) → null | { by, to } }
+//                  check says whether block i is consistent with a solve in
+//                  that mode: null if it is, else how far past its switching
+//                  point it is (by > 0, e.g. volts) and the mode to flip to.
+//    solveFor(modes) → sol, or null when the circuit can't be solved (then
+//                  settleModes returns null). modes[i] is block i's mode.
+//  Each round: solve; if every block is consistent, return settled: true;
+//  else flip the block with the largest `by`. If a set of modes repeats,
+//  flip the lowest-index inconsistent block instead (anti-cycling). After
+//  4·n + 10 rounds, return settled: false. `sol` is always the solve for the
+//  returned `modes`.
+
+function needSettle() {
+  assert.equal(typeof Sim.settleModes, 'function', 'simulate.js should export settleModes(blocks, solveFor)');
+  return Sim.settleModes;
+}
+
+// A fake solver: the "solution" just records the modes it was solved with,
+// so a block's check can read the other blocks. Throws past a hard limit so
+// a loop that never ends fails the test instead of hanging it.
+function fakeSolver(limit = 500) {
+  const calls = [];
+  const solveFor = modes => {
+    calls.push(modes.slice());
+    if (calls.length > limit) throw new Error(`settleModes called solveFor ${calls.length} times; it never stops`);
+    return { modes: modes.slice() };
+  };
+  return { solveFor, calls };
+}
+
+const flipOf = mode => (mode === 'on' ? 'off' : 'on');
+// A block that wants `want(sol)` ('on' / 'off'), `by` volts away.
+const wants = (want, by = 1) => ({
+  initial: 'off',
+  check: (sol, mode) => (mode === want(sol) ? null : { by: typeof by === 'function' ? by(sol) : by, to: flipOf(mode) }),
+});
+const CAP = n => 4 * n + 10;
+
+test('settleModes with no blocks solves once and is settled (#25)', () => {
+  const settle = needSettle();
+  const { solveFor, calls } = fakeSolver();
+  const out = settle([], solveFor);
+  assert.equal(out.settled, true);
+  assert.deepStrictEqual(out.modes, []);
+  assert.equal(calls.length, 1);
+});
+
+test('settleModes flips the most inconsistent block first and stops when all are consistent (#25)', () => {
+  const settle = needSettle();
+  const { solveFor, calls } = fakeSolver();
+  // Block 0 wants on (by 1), block 1 wants on (by 5): flip 1, then 0.
+  const blocks = [wants(() => 'on', 1), wants(() => 'on', 5)];
+  const out = settle(blocks, solveFor);
+  assert.equal(out.settled, true);
+  assert.deepStrictEqual(out.modes, ['on', 'on']);
+  assert.deepStrictEqual(calls, [['off', 'off'], ['off', 'on'], ['on', 'on']], 'most inconsistent first');
+  assert.deepStrictEqual(out.sol.modes, out.modes, 'sol is the solve for the returned modes');
+});
+
+test('settleModes returns null when the circuit cannot be solved (#25)', () => {
+  const settle = needSettle();
+  assert.strictEqual(settle([wants(() => 'on')], () => null), null);
+});
+
+// Six diodes set up so "flip the most inconsistent" cycles: block 2 is
+// always inconsistent (by 3) while block 0 is off, so plain greedy flips
+// block 2 on and off forever. Block 0 (by 1) wants on; with it on, block 2
+// is happy off and block 1 wants on. The only consistent modes are
+// on, on, off, off, off, off. Anti-cycling (on a repeat, flip the
+// lowest-index inconsistent block) must find them within 4·6 + 10 rounds.
+test('six diodes that make greedy flipping cycle: anti-cycling settles them consistently within 4·6+10 (#25)', () => {
+  const settle = needSettle();
+  const { solveFor, calls } = fakeSolver();
+  const blocks = [
+    wants(() => 'on', 1),                                                  // 0: wants on
+    wants(sol => sol.modes[0], 1),                                         // 1: follows block 0
+    { initial: 'off', check: (sol, mode) =>                                // 2: restless while 0 is off
+      sol.modes[0] === 'off' ? { by: 3, to: flipOf(mode) } : (mode === 'off' ? null : { by: 3, to: 'off' }) },
+    wants(() => 'off'), wants(() => 'off'), wants(() => 'off'),            // 3–5: happy off
+  ];
+  const out = settle(blocks, solveFor);
+
+  assert.ok(calls.length <= CAP(6) + 1, `at most ${CAP(6)} rounds (+1 final solve); solveFor ran ${calls.length} times`);
+  assert.equal(out.settled, true, `anti-cycling should settle this; ended at ${JSON.stringify(out.modes)} after ${calls.length} solves`);
+  assert.deepStrictEqual(out.modes, ['on', 'on', 'off', 'off', 'off', 'off']);
+  blocks.forEach((b, i) => assert.strictEqual(b.check(out.sol, out.modes[i]), null, `block ${i} is consistent in the settled result`));
+});
+
+// Six diodes in a frustrated ring: each wants the next one's mode, but the
+// last wants the opposite of the first. No set of modes satisfies them all,
+// so the loop must give up as unsettled within the cap, not run forever and
+// not claim to be settled.
+test('six diodes that can never all be consistent end "unsettled" within 4·6+10 rounds (#25)', () => {
+  const settle = needSettle();
+  const { solveFor, calls } = fakeSolver();
+  const blocks = [0, 1, 2, 3, 4, 5].map(i => wants(
+    sol => (i < 5 ? sol.modes[i + 1] : flipOf(sol.modes[0])),
+    sol => 1 + i / 10 + sol.modes.filter(m => m === 'on').length / 100,
+  ));
+  const out = settle(blocks, solveFor);
+
+  assert.ok(out, 'a solvable circuit returns a result');
+  assert.equal(out.settled, false);
+  assert.equal(out.modes.length, 6);
+  assert.ok(calls.length <= CAP(6) + 1, `at most ${CAP(6)} rounds (+1 final solve); solveFor ran ${calls.length} times`);
+  assert.deepStrictEqual(out.sol.modes, out.modes, 'sol is the solve for the returned modes');
+});
+
+// The same LED circuits through analyze(): six real LEDs in a ladder settle,
+// and whatever the loop reports is consistent: every lit LED carries forward
+// current, and no dark LED is forward-biased past its Vf.
+test('six LEDs in a ladder settle through analyze(), with no inconsistent LED (#25)', () => {
+  const bat = battery();
+  const components = [bat, comp('resistor', [h(5, 'a'), h(10, 'a')], { label: 'R1' })];
+  // LED k: anode on column 10 + 2k, cathode on column 12 + 2k; the last cathode wired to −.
+  for (let k = 0; k < 3; k++) components.push(comp('led', [h(12 + 2 * k, 'a'), h(10 + 2 * k, 'a')], { label: `LED${k + 1}` }));
+  // Three more straight from column 10 to −, one of each colour.
+  ['red', 'green', 'blue'].forEach((color, k) =>
+    components.push(comp('led', [h(30 + k, 'tn'), h(10, 'b')], { label: `LED${k + 4}`, values: { color } })));
+  const wires = [wire(h(2, 'tp'), h(5, 'a')), wire(h(16, 'a'), h(2, 'tn'))];
+  const r = Sim.analyze(components, wires);
+
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  assert.ok(!hasLine(r, 'settle'), texts(r).join(' | '));
+  const id = dId();
+  for (const label of ['LED1', 'LED2', 'LED3', 'LED4', 'LED5', 'LED6']) {
+    const L = partsOf(r)[label];
+    assert.ok(L, `parts.${label}`);
+    const vd = L.r.pins.anode - L.r.pins.cathode;
+    if (L.r.modes[id] === 'on') assert.ok(L.r.current[id] > -1e-6, `${label} on with reverse current ${L.r.current[id]}`);
+    else assert.ok(vd <= L.r.values.vf + 1e-6, `${label} off but forward-biased ${vd} V past vf ${L.r.values.vf}`);
+  }
+  // Red (2.0 V) clamps column 10, so only it lights: (9 − 2) / 470.
+  assert.deepStrictEqual(Object.keys(r.parts).filter(l => r.parts[l].m.on), ['LED4']);
+});
+
+// ── Battery, buzzer and button in the registry, issue #26 ────────────────
+//  The last three parts join the registry (parts/battery.js, buzzer.js,
+//  button.js) and simulate.js loses its per-type code: PROPS, the button
+//  union-find, the per-type branches, ledsOn / buzzersOn. What changes that
+//  a user can see:
+//  - A pressed button is a closed SW of 1 mΩ, pressed through the record's
+//    controls ({ controls: { pressed: true } }), and carries a real current:
+//    currents[i] is a number, never null.
+//  - Each connected circuit is grounded at the ref pin ('1', the −) of its
+//    earliest-placed source (lowest index). A circuit with no source reads
+//    null. No source on the board at all: status 'no-source', with the line
+//    "No battery in circuit." as before.
+//  - The results panel's top lines come from each part's headline(r, m), in
+//    board order with sources (parts with a ref) after the others, so today's
+//    order holds: buttons, then batteries. N comes from the label.
+//  - A part's line(r, m) replaces the generic ON line: the buzzer's
+//    "  🔔 BUZZER ON  (x.x mA)".
+//  - simulationSummary is generic: `- <label>: <report>`, and a `, <pin>`
+//    role after the hole for every part with non-numeric pin names.
+
+const PRESSED_LINES = [
+  { text: 'Button 1: 🟢 CLOSED (current flowing)', cls: 'sim-on' },
+  { text: 'Battery 1: 9V', cls: 'sim-info' },
+  { text: '  💡 LED ON  (14.9 mA)', cls: 'sim-on' },
+];
+const RELEASED_LINES = [
+  { text: 'Button 1: ⭕ OPEN — click to press', cls: 'sim-info' },
+  { text: 'Battery 1: 9V', cls: 'sim-info' },
+  { text: '  Circuit open — no complete path.', cls: 'sim-warn' },
+];
+
+// BAT1 (off-board) → tp → b4 SW1 b7 → R1 a7–a11 → LED1 anode a11, cathode
+// a16 → tn. The button is listed last, after the battery, so its headline
+// coming first shows the sources-after-the-others order.
+function buttonSeries(pressed) {
+  const bat = offBoardBattery('BAT1');
+  const components = [
+    bat,
+    comp('resistor', [h(6, 'a'),  h(10, 'a')], { label: 'R1' }),
+    comp('led',      [h(15, 'a'), h(10, 'a')], { label: 'LED1' }),   // pin0 cathode, pin1 anode
+    comp('button',   [h(3, 'b'),  h(6, 'b')],  { label: 'SW1', controls: { pressed } }),
+  ];
+  const wires = [
+    batWire(bat, 0, h(1, 'tp')), batWire(bat, 1, h(1, 'tn')),
+    wire(h(2, 'tp'), h(3, 'a')), wire(h(15, 'b'), h(2, 'tn')),
+  ];
+  return { components, wires };
+}
+
+// BAT1 → tp → R1 a5–a9 → BZ1 b9–b11 → tn: I = 9 / (470 + 42) = 17.578 mA.
+function buzzerSeries(opts) {
+  const bat = offBoardBattery('BAT1');
+  const components = [
+    bat,
+    comp('resistor', [h(4, 'a'), h(8, 'a')],  { label: 'R1' }),
+    comp('buzzer',   [h(8, 'b'), h(10, 'b')], { label: 'BZ1' }),
+  ];
+  const wires = [batWire(bat, 0, h(0, 'tp')), batWire(bat, 1, h(0, 'tn')), wire(h(1, 'tp'), h(4, 'b'))];
+  if (!(opts && opts.open)) wires.push(wire(h(10, 'a'), h(1, 'tn')));
+  return { components, wires };
+}
+
+function part(r, label) {
+  const p = partsOf(r)[label];
+  assert.ok(p, `analyze().parts should have ${label}; got ${JSON.stringify(Object.keys(r.parts))}`);
+  return p;
+}
+
+test('a pressed button carries a real current: currents[] 14.9 mA through SW1, the LED lit; released, 0 (#26)', () => {
+  const down = Sim.analyze(...Object.values(buttonSeries(true)));
+  assert.equal(down.status, 'ok', texts(down).join(' | '));
+  assert.equal(typeof down.currents[3], 'number', `a pressed button's current is a number, got ${down.currents[3]}`);
+  assert.ok(Math.abs(mA(down.currents[3]) - 14.894) < 0.01, `+ from lead1 to lead2: ${mA(down.currents[3])} mA`);
+  const SW1 = part(down, 'SW1');
+  const I = Object.values(SW1.r.current);
+  assert.equal(I.length, 1, `one element current; got ${JSON.stringify(SW1.r.current)}`);
+  assert.ok(Math.abs(Math.abs(I[0]) - 14.894) < 0.01, `parts.SW1.r.current in mA: ${I[0]}`);
+  assert.equal(SW1.r.controls.pressed, true, 'r.controls carries the record\'s controls');
+  assert.equal(part(down, 'LED1').m.on, true);
+
+  const up = Sim.analyze(...Object.values(buttonSeries(false)));
+  assert.equal(typeof up.currents[3], 'number');
+  assert.ok(Math.abs(up.currents[3]) < 1e-12, `a released button carries nothing: ${up.currents[3]}`);
+  assert.equal(part(up, 'SW1').r.controls.pressed, false);
+  assert.equal(part(up, 'LED1').m.on, false);
+});
+
+test('a pressed button is a closed SW of 1 mΩ, never an ideal short: its leads stay two nodes, I × 1 mΩ apart (#26)', () => {
+  const { components, wires } = buttonSeries(true);
+  const graph = Sim.buildGraph(components, wires);
+  assert.notEqual(graph[3].nodes[0], graph[3].nodes[1], 'no union-find merge: lead1 and lead2 are separate nodes');
+  const { pins } = part(Sim.analyze(components, wires), 'SW1').r;
+  const drop = pins.lead1 - pins.lead2;
+  assert.ok(Math.abs(drop - 14.8904e-3 * 1e-3) < 1e-7, `1 mΩ × 14.89 mA ≈ 1.49e-5 V across the switch; got ${drop}`);
+});
+
+test('headlines: "Button 1: 🟢 CLOSED" / "⭕ OPEN" first, then "Battery 1: 9V", though the battery is placed first (#26)', () => {
+  assert.deepStrictEqual(plainLines(Sim.analyze(...Object.values(buttonSeries(true)))), PRESSED_LINES);
+  assert.deepStrictEqual(plainLines(Sim.analyze(...Object.values(buttonSeries(false)))), RELEASED_LINES);
+});
+
+test('headlines take N from the label and keep board order within each group: SW2, then BAT1, BAT2 (#26)', () => {
+  const bat1 = offBoardBattery('BAT1');
+  const bat2 = offBoardBattery('BAT2', { voltage: 6 });
+  const sw2  = comp('button', [h(20, 'b'), h(23, 'b')], { label: 'SW2', controls: { pressed: false } });   // SW1 was deleted
+  const r = Sim.analyze([bat1, sw2, bat2], []);
+  assert.deepStrictEqual(plainLines(r).slice(0, 3), [
+    { text: 'Button 2: ⭕ OPEN — click to press', cls: 'sim-info' },
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: 'Battery 2: 6V', cls: 'sim-info' },
+  ], texts(r).join(' | '));
+});
+
+test('the buzzer through its registry part: 17.6 mA, sounding, and its own "🔔 BUZZER ON" line (#26)', () => {
+  const { components, wires } = buzzerSeries();
+  const r = Sim.analyze(components, wires);
+  assert.equal(r.status, 'ok');
+  const BZ1 = part(r, 'BZ1');
+  assert.equal(BZ1.m.sounding, true, JSON.stringify(BZ1.m));
+  assert.ok(Math.abs(BZ1.m.current - 17.578) < 0.01, `9 V / 512 Ω: ${BZ1.m.current}`);
+  assert.ok(Math.abs(mA(r.currents[2]) - 17.578) < 0.01, `currents[] in amps, + lead1 → lead2: ${r.currents[2]}`);
+  assert.deepStrictEqual(plainLines(r), [
+    { text: 'Battery 1: 9V', cls: 'sim-info' },
+    { text: '  🔔 BUZZER ON  (17.6 mA)', cls: 'sim-on' },
+  ]);
+
+  const open = Sim.analyze(...Object.values(buzzerSeries({ open: true })));
+  assert.equal(part(open, 'BZ1').m.sounding, false);
+  assert.ok(!hasLine(open, 'BUZZER ON'), texts(open).join(' | '));
+});
+
+// Circuit A on the top rails: BAT1, R1 470 Ω, a red LED1.
+// Circuit B on the bottom rails, wired to nothing in A: BAT2, R2 1 kΩ, a green LED2.
+// Circuit C: R3 on its own, no source.
+function twoCircuits() {
+  const bat1 = offBoardBattery('BAT1');
+  const bat2 = offBoardBattery('BAT2');
+  const components = [
+    bat1,
+    comp('resistor', [h(4, 'a'),  h(8, 'a')],  { label: 'R1' }),
+    comp('led',      [h(10, 'a'), h(8, 'b')],  { label: 'LED1' }),                      // cathode a11, anode b9
+    bat2,
+    comp('resistor', [h(30, 'f'), h(34, 'f')], { label: 'R2', values: { resistance: 1000 } }),
+    comp('led',      [h(36, 'f'), h(34, 'g')], { label: 'LED2', values: { color: 'green' } }),   // cathode f37, anode g35
+    comp('resistor', [h(50, 'c'), h(54, 'c')], { label: 'R3' }),
+  ];
+  const wires = [
+    batWire(bat1, 0, h(0, 'tp')),  batWire(bat1, 1, h(0, 'tn')),
+    wire(h(1, 'tp'), h(4, 'b')),   wire(h(10, 'b'), h(1, 'tn')),
+    batWire(bat2, 0, h(62, 'bp')), batWire(bat2, 1, h(62, 'bn')),
+    wire(h(29, 'bp'), h(30, 'g')), wire(h(36, 'g'), h(29, 'bn')),
+  ];
+  return { components, wires };
+}
+
+test('two separate circuits, each with its own battery: both simulate, each grounded at its own battery − (#26)', () => {
+  const { components, wires } = twoCircuits();
+  const r = Sim.analyze(components, wires);
+
+  assert.equal(r.status, 'ok', texts(r).join(' | '));
+  assert.ok(Math.abs(part(r, 'LED1').m.current - 14.8904) < 0.01, `LED1 (9 − 2.0) / 470: ${part(r, 'LED1').m.current}`);
+  assert.ok(Math.abs(part(r, 'LED2').m.current - 6.7993) < 0.01, `LED2 (9 − 2.2) / 1000: ${part(r, 'LED2').m.current}`);
+  assert.ok(hasLine(r, 'LED ON  (14.9 mA)') && hasLine(r, 'LED ON  (6.8 mA)'), texts(r).join(' | '));
+
+  // Circuit A: ground at BAT1.1.
+  nearV(vAt(r, h(40, 'tn')), 0, 'circuit A: the − rail, BAT1.1');
+  nearV(vAt(r, h(40, 'tp')), 9, 'circuit A: the + rail');
+  // Circuit B: its own ground at BAT2.1, not floating around ±4.5 V.
+  nearV(vAt(r, h(50, 'bn')), 0, 'circuit B: BAT2.1’s rail is its own ground');
+  nearV(vAt(r, h(50, 'bp')), 9, 'circuit B: BAT2.0’s rail');
+  const anode2 = vAt(r, h(34, 'j'));
+  assert.ok(typeof anode2 === 'number' && Math.abs(anode2 - 2.2007) < 0.001, `circuit B: LED2 anode column ≈ 2.2 V, got ${anode2}`);
+  nearV(part(r, 'BAT2').r.pins['1'], 0, 'parts.BAT2.r.pins["1"]');
+  nearV(part(r, 'BAT2').r.pins['0'], 9, 'parts.BAT2.r.pins["0"]');
+  nearV(part(r, 'LED2').r.pins.cathode, 0, 'parts.LED2 cathode');
+
+  // Circuit C has no source: floating.
+  assert.strictEqual(vAt(r, h(50, 'd')), null, 'circuit C: R3 lead1 column');
+  assert.strictEqual(vAt(r, h(54, 'e')), null, 'circuit C: R3 lead2 column');
+  assert.deepStrictEqual(part(r, 'R3').r.pins, { lead1: null, lead2: null });
+
+  const lines = summary(components, wires);
+  assertLine(lines, /^ {2}- BAT2\.0 \(off-board\): 9\.00 V$/, 'BAT2 + in the summary');
+  assertLine(lines, /^ {2}- BAT2\.1 \(off-board\): 0\.00 V$/, 'BAT2 − in the summary');
+  assertLine(lines, /^ {2}- LED2 pin 1 \(g35, anode\): 2\.20 V$/, 'LED2 anode in the summary');
+  assertLine(lines, /^ {2}- R3 pin 0 \(c51, lead1\): floating/, 'R3 floating in the summary');
+});
+
+// Circuit B stacks two batteries: BAT2 from the bn rail up to column 40, and
+// BAT3 from column 40 up to the bp rail, across R2 1 kΩ: 18 mA. Its ground
+// is the − of whichever of the two is earlier in the component list.
+function stackedCircuit(order) {
+  const bat1 = offBoardBattery('BAT1');
+  const bat2 = offBoardBattery('BAT2');
+  const bat3 = offBoardBattery('BAT3');
+  const parts = {
+    bat1, bat2, bat3,
+    r1: comp('resistor', [h(4, 'a'), h(8, 'a')], { label: 'R1' }),
+    r2: comp('resistor', [h(30, 'f'), h(34, 'f')], { label: 'R2', values: { resistance: 1000 } }),
+  };
+  const wires = [
+    batWire(bat1, 0, h(0, 'tp')),  batWire(bat1, 1, h(0, 'tn')),
+    wire(h(1, 'tp'), h(4, 'b')),   wire(h(8, 'b'), h(1, 'tn')),
+    batWire(bat2, 0, h(39, 'a')),  batWire(bat2, 1, h(62, 'bn')),
+    batWire(bat3, 0, h(62, 'bp')), batWire(bat3, 1, h(39, 'b')),
+    wire(h(29, 'bp'), h(30, 'g')), wire(h(34, 'g'), h(29, 'bn')),
+  ];
+  return { components: order.map(k => parts[k]), wires };
+}
+
+test('each circuit is grounded at the ref pin of its earliest-placed source (#26)', () => {
+  // BAT2 placed before BAT3: ground at BAT2.1, the bn rail.
+  let { components, wires } = stackedCircuit(['bat1', 'r1', 'bat2', 'r2', 'bat3']);
+  let r = Sim.analyze(components, wires);
+  assert.ok(Math.abs(part(r, 'R2').m.current - 18) < 0.01, `18 V across 1 kΩ: ${part(r, 'R2').m.current}`);
+  nearV(vAt(r, h(20, 'tn')), 0,  'circuit A: BAT1.1');
+  nearV(vAt(r, h(50, 'bn')), 0,  'BAT2 first: BAT2.1 (bn) is ground');
+  nearV(vAt(r, h(39, 'c')),  9,  'BAT2 first: column 40');
+  nearV(vAt(r, h(50, 'bp')), 18, 'BAT2 first: bp');
+
+  // BAT3 placed before BAT2: ground moves to BAT3.1, column 40.
+  ({ components, wires } = stackedCircuit(['bat1', 'r1', 'bat3', 'r2', 'bat2']));
+  r = Sim.analyze(components, wires);
+  assert.ok(Math.abs(part(r, 'R2').m.current - 18) < 0.01, `the same 18 mA: ${part(r, 'R2').m.current}`);
+  nearV(vAt(r, h(20, 'tn')), 0,  'circuit A: BAT1.1');
+  nearV(vAt(r, h(39, 'c')),  0,  'BAT3 first: BAT3.1 (column 40) is ground');
+  nearV(vAt(r, h(50, 'bn')), -9, 'BAT3 first: bn');
+  nearV(vAt(r, h(50, 'bp')), 9,  'BAT3 first: bp');
+
+  // The summary names the earliest source's ref pin as the reference.
+  ({ components, wires } = stackedCircuit(['bat2', 'r2', 'bat3', 'bat1', 'r1']));
+  assertLine(summary(components, wires), /^Status: solved\. Voltages are measured from BAT2\.1\b/, 'status line');
+});
+
+test("no source on the board: status 'no-source', the one line \"No battery in circuit.\", no readings (#26)", () => {
+  const r = Sim.analyze([
+    comp('resistor', [h(4, 'a'),  h(8, 'a')],  { label: 'R1' }),
+    comp('button',   [h(8, 'b'),  h(11, 'b')], { label: 'SW1', controls: { pressed: true } }),
+    comp('buzzer',   [h(11, 'c'), h(13, 'c')], { label: 'BZ1' }),
+  ], []);
+  assert.equal(r.status, 'no-source');
+  assert.deepStrictEqual(plainLines(r), [{ text: 'No battery in circuit.', cls: 'sim-warn' }]);
+  assert.deepStrictEqual(r.parts, {});
+  assert.strictEqual(vAt(r, h(4, 'b')), null);
+  assert.deepStrictEqual(summary([comp('buzzer', [h(11, 'c'), h(13, 'c')], { label: 'BZ1' })], []), ['No battery on the board.']);
+});
+
+test('summary: every part line is `- <label>: <report>` and every named pin gets its role; the pressed button reports 14.9 mA (#26)', () => {
+  const { components, wires } = buttonSeries(true);
+  const lines = summary(components, wires);
+  assert.match(lines[0], /^Status: solved\. Voltages are measured from BAT1\.1\b/, show(lines));
+  assert.deepStrictEqual(lines.slice(1), [
+    '- BAT1: 9.00 V battery, supplying 14.9 mA',
+    '  - BAT1.0 (off-board): 9.00 V',
+    '  - BAT1.1 (off-board): 0.00 V',
+    '- R1: 470 ohm resistor, 14.9 mA',
+    '  - R1 pin 0 (a7, lead1): 9.00 V',
+    '  - R1 pin 1 (a11, lead2): 2.00 V',
+    '- LED1: LED ON (lit), 14.9 mA',
+    '  - LED1 pin 0 (a16, cathode): 0.00 V',
+    '  - LED1 pin 1 (a11, anode): 2.00 V',
+    '- SW1: button pressed (closed), 14.9 mA',
+    '  - SW1 pin 0 (b4, lead1): 9.00 V',
+    '  - SW1 pin 1 (b7, lead2): 9.00 V',
+  ], show(lines));
+});
+
+test('summary: the buzzer reads "buzzer ON (sounding), 17.6 mA", its pins lead1 / lead2; a battery on the board gets no role (#26)', () => {
+  const { components, wires } = buzzerSeries();
+  const lines = summary(components, wires);
+  assert.deepStrictEqual(lines.slice(1), [
+    '- BAT1: 9.00 V battery, supplying 17.6 mA',
+    '  - BAT1.0 (off-board): 9.00 V',
+    '  - BAT1.1 (off-board): 0.00 V',
+    '- R1: 470 ohm resistor, 17.6 mA',
+    '  - R1 pin 0 (a5, lead1): 9.00 V',
+    '  - R1 pin 1 (a9, lead2): 0.74 V',
+    '- BZ1: buzzer ON (sounding), 17.6 mA',
+    '  - BZ1 pin 0 (b9, lead1): 0.74 V',
+    '  - BZ1 pin 1 (b11, lead2): 0.00 V',
+  ], show(lines));
+
+  const silent = summary(...Object.values(buzzerSeries({ open: true })));
+  assertLine(silent, /^- BZ1: buzzer OFF \(silent\), 0\.0 mA$/, 'a silent buzzer');
+
+  // A battery sitting on the rails (the fixture's battery()): pins '0' / '1', no role.
+  const board = seriesLedCircuit();
+  board.components[0].label = 'BAT1';
+  board.components[1].label = 'R1';
+  const onBoard = summary(board.components, board.wires);
+  assertLine(onBoard, /^ {2}- BAT1 pin 0 \(tp_2\): 9\.00 V$/, 'battery + on the rail, no role');
+  assertLine(onBoard, /^ {2}- BAT1 pin 1 \(tn_2\): 0\.00 V$/, 'battery − on the rail, no role');
+  assertLine(onBoard, /^ {2}- R1 pin 0 \(a6, lead1\): 9\.00 V$/, 'resistor pin role');
 });

@@ -13,29 +13,36 @@
 //    bb_rail_bn    →  all holes in the bottom + rail row (positive)
 //    bb_rail_bp    →  all holes in the bottom − rail row (negative)
 //
-//  Wires (drawn by the user) and pressed buttons additionally merge nodes.
+//  Wires (drawn by the user) additionally merge nodes. Every part is a
+//  registry part (parts/*.js) and simulates from its elements().
 //
 //  SOLVING
 //  ───────
 //  Modified nodal analysis: the whole circuit is solved at once for every
-//  node voltage and every battery current, so parallel branches share
-//  current correctly and batteries in series add up.
+//  node voltage and every V element's current, so parallel branches share
+//  current correctly and sources in series add up.
+//
+//  GROUND
+//  ──────
+//  Each connected circuit (nodes joined by wires and conducting elements)
+//  is grounded at the ref pin of its earliest-placed source (a part with
+//  `ref`, lowest index). A circuit with no source reads null.
 //
 //  POLARITY
 //  ────────
-//  LEDs are diodes — current may only flow from anode (+) to cathode (−).
-//  Each LED is off (open) or on (Vf plus a small resistance); the solver
-//  finds the on/off pattern that is consistent with the voltages.
-//  Battery: pin 0 = positive (+) output, pin 1 = negative (−) return.
+//  A D element (an LED's, parts/led.js) is a diode: a mode block that is
+//  off (open), on (Vf plus a small resistance) or, with vz, in breakdown.
+//  One generic loop (settleModes) finds the modes that are consistent
+//  with the voltages. A V element's pins are [plus, minus].
 //
 //  EXPORTS
 //  ───────
 //  Browser: window.App.runSimulation() / App.stopSimulation(), unchanged.
-//  Node:    module.exports = the pure solver (PROPS, UnionFind, bbNodeId,
-//           buildGraph, solveLinear, analyze, simulationSummary) so a test
-//           runner can call it.
+//  Node:    module.exports = the pure solver (UnionFind, bbNodeId,
+//           buildGraph, solveLinear, settleModes, analyze,
+//           simulationSummary) so a test runner can call it.
 //  Everything above the "Presentation" divider is pure: no document,
-//  no THREE, no AudioContext.
+//  no THREE, no audio.
 // ─────────────────────────────────────────────────────────────
 
 (function (root, factory) {
@@ -47,32 +54,27 @@
   // Browser App namespace, set by install(). Stays null under node.
   let App = null;
 
-  // ── Electrical properties ───────────────────────────────────
-  const PROPS = {
-    battery:  { voltage: 9.0 },
-    resistor: { resistance: 470 },    // about 15 mA on 9 V through an LED
-    led:      { forwardVoltage: 2.0, thresholdCurrent: 0.001, maxCurrent: 0.020 },
-    buzzer:   { resistance: 42,      thresholdCurrent: 0.001 },
-  };
-
   // ── Registry parts ──────────────────────────────────────────
   //  Parts defined in parts/*.js simulate from their elements(). Under Node
-  //  this module loads the registry itself; the page loads it before this file.
+  //  this module loads the registry itself; the page loads it before this
+  //  file. Definitions are looked up at call time, never cached.
   const Parts = typeof module === 'object' && module.exports ? require('./parts') : null;
   function partDef(type) {
     const P = Parts || (typeof window !== 'undefined' ? window.Parts : null);
     return P ? P.get(type) : null;
   }
 
-  // A registry part's values: its defaults (a choice's overrides beside the
-  // choice's name), then the record's own.
+  // A registry part's values: its defaults, then the record's own, then the
+  // overrides of each choice the result names (so a record saved with only
+  // { color: 'blue' } gets blue's vf).
   function partValues(def, comp) {
     const out = {};
+    for (const [key, spec] of Object.entries(def.values || {})) out[key] = spec.default;
+    Object.assign(out, comp.values || {});
     for (const [key, spec] of Object.entries(def.values || {})) {
-      out[key] = spec.default;
-      if (spec.choices && spec.choices[spec.default]) Object.assign(out, spec.choices[spec.default]);
+      if (spec.choices && spec.choices[out[key]]) Object.assign(out, spec.choices[out[key]]);
     }
-    return Object.assign(out, comp.values || {});
+    return out;
   }
 
   function partControls(def, comp) {
@@ -80,35 +82,6 @@
     for (const [key, c] of Object.entries(def.controls || {})) out[key] = c.default;
     return Object.assign(out, comp.controls || {});
   }
-
-  // A placed component carries its own values. PROPS is the default for parts
-  // built before instance values existed, and is what keeps this module
-  // loadable without a browser.
-  function propsOf(comp) {
-    const def = partDef(comp.type);
-    if (def) return partValues(def, comp);
-    return comp.values || PROPS[comp.type] || {};
-  }
-
-  const STOCK_R = [100, 150, 220, 330, 470, 680, 1000, 1500, 2200, 3300, 4700, 10000];
-
-  function stockResistor(minOhms) {
-    return STOCK_R.find(r => r >= minOhms) || Math.ceil(minOhms / 1000) * 1000;
-  }
-
-  function overCurrentLine(comp, I, advice) {
-    const max = propsOf(comp).maxCurrent;
-    if (!max || I <= max) return null;
-    return {
-      text: "  " + comp.type.toUpperCase() + " is over its " + (max * 1000).toFixed(0) +
-            " mA rating at " + (I * 1000).toFixed(1) + " mA. Needs at least " + advice.minR +
-            " ohm in series, so use " + advice.stock + " ohm.",
-      cls: "sim-err",
-    };
-  }
-
-  // app.js places LEDs pin 0 = cathode, pin 1 = anode.
-  const LED_ANODE_PIN = 1;
 
   // ── Union-Find ──────────────────────────────────────────────
   class UnionFind {
@@ -159,7 +132,7 @@
     });
 
     // 2. Wires merge nodes — wires store startHole/endHole for breadboard
-    //    holes and startComp/startPinIdx for off-board pins (e.g. battery).
+    //    holes and startComp/startPinIdx for off-board pins (a source's).
     wires.forEach(wire => {
       const { startHole, endHole, startComp, startPinIdx, endComp, endPinIdx } = wire;
 
@@ -180,14 +153,7 @@
       if (na && nb) uf.union(na, nb);
     });
 
-    // 3. Buttons that are pressed act as closed switches — merge their two pins
-    components.forEach((comp, ci) => {
-      if (comp.type === 'button' && comp.pressed) {
-        uf.union(pinNode[ci][0], pinNode[ci][1]);
-      }
-    });
-
-    // 4. Resolve each pin to its root
+    // 3. Resolve each pin to its root
     const graph = components.map((comp, ci) => {
       // nodes[pi] = root node of pin pi
       const g = { comp, nodes: comp.pins.map((_, pi) => uf.find(pinNode[ci][pi])) };
@@ -210,15 +176,16 @@
   // ── Nodal analysis ──────────────────────────────────────────
   //
   //  Modified nodal analysis: one unknown per node voltage plus one per
-  //  battery current. An LED is piecewise linear: open when off, Vf in
-  //  series with R_ON when on. The on/off pattern is found by flipping the
-  //  single most inconsistent LED until none is, so the same circuit always
-  //  gives the same answer.
-  const R_ON       = 0.1;    // ohm, LED on-state series resistance
-  const GMIN       = 1e-12;   // S from every node to the reference, keeps floating parts solvable
-  const SHORT_AMPS = 1.0;    // battery current treated as a short circuit
+  //  V element's current. A mode block (a D element) is piecewise linear:
+  //  open when off, Vf in series with ron when on. The modes are found by
+  //  settleModes, flipping the single most inconsistent block until none
+  //  is, so the same circuit always gives the same answer.
+  const GMIN       = 1e-12;   // S from every node to ground, keeps floating parts solvable
+  const SW_OHMS    = 1e-3;    // a closed SW: 1 mΩ, never an ideal short
+  const SHORT_AMPS = 1.0;    // source current treated as a short circuit
   const OPEN_AMPS  = 1e-6;   // below this nothing is flowing
   const PIVOT_EPS  = 1e-15;
+  const MODE_EPS   = 1e-9;   // volts past a switching point that count as inconsistent
 
   // Gaussian elimination with partial pivoting. null when singular.
   function solveLinear(A, b) {
@@ -244,20 +211,30 @@
     return x;
   }
 
-  // One linear solve for a fixed set of LEDs that are on.
-  // Returns { v(node), batteryCurrent: Map(comp -> amps) } or null.
-  function solveMNA(graph, bats, ledOn) {
-    const ref   = bats[0].nodes[1];
+  // Every element of every registry part, in board order.
+  function allElements(graph) {
+    const out = [];
+    graph.forEach(g => { if (g.part) g.part.els.forEach(e => out.push(e)); });
+    return out;
+  }
+
+  // One linear solve with every mode block in a fixed mode.
+  // grounds: Set of nodes held at 0 V, one per connected circuit.
+  // modeOf:  Map(element entry -> 'off' | 'on' | 'breakdown').
+  // Returns { v(node), vCurrent: Map(V element entry -> amps) } or null.
+  function solveMNA(graph, grounds, modeOf) {
     const index = new Map();
-    const add = n => { if (n != null && n !== ref && !index.has(n)) index.set(n, index.size); };
+    const add = n => { if (n != null && !grounds.has(n) && !index.has(n)) index.set(n, index.size); };
     graph.forEach(g => {
       g.nodes.forEach(add);
       if (g.part) g.part.els.forEach(e => e.nodes.forEach(add));
     });
-    const N = index.size, size = N + bats.length;
+    const els = allElements(graph);
+    const vs  = els.filter(e => e.el.kind === 'V');
+    const N = index.size, size = N + vs.length;
     const A = Array.from({ length: size }, () => new Array(size).fill(0));
     const b = new Array(size).fill(0);
-    const at = n => (n === ref ? -1 : index.get(n));
+    const at = n => (grounds.has(n) ? -1 : index.get(n));
 
     function conductance(n1, n2, g) {
       const i = at(n1), j = at(n2);
@@ -269,280 +246,343 @@
 
     for (let i = 0; i < N; i++) A[i][i] += GMIN;
 
-    graph.forEach(g => {
-      const { comp, nodes } = g;
-      const p = propsOf(comp);
-      if (g.part) {
-        // Only R is stamped so far; the other element kinds arrive with the
-        // parts that first need them.
-        g.part.els.forEach(({ el, nodes: [a, b] }) => {
-          if (el.kind === 'R' && el.ohms > 0) conductance(a, b, 1 / el.ohms);
-        });
-      } else if (comp.type === 'buzzer') {
-        if (p.resistance > 0) conductance(nodes[0], nodes[1], 1 / p.resistance);
-      } else if (comp.type === 'led' && ledOn.get(comp)) {
-        const anode = nodes[LED_ANODE_PIN], cathode = nodes[1 - LED_ANODE_PIN];
-        const vf = p.forwardVoltage || 0;
-        conductance(anode, cathode, 1 / R_ON);
-        inject(anode, vf / R_ON);
-        inject(cathode, -vf / R_ON);
-      }
+    els.forEach(e => {
+      const { el, nodes: [n1, n2] } = e;
+      if (el.kind === 'R' && el.ohms > 0) conductance(n1, n2, 1 / el.ohms);
+      if (el.kind === 'SW' && el.closed) conductance(n1, n2, 1 / SW_OHMS);
+      if (el.kind !== 'D') return;
+      // I(anode → cathode) = (Va − Vc ∓ V) / ron: Vf when on, −Vz in breakdown.
+      const mode = modeOf.get(e), G = 1 / el.ron;
+      const drop = mode === 'on' ? el.vf : mode === 'breakdown' ? -el.vz : null;
+      if (drop == null) return;
+      conductance(n1, n2, G);
+      inject(n1, drop * G);
+      inject(n2, -drop * G);
     });
 
-    bats.forEach((bat, k) => {
-      const row = N + k, pos = at(bat.nodes[0]), neg = at(bat.nodes[1]);
+    // V: one more unknown, its current, + from its plus pin to its minus
+    // pin inside the source (so a source that supplies reads negative).
+    vs.forEach((e, k) => {
+      const row = N + k, pos = at(e.nodes[0]), neg = at(e.nodes[1]);
       if (pos >= 0) { A[pos][row] += 1; A[row][pos] += 1; }
       if (neg >= 0) { A[neg][row] -= 1; A[row][neg] -= 1; }
-      b[row] = propsOf(bat.comp).voltage || 0;
+      b[row] = e.el.volts || 0;
     });
 
     const x = solveLinear(A, b);
     if (!x) return null;
-    const batteryCurrent = new Map(bats.map((bat, k) => [bat.comp, x[N + k]]));
-    return { v: n => (n === ref ? 0 : x[index.get(n)]), batteryCurrent };
+    const vCurrent = new Map(vs.map((e, k) => [e, x[N + k]]));
+    return { v: n => (grounds.has(n) ? 0 : x[index.get(n)]), vCurrent };
   }
 
   // Amps through one of a registry part's elements, + in its pin order.
-  function elementAmps({ el, nodes: [a, b] }, sol) {
+  function elementAmps(e, sol, mode) {
+    const { el, nodes: [a, b] } = e;
     if (el.kind === 'R' && el.ohms > 0) return (sol.v(a) - sol.v(b)) / el.ohms;
+    if (el.kind === 'SW') return el.closed ? (sol.v(a) - sol.v(b)) / SW_OHMS : 0;
+    if (el.kind === 'V') return sol.vCurrent.get(e) || 0;
+    if (el.kind === 'D') {
+      const vd = sol.v(a) - sol.v(b);
+      if (mode === 'on')        return (vd - el.vf) / el.ron;
+      if (mode === 'breakdown') return (vd + el.vz) / el.ron;
+    }
     return 0;
   }
 
-  // parts[label] = { r: PartResult, m: measured, warnings } for every
-  // labelled registry part. PartResult currents are mA; floating pins null.
-  function partResults(graph, sol, live) {
-    const parts = {};
-    graph.forEach(({ comp, nodes, part }) => {
-      if (!part || comp.label == null) return;
-      const { def, values, controls, els } = part;
-      const r = { label: comp.label, values, controls, pins: {}, current: {}, modes: {} };
-      def.pins.forEach((pin, k) => { r.pins[pin] = live.has(nodes[k]) ? sol.v(nodes[k]) : null; });
-      els.forEach((e, k) => { r.current[e.el.id !== undefined ? e.el.id : k] = elementAmps(e, sol) * 1000; });
-      const m = def.measure ? def.measure(r) : {};
-      parts[comp.label] = { r, m, warnings: def.warnings ? def.warnings(r, m) : [] };
-    });
-    return parts;
+  // Is a D element consistent in this mode? null if so, else how many
+  // volts past its switching point it is and the mode to flip to.
+  function checkDiode({ el, nodes: [a, c] }, sol, mode) {
+    const vd = sol.v(a) - sol.v(c);
+    let by, to;
+    if (mode === 'on')             { by = el.vf - vd; to = 'off'; }
+    else if (mode === 'breakdown') { by = vd + el.vz; to = 'off'; }
+    else {
+      by = vd - el.vf; to = 'on';
+      if (el.vz !== undefined && -vd - el.vz > by) { by = -vd - el.vz; to = 'breakdown'; }
+    }
+    return by > MODE_EPS ? { by, to } : null;
   }
 
-  function forwardCurrent(led, sol, on) {
-    if (!on) return 0;
-    const vf = propsOf(led.comp).forwardVoltage || 0;
-    return (sol.v(led.nodes[LED_ANODE_PIN]) - sol.v(led.nodes[1 - LED_ANODE_PIN]) - vf) / R_ON;
-  }
-
-  // Find the consistent on/off pattern. Returns { sol, ledOn, settled } or null.
-  function solveCircuit(graph, bats) {
-    const leds   = graph.filter(g => g.comp.type === 'led');
-    const ledOn  = new Map(leds.map(l => [l.comp, false]));
-    const rounds = 4 * leds.length + 10;
-    for (let round = 0; round < rounds; round++) {
-      const sol = solveMNA(graph, bats, ledOn);
+  // ── Pure: settleModes, the one loop for every mode block ────
+  //
+  //  blocks[i] = { initial, check(sol, mode) → null | { by > 0, to } }
+  //  solveFor(modes) → sol, or null when the circuit can't be solved.
+  //  Each round: solve; if every block is consistent, stop; else flip the
+  //  block with the largest `by`. If a set of modes comes round again, flip
+  //  the lowest-index inconsistent block instead, which breaks the cycle.
+  //  After 4·n + 10 rounds give up: settled false. `sol` is always the solve
+  //  for the returned modes. Returns { modes, sol, settled } or null.
+  function settleModes(blocks, solveFor) {
+    const modes = blocks.map(b => b.initial);
+    const seen  = new Set();
+    const cap   = 4 * blocks.length + 10;
+    for (let round = 0; round < cap; round++) {
+      const sol = solveFor(modes.slice());
       if (!sol) return null;
-      let worst = null, worstBy = 1e-9;
-      leds.forEach(l => {
-        const vf = propsOf(l.comp).forwardVoltage || 0;
-        const vd = sol.v(l.nodes[LED_ANODE_PIN]) - sol.v(l.nodes[1 - LED_ANODE_PIN]);
-        const by = ledOn.get(l.comp) ? vf - vd : vd - vf;   // volts past the switching point
-        if (by > worstBy) { worst = l; worstBy = by; }
-      });
-      if (!worst) return { sol, ledOn, settled: true };
-      ledOn.set(worst.comp, !ledOn.get(worst.comp));
+      const bad = blocks.map((b, i) => b.check(sol, modes[i]));
+      const first = bad.findIndex(Boolean);
+      if (first < 0) return { modes, sol, settled: true };
+      let worst = first;
+      bad.forEach((x, i) => { if (x && x.by > bad[worst].by) worst = i; });
+      const key = modes.join('|');
+      const pick = seen.has(key) ? first : worst;
+      seen.add(key);
+      modes[pick] = bad[pick].to;
     }
-    const sol = solveMNA(graph, bats, ledOn);
-    return sol ? { sol, ledOn, settled: false } : null;
+    const sol = solveFor(modes.slice());
+    return sol ? { modes, sol, settled: false } : null;
   }
 
-  // Open-circuit voltage across an LED with every LED switched off: what it
-  // would see on its own. Leaving the others on would let a parallel LED
-  // pin the shared node near Vf, and the advice would shrink toward 0 ohm.
-  function openVoltage(graph, bats, ledOn, led) {
-    const off = new Map([...ledOn.keys()].map(c => [c, false]));
-    const sol = solveMNA(graph, bats, off);
-    return sol ? sol.v(led.nodes[LED_ANODE_PIN]) - sol.v(led.nodes[1 - LED_ANODE_PIN]) : 0;
+  // A registry part's current for currents[]: its first element's, + from
+  // part pin 0 to pin 1 (so an element wired the other way round flips).
+  function partAmps({ part }, sol, modeOf) {
+    const e = part.els[0];
+    if (!e) return 0;
+    const amps = elementAmps(e, sol, modeOf.get(e));
+    const [p, q] = e.el.pins || [];
+    return p === part.def.pins[1] && q === part.def.pins[0] ? -amps : amps;
   }
 
-  // The series resistance that would hold an LED at its rated current.
-  function resistorAdvice(led, voc) {
-    const p = propsOf(led.comp);
-    const minR = Math.ceil((voc - (p.forwardVoltage || 0)) / p.maxCurrent);
-    return { minR, stock: stockResistor(minR) };
-  }
+  // ── Sources and ground ──────────────────────────────────────
+  //  A source is a registry part with a ref pin. Each connected circuit
+  //  (nodes joined by wires and by elements that conduct; an open SW is
+  //  removed) is grounded at the ref pin of its earliest-placed source.
+  //  Every circuit with a source is live: its nodes are readings, a lone
+  //  battery included. Only a circuit with no ref pin reads null.
+  const isSource = g => !!(g.part && g.part.def.ref !== undefined);
+  const refNode  = g => g.nodes[g.part.def.pins.indexOf(g.part.def.ref)];
+  const conducts = el => !(el.kind === 'SW' && !el.closed);
 
-  // Nodes reachable from the first battery through parts. Wires and pressed
-  // buttons are already merged into one root; a released button is open.
-  // Anything else only reads a GMIN leak, so it is floating, not 0 V.
-  function liveNodes(graph, bats) {
-    const live = new Set(bats[0].nodes);
-    for (let grew = true; grew;) {
-      grew = false;
-      graph.forEach(({ comp, nodes }) => {
-        if (comp.type === 'button' && !comp.pressed) return;
-        if (!nodes.some(n => live.has(n))) return;
-        nodes.forEach(n => { if (!live.has(n)) { live.add(n); grew = true; } });
+  function groundCircuits(graph) {
+    const uf = new UnionFind();
+    graph.forEach(g => {
+      g.nodes.forEach(n => uf.make(n));
+      // A part the registry doesn't know joins all its pins, as before.
+      if (!g.part) { g.nodes.forEach(n => uf.union(g.nodes[0], n)); return; }
+      g.part.els.forEach(e => {
+        e.nodes.forEach(n => uf.make(n));
+        if (conducts(e.el)) e.nodes.forEach(n => uf.union(e.nodes[0], n));
       });
+    });
+
+    const grounds = new Set(), live = new Set();
+    const firstOf = new Map();   // circuit root → its earliest source
+    graph.forEach(g => {
+      if (!isSource(g)) return;
+      const root = uf.find(refNode(g));
+      if (firstOf.has(root)) return;
+      firstOf.set(root, g);
+      grounds.add(refNode(g));
+    });
+
+    const mark = n => { if (firstOf.has(uf.find(n))) live.add(n); };
+    graph.forEach(g => {
+      g.nodes.forEach(mark);
+      if (g.part) g.part.els.forEach(e => e.nodes.forEach(mark));
+    });
+    return { grounds, live };
+  }
+
+  // { r: PartResult, m: measured, warnings } per graph entry, null for a
+  // part not in the registry. PartResult currents are mA; floating pins
+  // null; open = volts across each mode block with every mode block off.
+  function partResults(graph, sol, live, modeOf, openSol) {
+    return graph.map((g, i) => {
+      if (!g.part) return null;
+      const { nodes, part: { def, els } } = g;
+      const r = bareResult(graph, i);
+      def.pins.forEach((pin, k) => { r.pins[pin] = live.has(nodes[k]) ? sol.v(nodes[k]) : null; });
+      els.forEach((e, k) => {
+        const id = e.el.id !== undefined ? e.el.id : k;
+        const mode = modeOf.get(e);
+        r.current[id] = elementAmps(e, sol, mode) * 1000;
+        if (mode === undefined) return;
+        r.modes[id] = mode;
+        r.open[id] = openSol ? openSol.v(e.nodes[0]) - openSol.v(e.nodes[1]) : 0;
+      });
+      const m = def.measure ? def.measure(r) : {};
+      return { r, m, warnings: def.warnings ? def.warnings(r, m) : [] };
+    });
+  }
+
+  // A PartResult with no readings: label, values and controls. A part
+  // saved before labels gets the one ids.js would give it (prefix + count).
+  function bareResult(graph, i) {
+    const { comp, part: { def, values, controls } } = graph[i];
+    let label = comp.label;
+    if (label == null) {
+      const n = graph.slice(0, i + 1).filter(g => g.comp.type === comp.type).length;
+      label = def.prefix + n;
     }
-    return live;
+    const pins = {};
+    def.pins.forEach(pin => { pins[pin] = null; });
+    return { label, values, controls, pins, current: {}, modes: {}, open: {} };
   }
 
   // ── Pure: analyze ────────────────────────────────────────────
   //
   //  components + wires in, numbers and report lines out. Returns:
-  //    status        'empty' | 'no-battery' | 'ok' | 'unsolvable'
-  //    lines         [{ text, cls }] for the results panel
-  //    ledsOn        components the caller should light
-  //    buzzersOn     components the caller should sound
-  //    nodeVoltages  { [node id]: volts }, relative to the first battery's −
+  //    status        'empty' | 'no-source' | 'ok' | 'unsolvable' | 'unsettled'
+  //                  ('unsettled': the mode blocks never settled; only the
+  //                  headlines and one warning, no readings)
+  //    lines         [{ text, cls }] for the results panel: each part's
+  //                  headline(r, m) first (board order, sources last), then
+  //                  its line(r, m) or the generic ON line, its warnings,
+  //                  and the circuit's own messages
+  //    nodeVoltages  { [node id]: volts }, each relative to its circuit's ground
   //    currents      amps per component index, + from pin 0 to pin 1 inside
-  //                  the part (so a lit LED is negative); null for a pressed
-  //                  button, whose pins are one node
-  //    shorted       true when a battery is shorted
+  //                  the part (so a lit LED is negative); always a number
+  //    shorted       true when a source is shorted
   //    voltageAt     ({ col, row }) -> volts at any breadboard hole, same
-  //                  reference as nodeVoltages; null when the hole's node is
-  //                  not connected to the first battery through wires or
-  //                  parts, or nothing was solved
+  //                  reference as nodeVoltages; null when the hole's circuit
+  //                  has no source, or nothing was solved
   //    parts         { [label]: { r, m, warnings } } for labelled registry
-  //                  parts (docs/API-CONTRACT.md → PartResult); {} when
-  //                  nothing was solved
+  //                  parts (docs/API-CONTRACT.md → PartResult, with r.open);
+  //                  {} when nothing was solved. The page reads parts[label].m.
   //
   //  A part loaded from an old file that breaks a placement rule carries
   //  comp.flag ("R1: <reason>", board-io.js flagPlacements). Each flag adds
   //  one warning line, and goes into that part's warnings.
   function analyze(components, wires) {
-    const r = analyzeCircuit(components, wires);
-    for (const c of components) {
-      if (!c || !c.flag) continue;
-      r.lines.push({ text: '  ⚠ ' + c.flag, cls: 'sim-warn' });
-      if (r.parts && r.parts[c.label]) r.parts[c.label].warnings.push(c.flag);
-    }
-    return r;
+    return run(components, wires).r;
   }
 
+  // analyze(), plus what simulationSummary reads: the graph, each part's
+  // result by index, and the live nodes.
+  function run(components, wires) {
+    const out = analyzeCircuit(components, wires);
+    for (const c of components) {
+      if (!c || !c.flag) continue;
+      out.r.lines.push({ text: '  ⚠ ' + c.flag, cls: 'sim-warn' });
+      if (out.r.parts && out.r.parts[c.label]) out.r.parts[c.label].warnings.push(c.flag);
+    }
+    return out;
+  }
+
+  // Headline lines, marked so the summary can leave them out.
+  const HEADLINES = new WeakSet();
+
   function analyzeCircuit(components, wires) {
-    const blank = { lines: [], ledsOn: [], buzzersOn: [], nodeVoltages: {}, currents: [], shorted: false,
-                    voltageAt: () => null, parts: {} };
+    const blank = { lines: [], nodeVoltages: {}, currents: [], shorted: false, voltageAt: () => null, parts: {} };
+    const done  = (r, extra) => Object.assign({ r: Object.assign({}, blank, r) }, extra || {});
 
     if (!components.length) {
-      return Object.assign({}, blank, {
-        status: 'empty',
-        lines: [{ text: 'No components placed.', cls: 'sim-warn' }],
-      });
+      return done({ status: 'empty', lines: [{ text: 'No components placed.', cls: 'sim-warn' }] });
     }
 
-    const graph = buildGraph(components, wires);
-    const bats  = graph.filter(g => g.comp.type === 'battery');
-    const lines = [];
+    const graph   = buildGraph(components, wires);
+    const sources = graph.filter(isSource);
+    if (!sources.length) {
+      return done({ status: 'no-source', lines: [{ text: 'No battery in circuit.', cls: 'sim-warn' }] });
+    }
 
-    components.filter(c => c.type === 'button').forEach((btn, i) => {
-      const state = btn.pressed ? '🟢 CLOSED (current flowing)' : '⭕ OPEN — click to press';
-      lines.push({ text: `Button ${i + 1}: ${state}`, cls: btn.pressed ? 'sim-on' : 'sim-info' });
+    // One line per headline part, from its result once there is one.
+    const heads = graph.map((g, i) => i).filter(i => graph[i].part && graph[i].part.def.headline);
+    const order = heads.filter(i => !isSource(graph[i])).concat(heads.filter(i => isSource(graph[i])));
+    const headlines = results => order.map(i => {
+      const res = results && results[i];
+      const h = graph[i].part.def.headline(res ? res.r : bareResult(graph, i), res ? res.m : {});
+      const line = { text: h.text, cls: h.cls };
+      HEADLINES.add(line);
+      return line;
     });
+    const lines = [];
+    const withHeads = results => headlines(results).concat(lines);
 
-    if (!bats.length) {
-      return Object.assign({}, blank, {
-        status: 'no-battery',
-        lines: [{ text: 'No battery in circuit.', cls: 'sim-warn' }],
-      });
-    }
-
-    bats.forEach((bat, bi) => lines.push({ text: `Battery ${bi + 1}: ${propsOf(bat.comp).voltage}V`, cls: 'sim-info' }));
-
-    // A wire straight across a battery merges its terminals into one node.
-    if (bats.some(bat => bat.nodes[0] === bat.nodes[1])) {
+    // A wire straight across a source merges its terminals into one node.
+    const els = allElements(graph);
+    if (els.some(e => e.el.kind === 'V' && e.nodes[0] === e.nodes[1])) {
       lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
-      return Object.assign({}, blank, { status: 'ok', lines, shorted: true });
+      return done({ status: 'ok', lines: withHeads(null), shorted: true });
     }
 
-    const solved = solveCircuit(graph, bats);
+    // Every mode block (D element) in board order, and the loop that settles them.
+    const { grounds, live } = groundCircuits(graph);
+    const blockEls = els.filter(e => e.el.kind === 'D');
+    const blocks   = blockEls.map(e => ({ initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
+    const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]));
+    const solveFor = modes => solveMNA(graph, grounds, modesOf(modes));
+
+    const solved = settleModes(blocks, solveFor);
     if (!solved) {
       lines.push({ text: '  ⚠ This circuit cannot be solved. Two batteries may be wired straight into each other.', cls: 'sim-err' });
-      return Object.assign({}, blank, { status: 'unsolvable', lines });
+      return done({ status: 'unsolvable', lines: withHeads(null) });
     }
-    const { sol, ledOn, settled } = solved;
-    if (!settled) lines.push({ text: '  Some LEDs could not settle on or off, so this result is approximate.', cls: 'sim-warn' });
+    if (!solved.settled) {
+      lines.push({ text: '  ⚠ This circuit could not settle: some parts keep switching on and off, so there are no readings.', cls: 'sim-warn' });
+      return done({ status: 'unsettled', lines: withHeads(null) });
+    }
+    const { sol } = solved;
+    const modeOf  = modesOf(solved.modes);
+    // What each mode block would see on its own: every block off. Leaving
+    // the others on would let a parallel LED pin the shared node near Vf.
+    const openSol = blockEls.length ? solveFor(blockEls.map(() => 'off')) : sol;
 
     const nodeVoltages = {};
     graph.forEach(g => g.nodes.forEach(n => { nodeVoltages[n] = sol.v(n); }));
-    const live = liveNodes(graph, bats);
     const voltageAt = hole => {
       const n = graph.nodeOf(hole);
       return live.has(n) ? nodeVoltages[n] : null;
     };
 
-    const currents = graph.map(g => {
-      const { comp, nodes } = g;
-      if (g.part) return g.part.els.length ? elementAmps(g.part.els[0], sol) : 0;
-      if (comp.type === 'battery') return sol.batteryCurrent.get(comp);
-      if (comp.type === 'button')  return comp.pressed ? null : 0;
-      if (comp.type === 'led')     return -forwardCurrent(g, sol, ledOn.get(comp));
-      const R = propsOf(comp).resistance;
-      return R > 0 ? (sol.v(nodes[0]) - sol.v(nodes[1])) / R : 0;
-    });
+    const currents = graph.map(g => (g.part ? partAmps(g, sol, modeOf) : 0));
 
-    const shortBat = bats.find(bat => Math.abs(sol.batteryCurrent.get(bat.comp)) > SHORT_AMPS);
-    if (shortBat) {
-      const led = graph.find((g, i) => g.comp.type === 'led' && -currents[i] > SHORT_AMPS);
-      if (led) {
-        const advice = resistorAdvice(led, openVoltage(graph, bats, ledOn, led));
-        lines.push({ text: '  Short circuit. The LED sits straight across the battery with no current-limiting resistor.', cls: 'sim-err' });
-        lines.push({ text: `  Put a resistor in series: at least ${advice.minR} ohm, so use a ${advice.stock} ohm.`, cls: 'sim-info' });
-      } else {
-        lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
-      }
-      return Object.assign({}, blank, { status: 'ok', lines, nodeVoltages, currents, shorted: true, voltageAt });
+    const results = partResults(graph, sol, live, modeOf, openSol);
+    const parts = {};
+    graph.forEach((g, i) => { if (results[i] && g.comp.label != null) parts[g.comp.label] = results[i]; });
+    const extra = { graph, results, live };
+
+    // A source shorted through a part's mode block: that part's warnings
+    // say why, the first as the error and the rest as advice.
+    const sourceAmps = els.filter(e => e.el.kind === 'V').map(e => Math.abs(sol.vCurrent.get(e)));
+    if (sourceAmps.some(a => a > SHORT_AMPS)) {
+      const k = graph.findIndex(g => g.part &&
+        g.part.els.some(e => modeOf.has(e) && Math.abs(elementAmps(e, sol, modeOf.get(e))) > SHORT_AMPS));
+      const said = k >= 0 ? results[k].warnings : [];
+      if (said.length) said.forEach((t, j) => lines.push({ text: '  ' + t, cls: j === 0 ? 'sim-err' : 'sim-info' }));
+      else lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
+      return done({ status: 'ok', lines: withHeads(results), nodeVoltages, currents, shorted: true, voltageAt, parts }, extra);
     }
 
-    const ledsOn = [], buzzersOn = [];
-    let backwards = 0;
+    // One rule for every part: its own line(r, m) if it has one, else an
+    // ON line when measure() says on; then each warning (an error while on,
+    // a warning while off). A part whose mode blocks are all off and that
+    // warns (a backwards LED) explains the dark circuit, so the generic
+    // open-path lines are left out.
+    let outputs = 0, explained = 0;
     graph.forEach((g, i) => {
-      const { comp } = g;
-      const p = propsOf(comp);
-      if (comp.type === 'led') {
-        const I = -currents[i];
-        if (ledOn.get(comp) && I >= p.thresholdCurrent) {
-          ledsOn.push(comp);
-          lines.push({ text: `  💡 LED ON  (${(I * 1000).toFixed(1)} mA)`, cls: 'sim-on' });
-          const over = overCurrentLine(comp, I, resistorAdvice(g, openVoltage(graph, bats, ledOn, g)));
-          if (over) lines.push(over);
-        } else if (!ledOn.get(comp)) {
-          const reverse = sol.v(g.nodes[1 - LED_ANODE_PIN]) - sol.v(g.nodes[LED_ANODE_PIN]);
-          if (reverse >= (p.forwardVoltage || 0)) {
-            backwards++;
-            lines.push({ text: '  LED is backwards. Current cannot flow from cathode to anode. Flip it around.', cls: 'sim-warn' });
-          }
-        } else if (I >= OPEN_AMPS) {
-          // Below OPEN_AMPS the "current" is only GMIN leaking through a
-          // floating node: the path is open, which the open-circuit line says.
-          lines.push({ text: '  LED: current too low.', cls: 'sim-warn' });
-        }
-      }
-      if (comp.type === 'buzzer' && Math.abs(currents[i]) >= p.thresholdCurrent) {
-        buzzersOn.push(comp);
-        lines.push({ text: `  🔔 BUZZER ON  (${(Math.abs(currents[i]) * 1000).toFixed(1)} mA)`, cls: 'sim-on' });
-      }
+      const res = results[i];
+      if (!res) return;
+      const { r, m, warnings } = res;
+      const def = g.part.def;
+      const own = def.line ? def.line(r, m) : m.on === true
+        ? { text: `  💡 ${def.name.toUpperCase()} ON  (${m.current.toFixed(1)} mA)`, cls: 'sim-on' } : null;
+      if (own) { lines.push({ text: own.text, cls: own.cls }); outputs++; }
+      warnings.forEach(t => lines.push({ text: '  ' + t, cls: m.on === true ? 'sim-err' : 'sim-warn' }));
+      const modes = Object.values(r.modes);
+      if (warnings.length && modes.length && modes.every(x => x === 'off')) explained++;
     });
 
-    const flowing = bats.some(bat => Math.abs(sol.batteryCurrent.get(bat.comp)) > OPEN_AMPS);
-    if (!flowing && !ledsOn.length && !buzzersOn.length && !backwards) {
+    const flowing = sourceAmps.some(a => a > OPEN_AMPS);
+    if (!flowing && !outputs && !explained) {
       lines.push({ text: '  Circuit open — no complete path.', cls: 'sim-warn' });
-      bats.forEach(bat => {
-        const linked = graph.some(g => g.comp !== bat.comp &&
-          g.nodes.some(n => n === bat.nodes[0] || n === bat.nodes[1]));
+      sources.forEach(src => {
+        const linked = graph.some(g => g !== src && g.nodes.some(n => src.nodes.includes(n)));
         if (!linked) lines.push({ text: '  ⚠ Battery terminals not connected to anything.', cls: 'sim-warn' });
       });
-    } else if (flowing && !ledsOn.length && !buzzersOn.length && !backwards) {
+    } else if (flowing && !outputs && !explained) {
       lines.push({ text: '  No output components in circuit path.', cls: 'sim-info' });
     }
 
-    const parts = partResults(graph, sol, live);
-    return { status: 'ok', lines, ledsOn, buzzersOn, nodeVoltages, currents, shorted: false, voltageAt, parts };
+    return done({ status: 'ok', lines: withHeads(results), nodeVoltages, currents, shorted: false, voltageAt, parts }, extra);
   }
 
   // ── Pure: simulationSummary ──────────────────────────────────
   //
   //  analyze() as markdown lines for the AI's "## Simulation" section: the
-  //  status, each part's state and current, each pin's voltage, then the
-  //  analysis messages. Volts to 2 decimals, currents to 0.1 mA, so the
-  //  prompt stays short. labelOf(components, comp) names a part ("R1").
+  //  status, each part's report, each pin's voltage, then the analysis
+  //  messages. Volts to 2 decimals, currents to 0.1 mA, so the prompt
+  //  stays short. labelOf(components, comp) names a part ("R1").
 
   // Hole address as App.formatHole writes it: "a11", "tp_2", from ids.js.
   // The page loads ids.js after this file, so App is read at call time.
@@ -552,149 +592,99 @@
   const volts = v => (Math.abs(v) < 0.005 ? 0 : v).toFixed(2) + ' V';
   const milliamps = a => (Math.abs(a) < 0.00005 ? 0 : a * 1000).toFixed(1) + ' mA';
   // analyze's messages, minus the per-part ones the summary already states.
-  const partMessage = l => l.cls === 'sim-on' || /^(Button|Battery) \d/.test(l.text);
+  const partMessage = l => l.cls === 'sim-on' || HEADLINES.has(l);
   const plain = t => t.replace(/[⚠💡🔔🟢⭕]/gu, '').replace(/\s+/g, ' ').trim();
 
   function simulationSummary(components, wires, labelOf) {
-    const r = analyze(components, wires);
-    if (r.status === 'empty')      return ['The board is empty: no components placed.'];
-    if (r.status === 'no-battery') return ['No battery on the board.'];
+    const { r, graph, results, live } = run(components, wires);
+    if (r.status === 'empty')     return ['The board is empty: no components placed.'];
+    if (r.status === 'no-source') return ['No battery on the board.'];
 
     const messages = r.lines.filter(l => !partMessage(l)).map(l => '- ' + plain(l.text));
     if (r.status === 'unsolvable') {
       return ['Status: unsolvable. The simulator cannot solve this circuit.'].concat(messages);
     }
-
-    const bat0  = components.find(c => c.type === 'battery');
-    const out   = [`Status: ${r.shorted ? 'short circuit' : 'solved'}. Voltages are measured from ${labelOf(components, bat0)}.1 (the first battery's − terminal).`];
-    const solved = r.currents.length === components.length;   // a battery shorted by a wire solves nothing
-    if (solved) {
-      // Off-board pins have no hole for voltageAt, so read every pin by node.
-      const graph = buildGraph(components, wires);
-      const live  = liveNodes(graph, graph.filter(g => g.comp.type === 'battery'));
-      const pinVoltage = (i, k) => {
-        const n = graph[i].nodes[k];
-        return live.has(n) ? r.nodeVoltages[n] : null;
-      };
-      components.forEach((c, i) => {
-        const label = labelOf(components, c);
-        const p = propsOf(c), I = r.currents[i];
-        // A short solves to tens of amps, not a reading worth showing.
-        const mA = a => (r.shorted ? '' : ', ' + milliamps(a));
-        if (c.type === 'battery') {
-          out.push(`- ${label}: ${volts(p.voltage || 0)} battery` + (r.shorted ? '' : `, supplying ${milliamps(Math.abs(I || 0))}`));
-        } else if (c.type === 'resistor') {
-          out.push(`- ${label}: ${p.resistance} ohm resistor${mA(Math.abs(I))}`);
-        } else if (c.type === 'led') {
-          const state = r.ledsOn.includes(c) ? 'ON (lit)' : 'OFF (dark)';
-          out.push(`- ${label}: LED ${state}${mA(Math.max(0, -I))}`);
-        } else if (c.type === 'buzzer') {
-          const state = r.buzzersOn.includes(c) ? 'ON (sounding)' : 'OFF (silent)';
-          out.push(`- ${label}: buzzer ${state}${mA(Math.abs(I))}`);
-        } else if (c.type === 'button') {
-          out.push(`- ${label}: button ${c.pressed ? 'pressed (closed)' : 'released (open)' + mA(0)}`);
-        } else {
-          out.push(`- ${label}: ${c.type}` + (typeof I === 'number' ? mA(Math.abs(I)) : ''));
-        }
-        c.pins.forEach((_, k) => {
-          const v = pinVoltage(i, k);
-          const reading = v == null ? 'floating (not connected to the battery)' : volts(v);
-          const hole = c.holeRefs?.[k];
-          if (!hole) { out.push(`  - ${label}.${k} (off-board): ${reading}`); return; }
-          const role = c.type === 'led' ? (k === LED_ANODE_PIN ? ', anode' : ', cathode') : '';
-          out.push(`  - ${label} pin ${k} (${holeName(hole)}${role}): ${reading}`);
-        });
-      });
+    if (r.status === 'unsettled') {
+      return ['Status: unsettled. The simulator could not settle this circuit, so it has no readings.'].concat(messages);
     }
+
+    const src0 = components.find(c => { const d = partDef(c.type); return d && d.ref !== undefined; });
+    const ref  = partDef(src0.type).ref;
+    const out  = [`Status: ${r.shorted ? 'short circuit' : 'solved'}. Voltages are measured from ${labelOf(components, src0)}.${ref} (the first battery's − terminal).`];
+    if (!results) return out.concat(messages);   // a source shorted by a wire solves nothing
+
+    // Off-board pins have no hole for voltageAt, so read every pin by node.
+    const pinVoltage = (i, k) => {
+      const n = graph[i].nodes[k];
+      return live.has(n) ? r.nodeVoltages[n] : null;
+    };
+    components.forEach((c, i) => {
+      const label = labelOf(components, c);
+      const res = results[i], def = res && graph[i].part.def;
+      // A short solves to tens of amps, not a reading worth showing.
+      if (!res) {
+        const I = r.currents[i];
+        out.push(`- ${label}: ${c.type}` + (r.shorted || typeof I !== 'number' ? '' : ', ' + milliamps(Math.abs(I))));
+      } else {
+        out.push(`- ${label}: ` + (r.shorted ? def.name.toLowerCase() : def.report(res.r, res.m)));
+      }
+      c.pins.forEach((_, k) => {
+        const v = pinVoltage(i, k);
+        const reading = v == null ? 'floating (not connected to the battery)' : volts(v);
+        const hole = c.holeRefs?.[k];
+        if (!hole) { out.push(`  - ${label}.${k} (off-board): ${reading}`); return; }
+        const pin  = def ? def.pins[k] : undefined;
+        const role = pin !== undefined && !/^\d+$/.test(pin) ? ', ' + pin : '';   // ", cathode", ", lead1"
+        out.push(`  - ${label} pin ${k} (${holeName(hole)}${role}): ${reading}`);
+      });
+    });
     return out.concat(messages);
   }
 
   // ── Presentation ─────────────────────────────────────────────
-  //  DOM, THREE and audio live below this line.
+  //  DOM and THREE live below this line; each part draws, glows and
+  //  sounds in its own view.update.
 
-  // ── Buzzer audio ─────────────────────────────────────────────
-  let _audioCtx = null;
-  const _buzzerNodes = new Map(); // comp → { osc, gain }
-
-  function _getAudioCtx() {
-    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    return _audioCtx;
+  // ── Visual: registry parts ──────────────────────────────────
+  //  A part with view.update glows (or spins, or sounds) from its own
+  //  measure(); with {} it goes back to how it was drawn.
+  function viewOf(comp) {
+    const def = comp && comp.group ? partDef(comp.type) : null;
+    return def && def.view && typeof def.view.update === 'function' ? def.view : null;
   }
 
-  function activateBuzzer(comp) {
-    if (_buzzerNodes.has(comp)) return;
-    try {
-      const ctx  = _getAudioCtx();
-      const osc  = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.value = 220;   // low, buzzy tone
-      gain.gain.value = 0.12;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      _buzzerNodes.set(comp, { osc, gain });
-    } catch {}
-  }
+  // Every part last handed a reading, so one deleted since still goes quiet.
+  let _shown = new Set();
 
-  function deactivateBuzzer(comp) {
-    const node = _buzzerNodes.get(comp);
-    if (!node) return;
-    try {
-      const ctx = _getAudioCtx();
-      node.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
-      setTimeout(() => { try { node.osc.stop(); } catch {} }, 80);
-    } catch {}
-    _buzzerNodes.delete(comp);
-  }
-
-  function stopAllBuzzers() {
-    _buzzerNodes.forEach((node) => {
-      try {
-        const ctx = _getAudioCtx();
-        node.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
-        setTimeout(() => { try { node.osc.stop(); } catch {} }, 80);
-      } catch {}
+  // After a run: each part with a reading gets it, every other part {}.
+  function showParts(components, parts) {
+    const now = new Set();
+    components.forEach(c => {
+      const view = viewOf(c);
+      if (!view) return;
+      const p = c.label != null ? parts[c.label] : null;
+      view.update(c, p ? p.m : {}, p ? p.r : null);
+      now.add(c);
     });
-    _buzzerNodes.clear();
+    _shown.forEach(c => { if (!now.has(c)) { const view = viewOf(c); if (view) view.update(c, {}, null); } });
+    _shown = now;
   }
 
-  // ── Visual: LED on/off ──────────────────────────────────────
-  const activeLights = [];
-
-  function lightUpLED(comp) {
-    comp.group.traverse(obj => {
-      if (!obj.isMesh || !obj.material.transparent) return;
-      obj.material = obj.material.clone();
-      obj.material.emissiveIntensity = 3.5;
-      obj.material.opacity = 1.0;
-    });
-
-    const ledColor = getDomeColor(comp) ?? 0xffffff;
-    const p0 = comp.pins[0], p1 = comp.pins[1];
-    const light = new THREE.PointLight(ledColor, 8.0, 10);
-    light.position.set((p0.x + p1.x) / 2, 3.0, (p0.z + p1.z) / 2);
-    App.scene.add(light);
-    activeLights.push(light);
-    comp._simLight = light;
+  function resetParts(components) {
+    showParts(components, {});
+    _shown = new Set();
   }
 
-  function dimLED(comp) {
-    comp.group.traverse(obj => {
-      if (!obj.isMesh || !obj.material.transparent) return;
-      obj.material.emissiveIntensity = 0.45;
-      obj.material.opacity = 0.88;
+  // Stop puts every momentary control back to its default (a button
+  // pops back up); other controls keep their setting.
+  function resetControls(components) {
+    components.forEach(c => {
+      const def = c ? partDef(c.type) : null;
+      if (!def || !def.controls || !c.controls) return;
+      for (const [key, spec] of Object.entries(def.controls)) {
+        if (spec.type === 'momentary') c.controls[key] = spec.default;
+      }
     });
-    if (comp._simLight) { App.scene.remove(comp._simLight); comp._simLight = null; }
-  }
-
-  function getDomeColor(comp) {
-    let col = null;
-    comp.group.traverse(obj => {
-      if (obj.isMesh && obj.material.transparent && col === null)
-        col = obj.material.color.getHex();
-    });
-    return col;
   }
 
   // ── Results overlay ─────────────────────────────────────────
@@ -716,108 +706,34 @@
     if (b) b.style.display = 'none';
   }
 
-  // ── Button click handler (active only during simulation) ─────
-  let _btnClickHandler = null;
-
-  function installButtonClicks() {
-    removeButtonClicks();
-    const canvas    = document.getElementById('canvas');
-    const raycaster = new THREE.Raycaster();
-    const mouseNDC  = new THREE.Vector2();
-
-    _btnClickHandler = function (e) {
-      // Only fire on a clean click (not a drag)
-      const r = canvas.getBoundingClientRect();
-      mouseNDC.x =  ((e.clientX - r.left) / r.width)  * 2 - 1;
-      mouseNDC.y = -((e.clientY - r.top)  / r.height) * 2 + 1;
-      raycaster.setFromCamera(mouseNDC, App.camera);
-
-      const capMeshes = [];
-      App.state.components.forEach(c => {
-        if (c.type === 'button' && c.capMesh) capMeshes.push(c.capMesh);
-      });
-      if (!capMeshes.length) return;
-
-      const hits = raycaster.intersectObjects(capMeshes, false);
-      if (!hits.length) return;
-
-      const cap  = hits[0].object;
-      const comp = cap.userData.ownerComp;
-      if (comp) {
-        App.toggleButton(comp);   // animate cap + flip comp.pressed
-        App.runSimulation();      // re-evaluate circuit with new button state
-      }
-    };
-
-    canvas.addEventListener('click', _btnClickHandler);
-  }
-
-  function removeButtonClicks() {
-    if (_btnClickHandler) {
-      const canvas = document.getElementById('canvas');
-      canvas.removeEventListener('click', _btnClickHandler);
-      _btnClickHandler = null;
-    }
-  }
-
-  // ── Internal: clear visual state only (no button/UI reset) ──
-  function clearSimVisuals() {
-    activeLights.forEach(l => App.scene.remove(l));
-    activeLights.length = 0;
-    App.state.components.forEach(c => {
-      if (c.type === 'led')    dimLED(c);
-      if (c.type === 'buzzer') deactivateBuzzer(c);
-    });
-    stopAllBuzzers();
-    hideResults();
-  }
-
   // ── Public: runSimulation ────────────────────────────────────
-  //  Solve with analyze(), then render the result.
+  //  Solve with analyze(), then render the result. A run while the
+  //  simulation is already going (a click on a part, a delete) keeps the
+  //  mode; each part's view.update gets its new reading.
   function runSimulation() {
     const { components, wires } = App.state;
-    const isRerun = _btnClickHandler !== null; // already running = button click re-run
-    clearSimVisuals(); // preserve button states across re-runs
 
-    // Switch to select mode so user can click components during simulation
-    if (!isRerun && App.setMode) App.setMode('select');
+    // Switch to select mode so the user can click parts during simulation
+    if (!App.simRunning && App.setMode) App.setMode('select');
 
     const result = analyze(components, wires);
     showResults(result.lines);
+    showParts(components, result.status === 'ok' && !result.shorted ? result.parts : {});
     if (result.status === 'empty') return;
-
-    result.ledsOn.forEach(lightUpLED);
-    result.buzzersOn.forEach(activateBuzzer);
 
     if (result.status === 'ok') {
       App.simRunning = true;
       document.getElementById('sim-run-btn').style.display  = 'none';
       document.getElementById('sim-stop-btn').style.display = 'inline-flex';
     }
-    // Only install the click handler on the first run — re-runs from
-    // the button handler itself keep the same handler alive.
-    if (!isRerun) installButtonClicks();
   }
 
   // ── Public: stopSimulation ──────────────────────────────────
   function stopSimulation() {
-    clearSimVisuals();
-    // Reset all buttons directly — no toggleButton call to avoid re-entrancy
-    App.state.components.forEach(c => {
-      if (c.type !== 'button') return;
-      c.pressed = false;
-      const cap = c.capMesh;
-      if (!cap) return;
-      if (cap.userData._animId) { cancelAnimationFrame(cap.userData._animId); cap.userData._animId = null; }
-      cap.position.y = cap.userData.capRestY;
-      if (cap.userData.matCloned) {
-        cap.material.color.setHex(0xe8e8e8);
-        cap.material.emissive.setHex(0x000000);
-        cap.material.emissiveIntensity = 0;
-      }
-    });
+    resetControls(App.state.components);
+    resetParts(App.state.components);
+    hideResults();
     App.simRunning = false;
-    removeButtonClicks();
     const runBtn  = document.getElementById('sim-run-btn');
     const stopBtn = document.getElementById('sim-stop-btn');
     if (runBtn)  runBtn.style.display  = 'inline-flex';
@@ -827,11 +743,10 @@
   // ── Wiring ───────────────────────────────────────────────────
   function install(app) {
     App = app;
-    App.PROPS          = PROPS;
     App.runSimulation  = runSimulation;
     App.stopSimulation = stopSimulation;
     App.simulationSummary = simulationSummary;
   }
 
-  return { PROPS, UnionFind, bbNodeId, buildGraph, solveLinear, analyze, simulationSummary, install };
+  return { UnionFind, bbNodeId, buildGraph, solveLinear, settleModes, analyze, simulationSummary, install };
 });

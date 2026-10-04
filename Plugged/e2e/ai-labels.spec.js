@@ -45,17 +45,19 @@ test('exportState names parts by label and wires by label form', async ({ page }
   expect(s.wires).toEqual([{ from: 'BAT1.0', to: 'tp_2' }]);
 });
 
-// The recorded single-LED build, with the battery wired as ref(pin).
+// The recorded single-LED build, with the battery wired as ref(pin). One lead
+// per hole (test/fixtures/recipes.js ONE_LED): the old stacked build put the
+// LED anode on R1's a6, which the registry LED refuses since #25.
 const ledBuild = ref => ({
   reply: 'Built a single LED with a current-limiting resistor.',
   actions: [
     { tool: 'delete_all' },
     { tool: 'place_battery' },
-    { tool: 'add_wire', from: ref(0), to: 'tp_2', color: 'red' },
-    { tool: 'add_wire', from: ref(1), to: 'tn_8', color: 'black' },
-    { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
-    { tool: 'place_led', holeA: 'a8', holeB: 'a6' },
-    { tool: 'add_wire', from: 'tp_2', to: 'a2', color: 'red' },
+    { tool: 'add_wire', from: ref(0), to: 'tp_63', color: 'red' },
+    { tool: 'add_wire', from: ref(1), to: 'tn_63', color: 'black' },
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6' },
+    { tool: 'place_led', holeA: 'c8', holeB: 'c6' },
+    { tool: 'add_wire', from: 'tp_3', to: 'a2', color: 'red' },
     { tool: 'add_wire', from: 'a8', to: 'tn_8', color: 'black' },
   ],
 });

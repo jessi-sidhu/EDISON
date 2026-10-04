@@ -46,6 +46,8 @@ Passed to `Parts.define()`. **Required** fields are marked ●. Anything not lis
 | `measure` | `(r: PartResult) → object` | Flat, JSON-safe outputs, e.g. `{ on: true, current: 14.9 }`. Drives visuals and results. |
 | `warnings` | `(r, m) → string[]` | Advice, e.g. `"LED1 is backwards"`. Each ≤ 120 chars. |
 | ● `report` | `(r, m) → string` | One results line, ≤ 80 chars, e.g. `"ON, 14.9 mA"`. |
+| `headline` | `(r, m) → { text, cls }` | One line at the top of the results panel, e.g. `Battery 1: 9V` (`sim-info`). Headlines are in board order, with sources (parts with `ref`) after the others. Before a solve (or when there is none) it gets `r` without readings and `m = {}`. |
+| `line` | `(r, m) → { text, cls } \| null` | Replaces the generic `💡 NAME ON (x.x mA)` line for this part, e.g. the buzzer's `🔔 BUZZER ON (x.x mA)`. `null`: no line. |
 | ● `ai` | `AiSpec` | See below. |
 | ● `view` | `ViewSpec` | Browser only. See below. |
 | ● `examples` | `Example[]` | At least 1 known-answer circuit. See the testing contract. |
@@ -114,6 +116,7 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
   pins:    { cathode: 0.00, anode: 2.00 },   // volts vs ground, null if floating
   current: { d: 14.9 },                       // mA, by element id (or index), + in pin order
   modes:   { d: 'on' },                       // mode blocks only
+  open:    { d: 9.00 },                       // volts across each mode block with every mode block off
 }
 ```
 
@@ -225,7 +228,7 @@ App.holeMap() → Map<'b6', { label: 'LED1', pin: 'anode' } | { wire: 3, end: 'f
 - **Output:** as today (`status, lines, nodeVoltages, currents, shorted, voltageAt`), plus:
   - `status` can also be `'unsettled'` or `'no-source'`
   - `parts: { [label]: { r: PartResult, m: measured, warnings: string[] } }`
-- `ledsOn` and `buzzersOn` stay until issue C removes the last caller.
+- `ledsOn` and `buzzersOn` are gone (#26): the page reads `parts[label].m` and calls each part's `view.update`. `'no-source'` replaced `'no-battery'`.
 
 ### Legacy entry points (kept until issue D)
 `App.placeResistor/placeLED/placeBuzzer/placeButton/placeBattery` and `chat.js`'s `PLACE` map stay working through issues A–C as **thin wrappers over the registry**. They're how today's hand-written AI tools reach the app. Issue D replaces them with generated tools and deletes the wrappers. **Every foundation issue must keep the AI demo path working** ("Build a single LED circuit…" → preview → Accept → lit).

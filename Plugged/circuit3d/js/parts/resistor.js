@@ -43,13 +43,6 @@
     return [DIGIT_COLORS[Math.floor(sig / 10)], DIGIT_COLORS[sig % 10], multiplierColor(exp), GOLD];
   }
 
-  // 470 → "470 Ω", 1500 → "1.5 kΩ", 2.2e6 → "2.2 MΩ"
-  function ohmsText(r) {
-    if (r >= 1e6) return +(r / 1e6).toFixed(2) + ' MΩ';
-    if (r >= 1e3) return +(r / 1e3).toFixed(2) + ' kΩ';
-    return +Number(r).toFixed(2) + ' Ω';
-  }
-
   // ── The model: two upright leads, two stubs, a tan body, four bands ──
   function build(ctx, values, controls, legs) {
     const THREE = ctx.THREE;
@@ -129,7 +122,7 @@
 
     elements: v => [{ kind: 'R', pins: ['lead1', 'lead2'], ohms: v.resistance }],
     measure:  r => ({ current: Math.abs(through(r)) }),
-    report:   (r, m) => `${ohmsText(r.values.resistance)}, ${m.current.toFixed(1)} mA`,
+    report:   (r, m) => `${r.values.resistance} ohm resistor, ${m.current.toFixed(1)} mA`,
 
     ai: {
       about:    'A resistor: two leads on one row, 3–5 columns apart, or straight across the centre gap. ' +

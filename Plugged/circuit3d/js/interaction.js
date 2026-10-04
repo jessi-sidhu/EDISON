@@ -36,10 +36,26 @@
       return out;
     }
 
+    // The placed part whose model holds obj, or null. Parts this build
+    // doesn't know have no group.
+    function ownerOf(obj) {
+      for (let o = obj; o; o = o.parent) {
+        const comp = state.components.find(c => c.group && c.group === o);
+        if (comp) return comp;
+      }
+      return null;
+    }
+
     function getAllPinMeshes() {
       const out = [];
       state.components.forEach(c => (c.pinMeshes || []).forEach(pm => out.push(pm)));
       return out;
+    }
+
+    // A part that sits beside the board (the battery), not in its holes.
+    function isOffboard(type) {
+      const def = Parts.get(type);
+      return !!(def && def.place.kind === 'offboard');
     }
 
     // ── Ghost management ─────────────────────────────────────
@@ -116,6 +132,20 @@
       wasDragged    = false;
     });
 
+    // ── Scroll gestures ─────────────────────────────────────
+    // While simulating, the wheel over a part with a scroll gesture moves
+    // its control instead of zooming. Caught on the way down, before
+    // OrbitControls on the canvas sees it.
+    canvas.parentElement.addEventListener('wheel', e => {
+      if (!App.simRunning || e.target !== canvas) return;
+      updateRay(e);
+      const hits = raycaster.intersectObjects(getAllComponentMeshes(), false);
+      const comp = hits.length ? ownerOf(hits[0].object) : null;
+      if (!comp || !App.partGesture(comp, 'scroll', e.deltaY < 0 ? 1 : -1)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }, { capture: true, passive: false });
+
     canvas.addEventListener('pointercancel', e => {
       if (e.pointerId !== downPointerId) return;
       downPointerId = null;
@@ -160,7 +190,7 @@
         syncGhost();
         const type = state.pickedType;
 
-        if (type === 'battery') {
+        if (isOffboard(type)) {
           hoverSphere.visible  = false;
           hoverSphereB.visible = false;
           holeLabel.style.display = 'none';
@@ -309,10 +339,10 @@
       if (mode === 'place') {
         const type = state.pickedType;
 
-        if (type === 'battery') {
+        if (isOffboard(type)) {
           const pt  = new THREE.Vector3();
           const hit = raycaster.ray.intersectPlane(boardPlane, pt);
-          if (hit) App.placeBattery(pt.x, pt.z);
+          if (hit) App.placePart(type, { x: pt.x, z: pt.z });
           return;
         }
 
@@ -332,10 +362,7 @@
           }
         }
 
-        if (type === 'resistor') App.placeResistor(hA, hB);
-        if (type === 'led')      App.placeLED(hA, hB);
-        if (type === 'buzzer')   App.placeBuzzer(hA, hB);
-        if (type === 'button')   App.placeButton(hA, hB);
+        App.placePart(type, [hA, hB]);
         return;
       }
 
@@ -364,13 +391,11 @@
           if (found) { App.selectItem(w, 'wire'); return; }
         }
 
-        // Walk up to find owning component group
-        for (const comp of state.components) {
-          if (!comp.group) continue;   // unknown part: not drawn
-          let found = false;
-          comp.group.traverse(o => { if (o === hitObj) found = true; });
-          if (found) { App.selectItem(comp, 'component'); return; }
-        }
+        // The owning component. While simulating, a click on a part with a
+        // click gesture (a button) works its control instead of selecting it.
+        const comp = ownerOf(hitObj);
+        if (comp && App.simRunning && App.partGesture(comp, 'click')) return;
+        if (comp) { App.selectItem(comp, 'component'); return; }
 
         App.deselect();
         return;

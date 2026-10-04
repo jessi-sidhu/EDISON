@@ -27,7 +27,7 @@ board → App.exportMarkdown() → POST /api/ask → ai-providers (DeepSeek / Ge
 - **The backend has zero runtime npm packages.** `backend/` uses only Node built-ins. Dev dependencies (Vitest, Biome, Playwright) are fine.
 - **Parts are named by label**: `R1`, `LED1`, `BAT1`, from `nextLabel` in `ids.js` (`componentId` returns the label). Battery pins are `BAT1.0` (+) and `BAT1.1` (−), and body parts are referred to by the holes they sit in. Never use an index into all components.
 - **Change the board only through `App.place*`, `App.finishWire` and `App.clearAll`.** AI builds go through `Chat.acceptBuild` so they undo in one step.
-- **The simulator's `analyze()` is pure**, taking components and wires and returning results. The UI reads only `lines`, `ledsOn` and `buzzersOn`. Currents are positive from pin 0 to pin 1, so a lit LED is negative.
+- **The simulator's `analyze()` is pure**, taking components and wires and returning results. The UI reads only `lines` and `parts`. Currents are positive from pin 0 to pin 1, so a lit LED is negative.
 - **Saved circuits** go through `storage.js` (`SparkyStorage.projectsKey(uid)`). Never hard-code a `localStorage` key.
 
 ## Tests

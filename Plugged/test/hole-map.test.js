@@ -9,10 +9,10 @@
 // tested here in Node. e2e/hole-map.spec.js checks App.holeMap() equals it
 // after place, delete, undo, reload and an AI build in the browser.
 //
-// Legs come from Parts.legsOf(comp): a registry part's pins by name, a
-// legacy part's (LED, battery, buzzer, button) by index as '0', '1' until
-// #25/#26. Off-board legs (the battery) and off-board wire ends are not in
-// the map.
+// Legs come from Parts.legsOf(comp): a registry part's pins by name (the
+// LED's cathode / anode since #25), a legacy part's (battery, buzzer,
+// button) by index as '0', '1' until #26. Off-board legs (the battery) and
+// off-board wire ends are not in the map.
 
 const assert = require('node:assert');
 const IO     = require('../circuit3d/js/board-io.js');
@@ -62,8 +62,8 @@ test('the hole map holds each leg by label and pin name, and each wire end on a 
   const map = plain(need('buildHoleMap')(components, wires));
   assert.deepStrictEqual(map.a3, { label: 'R1', pin: 'lead1' });
   assert.deepStrictEqual(map.a7, { label: 'R1', pin: 'lead2' });
-  assert.deepStrictEqual(map.b10, { label: 'LED1', pin: '0' }, 'legacy LED: pin by index until #25');
-  assert.deepStrictEqual(map.b8, { label: 'LED1', pin: '1' });
+  assert.deepStrictEqual(map.b10, { label: 'LED1', pin: 'cathode' }, 'the LED\'s legs by pin name since #25');
+  assert.deepStrictEqual(map.b8, { label: 'LED1', pin: 'anode' });
   assert.deepStrictEqual(map.c3, { wire: 1, end: 'to' });
   assert.deepStrictEqual(map.c7, { wire: 2, end: 'from' });
   assert.deepStrictEqual(map.c8, { wire: 2, end: 'to' });
@@ -76,7 +76,7 @@ test('every part on the board has one leg in the map per pin', () => {
   const map = need('buildHoleMap')(components, wires);
   const legs = label => [...map.values()].filter(o => o.label === label).map(o => o.pin).sort();
   assert.deepStrictEqual(legs('R1'), [...Parts.get('resistor').pins].sort());
-  assert.deepStrictEqual(legs('LED1'), ['0', '1']);
+  assert.deepStrictEqual(legs('LED1'), ['anode', 'cathode']);
   assert.equal(legs('BAT1').length, 0);
 });
 

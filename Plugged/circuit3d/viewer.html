@@ -23,6 +23,10 @@
   <!-- Parts registry, then every file in js/parts/index.js FILES -->
   <script src="js/parts/registry.js"></script>
   <script src="js/parts/resistor.js"></script>
+  <script src="js/parts/led.js"></script>
+  <script src="js/parts/battery.js"></script>
+  <script src="js/parts/buzzer.js"></script>
+  <script src="js/parts/button.js"></script>
 
   <!-- Reuse scene, breadboard, and component builders -->
   <script src="js/scene.js"></script>
@@ -79,28 +83,19 @@
         // Place components
         for (const c of (data.components || [])) {
           let result = null;
+          // Every part draws itself; a saved part with no values gets its defaults.
           const def = window.Parts && Parts.get(c.type);
-          if (def && def.place.kind === 'span' && c.holeRefs?.length === 2) {
-            // A registry part draws itself; a saved part with no values gets its defaults.
+          if (def && def.place.kind === 'offboard' && c.position) {
+            // Drawn around (0, 0, 0), then moved to where it was saved.
+            const built = App.buildPart(c.type, Parts.legsOf(c), c.values);
+            built.group.position.set(c.position.x, 0, c.position.z);
+            result = { group: built.group, pins: built.pinPositions.map(p => p.clone().add(built.group.position)) };
+          } else if (def && def.place.kind !== 'offboard' && c.holeRefs?.length === def.pins.length) {
             const legs = Parts.legsOf(c);
             if (legs.every(l => bb.getHole(l.col, l.row))) {
               const built = App.buildPart(c.type, legs, c.values);
               result = { group: built.group, pins: built.pinPositions };
             }
-          } else if (c.type === 'led' && c.holeRefs?.length === 2) {
-            const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-            const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-            if (hA && hB) result = App.buildLED(hA, hB, c.values?.color);
-          } else if (c.type === 'buzzer' && c.holeRefs?.length === 2) {
-            const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-            const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-            if (hA && hB) result = App.buildBuzzer(hA, hB);
-          } else if (c.type === 'button' && c.holeRefs?.length === 2) {
-            const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-            const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-            if (hA && hB) result = App.buildButton(hA, hB);
-          } else if (c.type === 'battery' && c.position) {
-            result = App.buildBattery(c.position.x, c.position.z);
           }
           if (result) {
             App.scene.add(result.group);
