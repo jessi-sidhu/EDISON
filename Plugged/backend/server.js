@@ -64,7 +64,8 @@ const controlLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(Bo
     .map(([key, c]) => `- ${toolName(def)}: the user adjusts ${key} (${c.unit}) with a slider or by scrolling over it`));
 
 // A part's ai.recipe (an Example) as numbered tool calls with exact holes:
-// delete_all, each part in order, then each wire.
+// delete_all, each part in order, each wire, then a set_control for each
+// part that sets controls (a toggle switch starts open, so its build closes it).
 function recipeSteps(ex) {
   const steps = ['delete_all'];
   for (const p of ex.parts) {
@@ -80,6 +81,10 @@ function recipeSteps(ex) {
     steps.push(toolName(def) + (args.length ? `: ${args.join(', ')}` : ''));
   }
   for (const [from, to] of ex.wires) steps.push(`add_wire: ${from} -> ${to}`);
+  for (const p of ex.parts) {
+    const set = Object.entries(p.controls || {}).map(([k, v]) => `${k}=${v}`);
+    if (set.length) steps.push(`set_control: part=${p.label}, ${set.join(', ')}`);
+  }
   return steps;
 }
 

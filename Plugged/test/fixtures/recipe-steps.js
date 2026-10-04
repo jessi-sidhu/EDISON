@@ -13,6 +13,10 @@
 //                    footprintLegs are exactly `holes`
 //      plus the part's own `values`, as tool arguments (resistance: 470).
 //   3. each wire [from, to] as { tool: 'add_wire', from, to }.
+//   4. each part that sets `controls` (docs/API-CONTRACT.md → "Example": a
+//      part may set controls, e.g. a toggle switch's { closed: true }), in
+//      `parts` order, as { tool: 'set_control', part: label, ...controls }
+//      (#32: the switch starts open, so its recipe has to close it).
 //
 // The prompt's recipe block (the shape of the hand-written recipes already
 // in the prompt):
@@ -24,7 +28,9 @@
 //     3. add_wire: BAT1.0 -> tp_63 (red)
 //     5. place_seven_segment: hole=f30, direction=right
 //     6. place_resistor: holeA=b33, holeB=b37, resistance=470
+//     9. set_control: part=S1, closed=true
 //   Arguments are key=value, comma-separated; add_wire's are FROM -> TO.
+//   A value of true / false is a boolean, digits a number.
 //   Anything after "(" or "←" in an argument is a comment. The block ends
 //   at the first line after step 1 that is not a step.
 
@@ -55,13 +61,16 @@ function recipeActions(ex) {
     out.push(a);
   }
   for (const [from, to] of ex.wires) out.push({ tool: 'add_wire', from, to });
+  for (const p of ex.parts) {
+    if (p.controls && Object.keys(p.controls).length) out.push({ tool: 'set_control', part: p.label, ...p.controls });
+  }
   return out;
 }
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const STEP = /^\s*(\d+)\.\s+([a-z_]+)\s*(?::\s*(.*))?$/;
 const uncomment = s => s.split(/[(←]/)[0].trim();
-const argValue = s => (/^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s);
+const argValue = s => (/^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s === 'true' ? true : s === 'false' ? false : s);
 
 // The recipe block for `def` in `prompt`: { heading, steps: actions } or null.
 function parseRecipeSteps(prompt, def) {

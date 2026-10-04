@@ -12,10 +12,10 @@ const { test, expect } = require('@playwright/test');
 const Parts = require('../circuit3d/js/parts');
 
 // The resistor (#23), the LED (#25), the battery, buzzer and button (#26),
-// the potentiometer (#31), the light sensor (#40), the thermistor (#41)
-// and the diode (#33) are listed even before their files exist, so this spec fails (rather than
+// the potentiometer (#31), the light sensor (#40), the thermistor (#41),
+// the diode (#33), the toggle switch (#32) and the slide switch (#39) are listed even before their files exist, so this spec fails (rather than
 // running nothing) until each is registered.
-const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', 'ldr', 'thermistor', 'diode', 'zener', ...Parts.all().map(d => d.type)])];
+const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', 'ldr', 'thermistor', 'diode', 'zener', 'toggle_switch', 'slide_switch', 'bulb', ...Parts.all().map(d => d.type)])];
 
 // Resistor colours, as the model has always drawn them.
 const BODY = 0xd4a96a, LEAD = 0xc0c0c0, GHOST_LEAD = 0xcccccc;
@@ -326,6 +326,8 @@ const EVERY_PART = {
     { type: 'button',   label: 'SW1', holeRefs: [h(15, 'b'), h(18, 'b')] },
     { type: 'potentiometer', label: 'RV1', values: { resistance: 10000 }, controls: { position: 50 },
       holeRefs: [{ pin: '1', ...h(39, 'e') }, { pin: 'wiper', ...h(40, 'e') }, { pin: '3', ...h(41, 'e') }] },
+    { type: 'slide_switch', label: 'SS1', controls: { toB: true },   // #39, c45 c46 c47, flipped to b
+      holeRefs: [{ pin: 'a', ...h(44, 'c') }, { pin: 'common', ...h(45, 'c') }, { pin: 'b', ...h(46, 'c') }] },
     { type: 'ldr', label: 'LDR1', values: { r10: 10000 }, controls: { light: 300 },   // #40, b51–b54
       holeRefs: [{ pin: '1', ...h(50, 'b') }, { pin: '2', ...h(53, 'b') }] },
     { type: 'thermistor', label: 'TH1', values: { r25: 10000 }, controls: { temperature: 25 },   // #41, c56–c59

@@ -371,6 +371,7 @@
       ? Math.min(spec.max, Math.max(spec.min, now + (dir || 1) * scrollTick(spec)))
       : !now));
     if (kind === 'click') gestures.release();
+    if (def.controls[key].saved) scheduleAutoSave();
     return true;
   };
 
