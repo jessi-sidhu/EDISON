@@ -54,7 +54,15 @@ async function clickHole(page, where) {
   await page.mouse.click(at.x, at.y);
 }
 
-const pick  = (page, type) => page.locator(`#sidebar .comp-item[data-type="${type}"]`).click();
+const item  = (page, type) => page.locator(`#sidebar .comp-item[data-type="${type}"]`);
+// A fresh pick of `type` from the sidebar. Since #34, clicking the part that
+// is already picked unpicks it, so when `type` is picked already this cancels
+// with ESC first, then picks it again (and a new pick starts unflipped).
+async function pick(page, type) {
+  const already = await page.evaluate(t => App.state.mode === 'place' && App.state.pickedType === t, type);
+  if (already) await page.keyboard.press('Escape');
+  await item(page, type).click();
+}
 const hint  = page => page.locator('#hint-text');
 const count = page => page.evaluate(() => App.state.components.length);
 
@@ -137,7 +145,7 @@ test('F again flips back to normal, and the next LED is placed in the default or
   expect(errors).toEqual([]);
 });
 
-test('the flip stays on for more LEDs of the same pick, and picking the LED again starts unflipped', async ({ page }) => {
+test('the flip stays on for more LEDs of the same pick; clicking the picked LED again unpicks it, and picking it after that starts unflipped', async ({ page }) => {
   const errors = watchErrors(page);
   await openEditor(page);
   await pick(page, 'led');
@@ -147,7 +155,18 @@ test('the flip stays on for more LEDs of the same pick, and picking the LED agai
   expect(await holesOf(page, 'LED1')).toEqual(['c12', 'c10']);
   expect(await holesOf(page, 'LED2'), 'still flipped for the second LED').toEqual(['c22', 'c20']);
 
-  await pick(page, 'led');          // a new pick resets the flip
+  // #34: a click on the picked LED's sidebar item unpicks it: select mode,
+  // no flip hint, and a click on the board places nothing.
+  await item(page, 'led').click();
+  expect(await page.evaluate(() => [App.state.mode, App.state.pickedType])).toEqual(['select', null]);
+  await expect(hint(page)).not.toContainText('Flipped');
+  await expect(hint(page)).not.toContainText('F to flip');
+  await clickHole(page, 'c40');
+  expect(await count(page), 'nothing placed while unpicked').toBe(2);
+
+  await item(page, 'led').click();  // picked again: a new pick resets the flip
+  expect(await page.evaluate(() => [App.state.mode, App.state.pickedType])).toEqual(['place', 'led']);
+  await expect(hint(page)).not.toContainText('Flipped');
   await clickHole(page, 'c30');
   expect(await holesOf(page, 'LED3')).toEqual(['c30', 'c32']);
   expect(errors).toEqual([]);

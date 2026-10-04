@@ -15,6 +15,7 @@ description: Finish the current task - run checks, review, commit, rebase onto t
    - Run `npm run check` (lint) and `npm test`.
    - Also run the **full** `npm run e2e` if any file under `circuit3d/`, `*.html`, `firebase-config.js` or `e2e/` changed. Never swap it for a subset of specs, even if the builder ran some or CI is fast: features clash through shared UI, and only the full suite sees it.
    - Fix any failures this change caused. Never push red.
+   - **AI prompt changed?** If `Plugged/test/fixtures/prompts/` changed (the golden prompt files), this change alters what the AI is sent. Before pushing, run the real-AI demo check: start the app with the real key and send "Build a single LED circuit with a current-limiting resistor." 3 times. Each must Accept cleanly and light the LED. Report the results. Never update the golden files just to make the test pass.
 3. **Review.**
    - If `/start-task`'s reviewer already said SHIP IT for this exact diff, skip this step.
    - Otherwise, run the **reviewer** subagent with the issue text.

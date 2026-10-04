@@ -29,24 +29,39 @@
 
   const LIGHT_ON = 1.4;              // the LIMIT light's glow when a rail is over
 
-  // ── The readout panel: per-rail volts and mA, redrawn in update() ──
+  // The readout panel on the front face, and its canvas (power-of-two
+  // sizes, so r128 never has to resize an OffscreenCanvas).
+  const PANEL_W = W * 0.8, PANEL_H = H * 0.6;
+  const CANVAS_W = 512, CANVAS_H = 256;
+  const STRETCH = (PANEL_W / PANEL_H) / (CANVAS_W / CANVAS_H);   // the canvas is drawn this much wider on the panel
+
+  // ── The readout: per-rail volts and mA, redrawn in update() ──
+  //  Drawn squeezed by 1/STRETCH, so the text reads at its own width.
   function drawPanel(panel, volts, m) {
     const c = panel && panel.userData.canvas;
     if (!c) return;
     const g = c.getContext('2d');
     const mA = n => (Number.isFinite(n) ? n.toFixed(1) : '---') + ' mA';
+    const rows = [[`+${volts.toFixed(1)} V  ${mA(m.posAmps)}`, '#ff5a5a', 108],
+                  [`−${volts.toFixed(1)} V  ${mA(m.negAmps)}`, '#5a8cff', 222]];
+    const room = CANVAS_W * STRETCH - 40;   // usable width, in drawn units
+    g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = '#10161c';
     g.fillRect(0, 0, c.width, c.height);
-    g.font = 'bold 34px monospace';
-    g.fillStyle = '#ff5a5a';
-    g.fillText(`+${volts.toFixed(1)} V  ${mA(m.posAmps)}`, 12, 50);
-    g.fillStyle = '#5a8cff';
-    g.fillText(`−${volts.toFixed(1)} V  ${mA(m.negAmps)}`, 12, 106);
+    g.setTransform(1 / STRETCH, 0, 0, 1, 0, 0);
+    g.font = 'bold 84px monospace';
+    const widest = Math.max(...rows.map(([t]) => g.measureText(t).width));
+    g.font = `bold ${Math.floor(84 * Math.min(1, room / widest))}px monospace`;
+    for (const [t, colour, y] of rows) {
+      g.fillStyle = colour;
+      g.fillText(t, 20, y);
+    }
     panel.userData.texture.needsUpdate = true;
   }
 
-  // ── The model: a grey case, a readout panel and a LIMIT light on top,
-  //  three terminal posts (red +, black COM, blue −) along the front ──
+  // ── The model: a grey case with a readout panel and a LIMIT light on
+  //  its front face, three terminal posts (red +, black COM, blue −) on
+  //  the lid ──
   function build(ctx, values) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
@@ -58,18 +73,17 @@
     body.castShadow = true;
     group.add(body);
 
-    // Readout panel on the back half of the top
+    // Readout panel on the front face (+z), facing the camera
     if (typeof OffscreenCanvas !== 'undefined') {
-      const canvas = new OffscreenCanvas(256, 128);
+      const canvas = new OffscreenCanvas(CANVAS_W, CANVAS_H);
       const texture = new THREE.CanvasTexture(canvas);
       const screen = ctx.mat.label(0xffffff);   // a label material, so the ghost and selection treat it like the rest
       screen.map = texture;
       screen.emissiveMap = texture;
       screen.emissive.setHex(0xffffff);
       screen.emissiveIntensity = 0.6;
-      const panel = new THREE.Mesh(new THREE.PlaneGeometry(W * 0.8, D * 0.4), screen);
-      panel.rotation.x = -Math.PI / 2;
-      panel.position.set(-0.15, H + 0.01, -D * 0.2);
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(PANEL_W, PANEL_H), screen);
+      panel.position.set(-0.12, H / 2, D / 2 + 0.01);
       panel.name = 'readout';
       panel.userData.canvas = canvas;
       panel.userData.texture = texture;
@@ -77,11 +91,11 @@
       drawPanel(panel, Number(values.voltage) || 0, {});
     }
 
-    // LIMIT light beside the panel: dark until a rail is over its limit
+    // LIMIT light on the front face, right of the panel: dark until a rail is over its limit
     const light = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8), ctx.mat.label(0x661111));
     light.material.emissive.setHex(0xff2222);
     light.material.emissiveIntensity = 0;
-    light.position.set(W / 2 - 0.2, H + 0.05, -D * 0.2);
+    light.position.set(W / 2 - 0.13, H / 2, D / 2 + 0.03);
     light.name = 'limit-light';
     group.add(light);
 

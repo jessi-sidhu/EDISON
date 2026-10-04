@@ -91,3 +91,4 @@ The app is `Plugged/`. Its commands, code rules and gotchas are in `Plugged/AGEN
 
 ## Gotchas
 <!-- Add one line each time an agent makes the same mistake twice. Say what to do instead. -->
+- **The AI prompt is guarded by golden files** (`Plugged/test/fixtures/prompts/`). Adding a part or editing a prompt line can change what the demo's LED request sends. If the golden test fails, look at the diff first. Only if the change is intended, run `UPDATE_GOLDEN=1 npm test`, then do the real-AI demo check (3 runs) before `/ship`.
