@@ -203,6 +203,10 @@
       about:    'An LED: cathode (−) in holeA, anode (+) in holeB, on one row 1–3 columns apart. ' +
                 'Lights when current flows anode to cathode; needs a resistor in series.',
       keywords: ['led', 'light', 'diode', 'lamp', 'indicator'],
+      everyday: true,
+      values:   ['color'],
+      guide:    'Every LED needs a resistor in series to limit current (place_resistor). ' +
+                'holeA = cathode (-) goes toward GND. holeB = anode (+) goes toward resistor/power.',
     },
 
     view: { build, update },

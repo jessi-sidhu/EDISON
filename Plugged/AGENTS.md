@@ -18,7 +18,7 @@ Plugged is a browser 3D breadboard editor with a circuit simulator and an AI tut
 ```
 board → App.exportMarkdown() → POST /api/ask → ai-providers (DeepSeek / Gemini / claude / fixture)
 → finishAIReply() drops bad actions and flags circuit problems → chat.js shows a preview
-→ Accept → Chat.acceptBuild() → App.place* / App.finishWire (one undo step) → simulate.analyze()
+→ Accept → Chat.acceptBuild() → App.placePart / setValues / deletePart / finishWire (one undo step) → simulate.analyze()
 ```
 
 ## Code rules
@@ -26,7 +26,7 @@ board → App.exportMarkdown() → POST /api/ask → ai-providers (DeepSeek / Ge
 - **Logic goes in a module Node can load**, using the wrapper at the top of `simulate.js`, `ids.js` or `storage.js`: it exports `module.exports` in Node and attaches to `window` in the browser. DOM and Three.js code stays a thin layer on top. If it can't be loaded in Node, it can't be unit-tested.
 - **The backend has zero runtime npm packages.** `backend/` uses only Node built-ins. Dev dependencies (Vitest, Biome, Playwright) are fine.
 - **Parts are named by label**: `R1`, `LED1`, `BAT1`, from `nextLabel` in `ids.js` (`componentId` returns the label). Battery pins are `BAT1.0` (+) and `BAT1.1` (−), and body parts are referred to by the holes they sit in. Never use an index into all components.
-- **Change the board only through `App.place*`, `App.finishWire` and `App.clearAll`.** AI builds go through `Chat.acceptBuild` so they undo in one step.
+- **Change the board only through `App.placePart`, `App.setValues`, `App.setControls`, `App.deletePart`, `App.finishWire` and `App.clearAll`.** AI builds go through `Chat.acceptBuild` so they undo in one step.
 - **The simulator's `analyze()` is pure**, taking components and wires and returning results. The UI reads only `lines` and `parts`. Currents are positive from pin 0 to pin 1, so a lit LED is negative.
 - **Saved circuits** go through `storage.js` (`SparkyStorage.projectsKey(uid)`). Never hard-code a `localStorage` key.
 

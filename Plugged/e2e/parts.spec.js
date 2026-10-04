@@ -163,7 +163,7 @@ for (const type of TYPES) {
 async function placeResistorAt(page, a, b, values) {
   await page.evaluate(([a, b, values]) => {
     const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeResistor(hole(a), hole(b), values);
+    App.placePart('resistor', [hole(a), hole(b)], values);
   }, [a, b, values]);
   return lastPart(page);
 }

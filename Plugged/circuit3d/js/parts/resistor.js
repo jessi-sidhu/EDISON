@@ -128,6 +128,7 @@
       about:    'A resistor: two leads on one row, 3–5 columns apart, or straight across the centre gap. ' +
                 'Limits current, e.g. in series with an LED.',
       keywords: ['resistor', 'resistance', 'ohm', 'ohms', 'limit'],
+      everyday: true,
     },
 
     view: { build },

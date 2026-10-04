@@ -24,7 +24,7 @@
   if (node) module.exports = def;
 })(typeof window !== 'undefined' ? window : null, function () {
 
-  const W = 2.0, H = 2.6, D = 1.4;   // body; chat.js's pending wire ends use H and the terminal offsets
+  const W = 2.0, H = 2.6, D = 1.4;   // body; the pin positions below set where wires attach
 
   // ── The model: a black body, a red + post and a blue − ring on top ──
   //  Drawn in label materials, so its ghost stays fairly opaque.

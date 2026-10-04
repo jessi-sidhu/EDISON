@@ -86,7 +86,7 @@ test('App.holeMap() equals a fresh rebuild after an AI build, place, delete, und
   // Place R2 at d20–d24.
   await page.evaluate(() => {
     const at = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeResistor(at('d20'), at('d24'));
+    App.placePart('resistor', [at('d20'), at('d24')]);
   });
   map = await expectConsistent(page, 'place');
   expect(map.get('d20')).toEqual({ label: 'R2', pin: 'lead1' });

@@ -146,13 +146,13 @@ test('with AI_PROVIDER=deepseek, makeAsk runs the reply through the shared finis
 });
 
 // ── Part values on the real tools, issue #9 ────────────────────────────────
-// CIRCUIT_TOOLS is not exported, so read the literal out of server.js the way
-// the system-prompt tests do, and convert it as askDeepSeek does.
+// Since #27 the tools are generated from the parts registry, so there is no
+// literal left to read out of server.js: use its exported CIRCUIT_TOOLS, and
+// convert it as askDeepSeek does.
 function realTools() {
-  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'backend', 'server.js'), 'utf8');
-  const start = src.indexOf('[', src.indexOf('const CIRCUIT_TOOLS'));
-  const end = src.indexOf('\n}];', start) + 3;
-  return P.toOpenAITools(new Function(`return ${src.slice(start, end)};`)());
+  const Server = require('../backend/server.js');
+  assert.ok(Array.isArray(Server.CIRCUIT_TOOLS), 'server.js must export CIRCUIT_TOOLS, the generated tool list');
+  return P.toOpenAITools(Server.CIRCUIT_TOOLS);
 }
 const toolParams = name => {
   const t = realTools().find(x => x.function.name === name);

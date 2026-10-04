@@ -141,16 +141,25 @@ async function askDeepSeek(markdown, userMsg, history, ctx) {
   const msg = userMsg || 'Analyze my circuit and tell me what to do next.';
   const boardState = markdown || '**Board is EMPTY — no components or wires placed.**';
 
-  const messages = [{ role: 'system', content: ctx.SYSTEM_PROMPT }];
+  // The server picks this request's tools and the prompt that goes with
+  // them. Without that hook, every tool and the one prompt are sent.
+  let decls = ctx.toolsFor ? ctx.toolsFor(markdown || '', userMsg || '')
+    : ((ctx.CIRCUIT_TOOLS && ctx.CIRCUIT_TOOLS[0] && ctx.CIRCUIT_TOOLS[0].function_declarations) || []);
+  const system = ctx.promptFor ? ctx.promptFor(decls) : ctx.SYSTEM_PROMPT;
+  console.log(`[ask] tools: ${decls.map(d => d.name).join(', ')}`);
+
+  const messages = [{ role: 'system', content: system }];
   for (const h of history || []) {
     if (h && h.text) messages.push({ role: h.role === 'model' ? 'assistant' : 'user', content: h.text });
   }
   messages.push({ role: 'user', content: `BOARD STATE:\n${boardState}\n\nQUESTION: ${msg}` });
 
   // DeepSeek calls a few tools per turn and waits for their results before
-  // calling more, so keep answering "done" until it stops calling tools.
-  // The tools only queue actions for the browser preview; nothing runs here.
-  const tools   = toOpenAITools(ctx.CIRCUIT_TOOLS);
+  // calling more, so keep answering until it stops calling tools. The tools
+  // only queue actions for the browser preview; nothing runs here. use_parts
+  // adds tools for the next round, and a placement the server refuses is
+  // answered with the reason so the model can place it again.
+  let tools = toOpenAITools([{ function_declarations: decls }]);
   const actions = [];
   let reply = '';
   for (let round = 0; round < DEEPSEEK_MAX_ROUNDS; round++) {
@@ -164,9 +173,27 @@ async function askDeepSeek(markdown, userMsg, history, ctx) {
       // The model can emit invalid JSON arguments; drop that call, keep the rest.
       let args = null;
       try { args = JSON.parse(c.function.arguments || '{}'); } catch { /* reported below */ }
-      if (args) actions.push({ tool: c.function.name, ...args });
-      messages.push({ role: 'tool', tool_call_id: c.id,
-        content: args ? 'Done. Queued for the user to preview.' : 'Rejected: the arguments were not valid JSON.' });
+      let result;
+      if (!args || typeof args !== 'object') {
+        result = 'Rejected: the arguments were not valid JSON.';
+      } else if (c.function.name === 'use_parts' && ctx.partTools) {
+        const { added, text } = ctx.partTools(args.types, decls.map(d => d.name));
+        if (added.length) {
+          decls = decls.concat(added);
+          tools = toOpenAITools([{ function_declarations: decls }]);
+          console.log(`[ask] use_parts added: ${added.map(d => d.name).join(', ')}`);
+        }
+        result = text;
+      } else {
+        const action = { tool: c.function.name, ...args };
+        const why = ctx.refusal ? ctx.refusal(action, actions) : null;
+        if (why) result = `Refused: ${why} Nothing was queued; fix it and place it again.`;
+        else {
+          actions.push(action);
+          result = 'Done. Queued for the user to preview.';
+        }
+      }
+      messages.push({ role: 'tool', tool_call_id: c.id, content: result });
     }
   }
   return { reply, actions };
@@ -277,6 +304,12 @@ function makeAsk(askGemini, ctx) {
   return async function ask(markdown, userMsg, history) {
     if (provider === 'fixture') {
       return askFixture(markdown, userMsg, history);
+    }
+
+    // DeepSeek logs the tools it picks per request; the others send every tool.
+    if (provider !== 'deepseek') {
+      const all = (ctx.CIRCUIT_TOOLS && ctx.CIRCUIT_TOOLS[0] && ctx.CIRCUIT_TOOLS[0].function_declarations) || [];
+      console.log(`[ask] tools: ${all.map(d => d.name).join(', ')}`);
     }
 
     let result;

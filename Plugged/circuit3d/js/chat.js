@@ -52,47 +52,117 @@
 
   function colorHex(name) { return COLOR_MAP[String(name || '').toLowerCase()] || COLOR_MAP.red; }
 
-  const PLACE = { place_resistor: 'placeResistor', place_led: 'placeLED',
-                  place_buzzer: 'placeBuzzer', place_button: 'placeButton' };
-
-  // The one value each part takes from the AI; buzzers and buttons take none.
-  const VALUE_KEY = { place_resistor: 'resistance', place_led: 'color', place_battery: 'voltage' };
+  // The registry part a place_<type> action names (its ai.tool, or
+  // place_<type>), or null.
+  function partFor(tool) {
+    if (!Parts || typeof tool !== 'string') return null;
+    return Parts.all().find(def => ((def.ai && def.ai.tool) || 'place_' + def.type) === tool) || null;
+  }
 
   // The values an action names for its part, e.g. { resistance: 1000 }, or {}
-  // for the part's defaults. The server has already dropped bad ones.
-  function partValues(a) {
-    const key = VALUE_KEY[a.tool];
-    return key && a[key] != null ? { [key]: a[key] } : {};
+  // for the part's defaults: only the part's own value keys, each checked
+  // with Parts.checkValue. A refused one is left out, with its reason in
+  // `refused` (the part keeps its default).
+  function partValues(a, refused) {
+    const def = partFor(a && a.tool);
+    const out = {};
+    for (const key of Object.keys((def && def.values) || {})) {
+      if (a[key] == null) continue;
+      const check = Parts.checkValue(def.type, key, a[key]);
+      if (check.ok) out[key] = check.value;
+      else if (refused) refused.push(check.reason);
+    }
+    return out;
   }
 
   // A registry part's placement, checked against the board as it is now
   // (docs/API-CONTRACT.md → Parts.checkPlacement). The refusal, or null.
-  function placementRefusal(type, hA, hB, board) {
-    if (!Parts || !Parts.get(type)) return null;   // legacy parts join as they move
-    const legs  = Parts.legsOf({ type, holeRefs: [{ col: hA.col, row: hA.row }, { col: hB.col, row: hB.row }] });
+  function placementRefusal(type, holes, board) {
+    const legs  = Parts.legsOf({ type, holeRefs: holes.map(h => ({ col: h.col, row: h.row })) });
     const map   = board.holeMap ? board.holeMap() : new Map();
     const check = Parts.checkPlacement(type, legs, map, { cols: GEOMETRY.COLS, bodyRows: GEOMETRY.BODY_ROWS });
     return check.ok ? null : `${Ids.nextLabel(board.components(), type)} not placed: ${check.reason}`;
   }
 
-  function applyOne(a, board) {
-    if (PLACE[a.tool]) {
-      const hA = holeOf(a.holeA, board), hB = holeOf(a.holeB, board);
-      if (!hA || !hB) return false;
-      const refusal = placementRefusal(a.tool.slice('place_'.length), hA, hB, board);
-      if (refusal) {
-        if (board.note) board.note(refusal);
-        return false;
-      }
-      board[PLACE[a.tool]](hA, hB, partValues(a));
-      return true;
+  const note = (board, text) => { if (board.note) board.note(text); };
+
+  // place_<type> for any registry part: its holes (one per pin), or the
+  // board's spot for an off-board part.
+  function placeOne(a, board) {
+    const def = partFor(a.tool);
+    if (!def) {
+      note(board, `${a.tool.slice('place_'.length)} not placed: there is no part type "${a.tool.slice('place_'.length)}".`);
+      return false;
     }
-    if (a.tool === 'place_battery') {
+    let where;
+    if (def.place.kind === 'offboard') {
       // The board says where an AI battery goes (App.batterySpot in a page).
       const { x, z } = board.batterySpot();
-      board.placeBattery(x, z, partValues(a));
-      return true;
+      where = { x, z };
+    } else if (def.place.kind === 'span') {
+      where = [holeOf(a.holeA, board), holeOf(a.holeB, board)];
+      if (!where.every(Boolean)) return false;
+      const refusal = placementRefusal(def.type, where, board);
+      if (refusal) { note(board, refusal); return false; }
+    } else {
+      return false;   // footprint parts arrive later
     }
+    const refused = [];
+    const values = partValues(a, refused);
+    for (const reason of refused) note(board, `${Ids.nextLabel(board.components(), def.type)} keeps its default: ${reason}`);
+    board.placePart(def.type, where, values);
+    return true;
+  }
+
+  // The keys of an edit action other than tool and part: { resistance: 1000 }.
+  function editKeys(a) {
+    const out = {};
+    for (const [key, v] of Object.entries(a)) if (key !== 'tool' && key !== 'part' && v != null) out[key] = v;
+    return out;
+  }
+
+  // A control's value, or null if the control can't take it.
+  function controlValue(spec, v) {
+    if (spec.type === 'slider') return typeof v === 'number' && v >= spec.min && v <= spec.max ? v : null;
+    return typeof v === 'boolean' ? v : null;
+  }
+
+  // set_value / set_control / delete_part { part: 'R1', ... }. A refusal
+  // changes nothing and says why in one note naming the part.
+  function editOne(a, board) {
+    const label = String(a.part == null ? '' : a.part);
+    const comp  = label ? Ids.findByLabel(board.components(), label) : null;
+    const refuse = why => { note(board, `${label || 'The part'} not changed: ${why}`); return false; };
+    if (!comp) return refuse(`no part on the board is labelled ${label || '(none given)'}.`);
+    if (a.tool === 'delete_part') { board.deletePart(comp); return true; }
+
+    const def  = Parts.get(comp.type);
+    const keys = editKeys(a);
+    if (!Object.keys(keys).length) return refuse('the change names nothing to set.');
+    const out = {};
+    for (const [key, v] of Object.entries(keys)) {
+      if (a.tool === 'set_value') {
+        const check = Parts.checkValue(comp.type, key, v);
+        if (!check.ok) return refuse(check.reason);
+        out[key] = check.value;
+      } else {
+        const spec = def && def.controls && Object.hasOwn(def.controls, key) ? def.controls[key] : null;
+        if (!spec) return refuse(`${label} has no control "${key}".`);
+        const value = controlValue(spec, v);
+        if (value === null) return refuse(`${key} can't be ${JSON.stringify(v)}.`);
+        out[key] = value;
+      }
+    }
+    if (a.tool === 'set_value') board.setValues(comp, out);
+    else board.setControls(comp, out);
+    return true;
+  }
+
+  const EDITS = ['set_value', 'set_control', 'delete_part'];
+
+  function applyOne(a, board) {
+    if (typeof a.tool === 'string' && a.tool.startsWith('place_')) return placeOne(a, board);
+    if (EDITS.includes(a.tool))     return editOne(a, board);
     if (a.tool === 'delete_all')    { board.clearAll(); return true; }
     if (a.tool === 'add_wire') {
       const from = resolveEndpoint(a.from, board), to = resolveEndpoint(a.to, board);
@@ -119,26 +189,29 @@
   }
 
   // The label each action will give its part when accepted, or null for an
-  // action that places nothing. Mirrors what App.place* does on Accept:
-  // Ids.nextLabel over the board as it will be, with delete_all emptying it.
+  // action that places nothing. Mirrors what App.placePart does on Accept:
+  // Ids.nextLabel over the board as it will be, with delete_all emptying it
+  // and delete_part taking its part out.
   function predictLabels(actions, components) {
     let parts = (components || []).slice();
     return (actions || []).map(a => {
       if (a.tool === 'delete_all') { parts = []; return null; }
+      if (a.tool === 'delete_part') { const gone = Ids.findByLabel(parts, a.part); parts = parts.filter(c => c !== gone); return null; }
       if (!a.tool || !a.tool.startsWith('place_')) return null;
-      const type = a.tool.slice('place_'.length);
+      const def = partFor(a.tool);
+      const type = def ? def.type : a.tool.slice('place_'.length);
       const label = Ids.nextLabel(parts, type);
       parts.push({ type, label });
       return label;
     });
   }
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, partValues, colorHex };
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, partFor, partValues, colorHex, EDITS };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
 //  Everything below touches the DOM or THREE, so it only runs in a page.
-if (typeof window !== 'undefined') (function (App, Chat) {
+if (typeof window !== 'undefined') (function (App, Chat, Parts) {
 
   const chatHistory = [];   // {role:'user'|'model', text} pairs for conversation memory
 
@@ -148,11 +221,10 @@ if (typeof window !== 'undefined') (function (App, Chat) {
     batterySpot:   () => App.batterySpot(),
     parseHole:     s => App.parseHole(s),
     getHole:       (col, row) => App.state.breadboard.getHole(col, row),
-    placeResistor: (a, b, v) => App.placeResistor(a, b, v),
-    placeLED:      (a, b, v) => App.placeLED(a, b, v),
-    placeBuzzer:   (a, b, v) => App.placeBuzzer(a, b, v),
-    placeButton:   (a, b, v) => App.placeButton(a, b, v),
-    placeBattery:  (x, z, v) => App.placeBattery(x, z, v),
+    placePart:     (type, where, v) => App.placePart(type, where, v),
+    setValues:     (comp, v) => App.setValues(comp, v),
+    setControls:   (comp, c) => App.setControls(comp, c),
+    deletePart:    comp => App.deletePart(comp),
     clearAll:      () => App.clearAll(),
     batch:         fn => App.history.batch(fn),
     holeMap:       () => App.holeMap(),
@@ -231,52 +303,76 @@ if (typeof window !== 'undefined') (function (App, Chat) {
 
     const bb = App.state.breadboard;
 
-    // Pin positions of batteries that do not exist yet, so wire ghosts can
-    // reach them. Keyed (lower case) by the label Accept will give each one
-    // ("bat1.0") and by the old form ("battery_0_pin0"). A delete_all ahead
-    // of them means numbering restarts.
+    // Off-board parts (the battery) are drawn first, so wire ghosts can
+    // reach pins that do not exist yet. Their pin positions are keyed (lower
+    // case) by the label Accept will give each one ("bat1.0") and by the old
+    // form ("battery_0_pin0"). A delete_all ahead of them restarts numbering.
     const pendingPins = {};
-    const H = 2.6;                   // battery body height (must match buildBattery)
+    const ghosts = [];
     const labels = Chat.predictLabels(actions, App.state.components);
-    let batteryIdx = App.state.components.filter(c => c.type === 'battery').length;
+    const counts = {};
+    const countOf = type => App.state.components.filter(c => c.type === type).length;
     actions.forEach((a, i) => {
-      if (a.tool === 'delete_all') batteryIdx = 0;
-      if (a.tool === 'place_battery') {
-        const { x, z } = board.batterySpot();
-        const pins = [new THREE.Vector3(x - 0.32, H + 0.54, z), new THREE.Vector3(x + 0.32, H + 0.24, z)];
-        pins.forEach((p, k) => {
-          pendingPins[`${labels[i]}.${k}`.toLowerCase()] = p;
-          pendingPins[`battery_${batteryIdx}_pin${k}`] = p;
-        });
-        batteryIdx++;
-      }
+      if (a.tool === 'delete_all') { for (const k of Object.keys(counts)) counts[k] = 0; return; }
+      const def = Chat.partFor(a.tool);
+      if (!def || def.place.kind !== 'offboard') return;
+      const spot = board.batterySpot();   // the same spot Accept uses
+      const built = App.buildPart(def.type, Parts.legsOf({ type: def.type, holeRefs: null }), Chat.partValues(a), { ghost: true });
+      built.group.position.set(spot.x, 0, spot.z);
+      if (!(def.type in counts)) counts[def.type] = actions.slice(0, i).some(b => b.tool === 'delete_all') ? 0 : countOf(def.type);
+      built.pinPositions.forEach((p, k) => {
+        const at = p.clone().add(built.group.position);
+        pendingPins[`${labels[i]}.${k}`.toLowerCase()] = at;
+        pendingPins[`${def.type}_${counts[def.type]}_pin${k}`] = at;
+      });
+      counts[def.type]++;
+      ghosts[i] = built.group;
     });
 
-    for (const a of actions) {
-      let ghost = null;
+    const notes = [];
+    actions.forEach((a, i) => {
+      let ghost = ghosts[i] || null;
+      const def = Chat.partFor(a.tool);
 
-      if (['place_resistor', 'place_led', 'place_buzzer', 'place_button'].includes(a.tool)) {
-        const type = a.tool.replace('place_', '');
+      if (def && def.place.kind === 'span') {
         const hA = Chat.resolveEndpoint(a.holeA, board);
         const hB = Chat.resolveEndpoint(a.holeB, board);
         if (hA && hA.hole && hB && hB.hole) {
           const rotation = hA.hole.col === hB.hole.col ? 1 : 0;
-          ghost = App.buildPreview(type, App.SPANS[type] || 2, bb.HS, rotation, Chat.partValues(a));
+          ghost = App.buildPreview(def.type, App.SPANS[def.type] || def.place.span.default, bb.HS, rotation, Chat.partValues(a));
           ghost.position.set((hA.hole.x + hB.hole.x) / 2, 0, (hA.hole.z + hB.hole.z) / 2);
         }
-      } else if (a.tool === 'place_battery') {
-        const spot = board.batterySpot();   // the same spot Accept uses
-        ghost = App.buildPreview('battery', 0, bb.HS, 0);
-        ghost.position.set(spot.x, 0, spot.z);
       } else if (a.tool === 'add_wire') {
         ghost = buildWireGhost(a.from, a.to, a.color, pendingPins);
+      } else if (Chat.EDITS.includes(a.tool)) {
+        notes.push(editNote(a));   // an edit places nothing: a note, no ghost
       }
       // delete_all: no ghost mesh
 
       if (ghost) { App.scene.add(ghost); _pendingGhosts.push(ghost); }
-    }
+    });
+    notes.forEach(text => sparkyAddMsg(text, 'system'));
 
     document.getElementById('sparky-pending-bar').style.display = 'flex';
+  }
+
+  // What an edit will do, for the preview: "R1 → 1 kΩ", "Delete R1".
+  function editNote(a) {
+    const label = String(a.part == null ? '?' : a.part);
+    if (a.tool === 'delete_part') return `Delete ${label} (and the wires on its pins).`;
+    const comp = App.findByLabel(App.state.components, label);
+    const keys = Object.keys(a).filter(k => k !== 'tool' && k !== 'part' && a[k] != null);
+    if (a.tool === 'set_value' && comp) {
+      const shown = App.formatValue({ type: comp.type, values: Object.assign({}, comp.values, pick(a, keys)) }, keys);
+      if (shown) return `${label} → ${shown}`;
+    }
+    return `${label} → ${keys.map(k => `${k}: ${a[k]}`).join(', ')}`;
+  }
+
+  function pick(obj, keys) {
+    const out = {};
+    for (const k of keys) out[k] = obj[k];
+    return out;
   }
 
   function buildWireGhost(fromStr, toStr, colorName, pendingPins) {
@@ -386,4 +482,4 @@ if (typeof window !== 'undefined') (function (App, Chat) {
     });
   });
 
-})(window.App, window.SparkyChat);
+})(window.App, window.SparkyChat, window.Parts);

@@ -60,7 +60,7 @@ async function openSaved(page, data = CIRCUIT) {
 async function placeResistor(page, a = 'a24', b = 'a28') {
   await page.evaluate(([a, b]) => {
     const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeResistor(hole(a), hole(b));
+    App.placePart('resistor', [hole(a), hole(b)]);
   }, [a, b]);
 }
 

@@ -301,13 +301,13 @@ test("parts/resistor.js holds the resistor's model and draws only through ctx", 
   assert.doesNotMatch(src, /\bdocument\b/, 'the part file must not touch document');
 });
 
-test('App.placeResistor keeps its signature and goes through the registry', () => {
+// Issue #27 (D2) deletes the per-type wrappers: every placement (hand
+// placement, rebuildBoard, chat.js, the e2e helpers) goes through
+// App.placePart(type, holes | { x, z }, values, opts).
+test('App.placeResistor is gone: placement goes through App.placePart', () => {
   const src = read('circuit3d/js/app.js');
-  const fn = functionSource(src, /App\.placeResistor\s*=\s*function\s*\(holeA, holeB, values, opts\)/);
-  assert.ok(fn, 'App.placeResistor = function (holeA, holeB, values, opts) must stay');
-  assert.match(fn, /checkValue\(/, 'values are checked with Parts.checkValue');
-  assert.match(fn, /buildPart\(/, 'the model is built with App.buildPart');
-  assert.doesNotMatch(fn, /buildResistor/, 'no App.buildResistor');
+  assert.doesNotMatch(src, /App\.placeResistor\b/, 'App.placeResistor is still defined or used in app.js');
+  assert.match(src, /App\.placePart\s*=\s*function\s*\(type, where, values, opts\)/, 'App.placePart(type, where, values, opts) stays');
 });
 
 // Issue #24: the hole map (App.holeMap(), rebuilt from the records) replaces
@@ -356,13 +356,8 @@ test("parts/led.js holds the LED's model and glow, drawing only through ctx", ()
   assert.doesNotMatch(src, /\bdocument\b/, 'the part file must not touch document');
 });
 
-test('App.placeLED keeps its signature and goes through the registry', () => {
-  const src = read('circuit3d/js/app.js');
-  const fn = functionSource(src, /App\.placeLED\s*=\s*function\s*\(holeA, holeB, values, opts\)/);
-  assert.ok(fn, 'App.placeLED = function (holeA, holeB, values, opts) must stay');
-  assert.match(fn, /checkValue\(/, 'values are checked with Parts.checkValue');
-  assert.match(fn, /buildPart\(/, 'the model is built with App.buildPart');
-  assert.doesNotMatch(fn, /buildLED/, 'no App.buildLED');
+test('App.placeLED is gone: placement goes through App.placePart', () => {
+  assert.doesNotMatch(read('circuit3d/js/app.js'), /App\.placeLED\b/, 'App.placeLED is still defined or used in app.js');
 });
 
 // ── Battery, buzzer and button in the parts registry, issue #26 ─────────
@@ -427,15 +422,10 @@ test('rebuildBoard has no per-type table: no PLACE map, no part-type literal', (
   assert.doesNotMatch(fn, new RegExp(TYPE_LITERAL.source), 'rebuildBoard still names part types');
 });
 
-test('App.placeBattery, placeBuzzer and placeButton keep their signatures and go through the registry', () => {
+test('App.placeBattery, placeBuzzer and placeButton are gone: placement goes through App.placePart', () => {
   const src = read('circuit3d/js/app.js');
-  for (const [name, args, old] of [['placeBattery', 'wx, wz, values, opts', 'buildBattery'],
-                                   ['placeBuzzer', 'holeA, holeB, values, opts', 'buildBuzzer'],
-                                   ['placeButton', 'holeA, holeB, values, opts', 'buildButton']]) {
-    const fn = functionSource(src, new RegExp(`App\\.${name}\\s*=\\s*function\\s*\\(${args}\\)`));
-    assert.ok(fn, `App.${name} = function (${args}) must stay`);
-    assert.match(fn, /buildPart\(/, `App.${name}: the model is built with App.buildPart`);
-    assert.doesNotMatch(fn, new RegExp(`\\b${old}\\b`), `App.${name}: no App.${old}`);
+  for (const name of ['placeBattery', 'placeBuzzer', 'placeButton']) {
+    assert.doesNotMatch(src, new RegExp(`App\\.${name}\\b`), `App.${name} is still defined or used in app.js`);
   }
 });
 
@@ -460,4 +450,137 @@ test("components.js no longer carries the battery, buzzer or button models, or t
 test('the showcase viewer draws saved batteries, buzzers and buttons through App.buildPart', () => {
   const src = read('circuit3d/viewer.html');
   assert.doesNotMatch(src, /App\.build(Battery|Buzzer|Button)\(/, 'viewer.html still uses the old per-type builders');
+});
+
+// ── Issue #27 (D2): no part-type names left in the core code ────────────────
+//  app.js, interaction.js, simulate.js, chat.js and server.js must not name
+//  a part type in code: every per-type branch reads the registry instead.
+//  What counts: a string literal ('…', "…" or a template with no ${}) whose
+//  whole text is one of the five types, e.g. 'led' or "battery". Also
+//  checked inside ${…} of a template. What doesn't count: comments, and a
+//  type named inside longer text, e.g. the prompt's recipe prose ("put a
+//  resistor in series") or 'Part types, e.g. ["led"]'. Rule of thumb: code
+//  that compares or passes a type must get it from Parts, not spell it.
+
+const PART_TYPES = ['battery', 'buzzer', 'button', 'led', 'resistor'];
+
+// Every string literal in a JS source, with its line: [{ line, text }].
+// Skips comments and regex literals; walks into ${…} inside templates.
+function stringLiterals(src) {
+  const out = [];
+  let i = 0, line = 1;
+  const stack = [];        // open template ${ … } brace depths
+  let prev = '';           // last significant code character, for regex detection
+  const regexCanStart = () => prev === '' || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev) || /\b(return|typeof|case|in|of)$/.test(src.slice(Math.max(0, i - 7), i).trimEnd());
+  function readQuoted(q) {
+    const startLine = line;
+    let text = '';
+    i++;
+    while (i < src.length && src[i] !== q) {
+      if (src[i] === '\\') { text += src[i + 1]; i += 2; continue; }
+      if (src[i] === '\n') line++;
+      text += src[i++];
+    }
+    i++;
+    out.push({ line: startLine, text });
+  }
+  function readTemplate() {
+    // From just after a ` (or after the } closing a ${), up to ` or ${.
+    const startLine = line;
+    let text = '', hasExpr = false;
+    while (i < src.length && src[i] !== '`') {
+      if (src[i] === '\\') { text += src[i + 1]; i += 2; continue; }
+      if (src[i] === '$' && src[i + 1] === '{') { hasExpr = true; i += 2; stack.push(0); prev = '{'; return { text, hasExpr, startLine, open: true }; }
+      if (src[i] === '\n') line++;
+      text += src[i++];
+    }
+    i++;
+    return { text, hasExpr, startLine, open: false };
+  }
+  while (i < src.length) {
+    const c = src[i], n = src[i + 1];
+    if (c === '\n') { line++; i++; continue; }
+    if (c === '/' && n === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
+    if (c === '/' && n === '*') { const end = src.indexOf('*/', i + 2); line += (src.slice(i, end).match(/\n/g) || []).length; i = end + 2; continue; }
+    if (c === '"' || c === "'") { readQuoted(c); prev = 'x'; continue; }
+    if (c === '`') {
+      i++;
+      const t = readTemplate();
+      if (!t.hasExpr) out.push({ line: t.startLine, text: t.text });
+      if (!t.open) prev = 'x';
+      continue;
+    }
+    if (c === '/' && regexCanStart()) {
+      i++;
+      let inClass = false;
+      while (i < src.length && (inClass || src[i] !== '/')) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '[') inClass = true;
+        else if (src[i] === ']') inClass = false;
+        i++;
+      }
+      i++;
+      while (/[a-z]/i.test(src[i] || '')) i++;
+      prev = 'x';
+      continue;
+    }
+    if (stack.length && c === '{') { stack[stack.length - 1]++; }
+    if (stack.length && c === '}') {
+      if (stack[stack.length - 1] === 0) {
+        stack.pop();
+        i++;
+        const t = readTemplate();   // the rest of the template after ${…}
+        if (!t.open) prev = 'x';
+        continue;
+      }
+      stack[stack.length - 1]--;
+    }
+    if (!/\s/.test(c)) prev = /[\w$]/.test(c) ? 'x' : c;
+    i++;
+  }
+  return out;
+}
+
+test('the literal scanner finds quoted type names in code, and not in comments or longer text', () => {
+  const src = [
+    "if (c.type === 'led') x();          // a 'buzzer' in a comment",
+    'const a = "battery", b = `resistor`;',
+    "/* 'button' */ const re = /'led'/;",
+    "const prose = 'put a resistor in series', eg = 'Part types, e.g. [\"led\"]';",
+    'const t = `$' + '{c.type === "button" ? 1 : 2} and led`;',
+  ].join('\n');
+  const hits = stringLiterals(src).filter(s => PART_TYPES.includes(s.text)).map(s => `${s.line}:${s.text}`);
+  assert.deepStrictEqual(hits, ['1:led', '2:battery', '2:resistor', '5:button']);
+});
+
+test("app.js, interaction.js, simulate.js, chat.js and server.js name no part type: no 'battery', 'buzzer', 'button', 'led' or 'resistor' literal", () => {
+  const files = ['circuit3d/js/app.js', 'circuit3d/js/interaction.js', 'circuit3d/js/simulate.js',
+                 'circuit3d/js/chat.js', 'backend/server.js'];
+  const hits = [];
+  for (const file of files) {
+    const src = read(file);
+    for (const s of stringLiterals(src)) {
+      if (PART_TYPES.includes(s.text)) hits.push(`${file}:${s.line}: ${src.split('\n')[s.line - 1].trim()}`);
+    }
+  }
+  assert.deepStrictEqual(hits, [], 'part-type literals left');
+});
+
+test('no page, script or browser test calls the deleted App.placeResistor / placeLED / placeBuzzer / placeButton / placeBattery', () => {
+  const files = [
+    ...editorSources(),
+    { file: 'circuit3d/viewer.html', src: read('circuit3d/viewer.html') },
+    ...fs.readdirSync(path.join(__dirname, '..', 'e2e')).filter(f => f.endsWith('.js'))
+      .map(f => ({ file: `e2e/${f}`, src: read(`e2e/${f}`) })),
+  ];
+  const hits = files.filter(({ src }) => /\bApp\.place(Resistor|LED|Buzzer|Button|Battery)\b/.test(src)).map(x => x.file);
+  assert.deepStrictEqual(hits, [], 'App.place<Type> still used in');
+});
+
+test('viewer.html builds every saved part from the registry, with no part type of its own', () => {
+  const src = read('circuit3d/viewer.html');
+  assert.match(src, /Parts\.get\(\s*c\.type\s*\)/, 'the viewer looks each saved part up in the registry');
+  assert.match(src, /App\.buildPart\(\s*c\.type\b/, 'and draws it with App.buildPart(c.type, …)');
+  const hits = stringLiterals(src).filter(s => PART_TYPES.includes(s.text)).map(s => `${s.line}: ${s.text}`);
+  assert.deepStrictEqual(hits, [], 'part-type literals in viewer.html');
 });

@@ -224,7 +224,10 @@ test('the recipe builds put at most one lead in each hole', () => {
 
 // The old row-a recipe: a2 holds the resistor and the rail wire, a6 the
 // resistor and the LED anode, a8 the LED cathode and the ground wire.
-test('findCircuitProblems flags the old stacked row-a build and names a2, a6 and a8', () => {
+// Since #27 the LED is refused outright (a6 already holds the resistor), so
+// it is dropped with a note naming a6, and a8 is left with just its wire;
+// a2 is still two leads (a wire end is not a placement, so it isn't refused).
+test('the old stacked row-a build: the LED is refused at a6, and a2 is still flagged', () => {
   const out = Server.finishAIReply({ reply: 'Built it.', actions: [
     { tool: 'delete_all' },
     { tool: 'place_battery' },
@@ -235,8 +238,10 @@ test('findCircuitProblems flags the old stacked row-a build and names a2, a6 and
     { tool: 'add_wire', from: 'tp_2', to: 'a2', color: 'red' },
     { tool: 'add_wire', from: 'a8', to: 'tn_8', color: 'black' },
   ] });
+  assert.ok(!out.actions.some(a => a.tool === 'place_led'), 'the LED at a8/a6 is refused and dropped');
+  assert.match(out.reply, /a6 already holds/);
   assert.match(out.reply, /Heads up/);
-  for (const h of ['a2', 'a6', 'a8']) assert.match(out.reply, hole(h), `the reply should name ${h}`);
+  assert.match(out.reply, /Hole a2 holds 2 leads/);
 });
 
 test('findCircuitProblems flags a3 holding both a resistor leg and a wire end', () => {
@@ -446,14 +451,17 @@ test('a partial reply adding a second LED and a wire has no LED "not connected" 
   assert.doesNotMatch(out.reply, /Heads up/);
 });
 
-// Guard: stacking is judged within the reply's own actions.
-test('a partial reply that puts two leads in d8 is still flagged', () => {
+// Guard: stacking is judged within the reply's own actions. Since #27 a part
+// into a hole an earlier action holds is refused and dropped, with a note.
+// (The resistor was d8→e12, which is now refused for its span first; d8→d12
+// keeps this about the shared hole.)
+test('a partial reply that puts a second lead in d8 has that part refused', () => {
   const out = Server.finishAIReply({ reply: 'Added it.', actions: [
     { tool: 'place_led', holeA: 'd8', holeB: 'd6' },
-    { tool: 'place_resistor', holeA: 'd8', holeB: 'e12' },
+    { tool: 'place_resistor', holeA: 'd8', holeB: 'd12' },
   ] });
-  assert.match(out.reply, /Heads up/);
-  assert.match(out.reply, /Hole d8 holds 2 leads/);
+  assert.deepStrictEqual(out.actions, [{ tool: 'place_led', holeA: 'd8', holeB: 'd6' }]);
+  assert.match(out.reply, /d8 already holds/);
 });
 
 // Guard: wires alone joining + to − is a short whatever else is on the board.
@@ -550,4 +558,59 @@ test('the recipe builds put the battery wires on tp_63 and tn_63', () => {
     const ends = Object.fromEntries(batteryWires(Recipes[name]).map(w => [w.from, w.to]));
     assert.deepStrictEqual(ends, { 'BAT1.0': 'tp_63', 'BAT1.1': 'tn_63' }, name);
   }
+});
+
+// ── Placement and values from the registry, issue #27 (D1) ─────────────────
+// finishAIReply runs for every provider. It checks each place_* action with
+// Parts.checkPlacement against the holes the earlier actions use, drops a
+// refused one and adds its reason as a note. Values go through
+// Parts.checkValue: a bad value is dropped with a note (the part stays), and
+// a kit hint (e.g. 350 Ω → 330 Ω) is added as a note.
+
+test('finishAIReply drops a resistor at b2→b32 and the note gives the range "3–5"', () => {
+  const actions = Recipes.ONE_LED.map(a => a.tool === 'place_resistor' ? { ...a, holeB: 'b32' } : { ...a });
+  const out = Server.finishAIReply({ reply: 'Built it.', actions });
+  assert.ok(!out.actions.some(a => a.tool === 'place_resistor'), 'the resistor at b2/b32 is dropped');
+  assert.equal(out.actions.length, Recipes.ONE_LED.length - 1, 'only the refused resistor is dropped');
+  assert.match(out.reply, /3–5/);
+  assert.match(out.reply, /\bb32\b/);
+});
+
+test('finishAIReply drops a second LED into holes the first LED holds', () => {
+  const actions = [...Recipes.ONE_LED.map(a => ({ ...a })), { tool: 'place_led', holeA: 'c8', holeB: 'c6' }];
+  const out = Server.finishAIReply({ reply: 'Built it.', actions });
+  assert.deepStrictEqual(out.actions, Recipes.ONE_LED, 'the clashing LED is dropped, the rest kept');
+  assert.match(out.reply, /c8 already holds/);
+});
+
+test('a refused part does not hold its holes: a later part may use them', () => {
+  // The first resistor is refused (b2→b32), so b2 is free for the retry.
+  const actions = Recipes.ONE_LED.flatMap(a => a.tool === 'place_resistor'
+    ? [{ ...a, holeB: 'b32' }, { ...a }] : [{ ...a }]);
+  const out = Server.finishAIReply({ reply: 'Built it.', actions });
+  assert.deepStrictEqual(out.actions, Recipes.ONE_LED);
+  assert.match(out.reply, /3–5/);
+  assert.doesNotMatch(out.reply, /b2 already holds/);
+});
+
+for (const [name, bad, range] of [['20 MΩ', 20e6, /10 MΩ/], ['0.5 Ω', 0.5, /1 Ω/]]) {
+  test(`finishAIReply drops a resistance of ${name}, out of range, and keeps the resistor`, () => {
+    const out = Server.finishAIReply({ reply: 'Built it.', actions: valuedBuild({ resistance: bad }) });
+    assert.deepStrictEqual(find(out, 'place_resistor'), { tool: 'place_resistor', holeA: 'b2', holeB: 'b6' });
+    assert.match(out.reply, /resistance/i);
+    assert.match(out.reply, range, 'the note gives the allowed range');
+  });
+}
+
+test('finishAIReply drops a battery voltage of 30, above 24 V, and keeps the battery', () => {
+  const out = Server.finishAIReply({ reply: 'Built it.', actions: valuedBuild({ voltage: 30 }) });
+  assert.deepStrictEqual(find(out, 'place_battery'), { tool: 'place_battery' });
+  assert.match(out.reply, /voltage/i);
+  assert.match(out.reply, /24 V/);
+});
+
+test('a 350 Ω resistor is kept at 350, with a note giving the closest kit value, 330 Ω', () => {
+  const out = Server.finishAIReply({ reply: 'Built it.', actions: valuedBuild({ resistance: 350 }) });
+  assert.equal(find(out, 'place_resistor').resistance, 350);
+  assert.match(out.reply, /330 Ω/);
 });

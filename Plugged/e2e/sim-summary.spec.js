@@ -31,14 +31,14 @@ async function buildSeries(page, opts = {}) {
       App.finishWire(end(b));
     };
 
-    App.placeBattery(13, 0);
+    App.placePart('battery', { x: 13, z: 0 });
     wireBat(0, 'tp_2');
     wireBat(1, 'tn_8');
-    App.placeResistor(hole('a2'), hole('a6'));
-    App.placeLED(hole('a8'), hole('a6'));        // cathode a8, anode a6
+    App.placePart('resistor', [hole('a2'), hole('a6')]);
+    App.placePart('led', [hole('a8'), hole('a6')]);        // cathode a8, anode a6
     wireHoles('tp_2', 'a2');
     if (button) {
-      App.placeButton(hole('e8'), hole('e10'));
+      App.placePart('button', [hole('e8'), hole('e10')]);
       wireHoles('a10', 'tn_8');
     } else {
       wireHoles('a8', 'tn_8');
@@ -82,7 +82,7 @@ test('with no battery the ## Simulation section says "No battery on the board."'
   await openEditor(page);
   await page.evaluate(() => {
     const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeResistor(hole('a2'), hole('a6'));
+    App.placePart('resistor', [hole('a2'), hole('a6')]);
   });
   const sim = simulationSection(await page.evaluate(() => App.exportMarkdown()));
   expect(sim).toContain('## Simulation');

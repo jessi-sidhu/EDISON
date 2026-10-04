@@ -67,11 +67,11 @@ async function buildBuzzer(page) {
       App.state.wireStart = { world: pm.userData.world.clone(), holeRef: null, pinMesh: pm };
       App.finishWire(end(b));
     };
-    App.placeBattery(13, 0);
+    App.placePart('battery', { x: 13, z: 0 });
     wireBat(0, 'tp_2');
     wireBat(1, 'tn_12');
-    App.placeResistor(hole('b3'), hole('b7'));
-    App.placeBuzzer(hole('c7'), hole('c9'));
+    App.placePart('resistor', [hole('b3'), hole('b7')]);
+    App.placePart('buzzer', [hole('c7'), hole('c9')]);
     wireHoles('tp_3', 'a3');
     wireHoles('a9', 'tn_9');
   });

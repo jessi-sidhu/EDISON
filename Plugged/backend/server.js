@@ -14,7 +14,9 @@ const fs   = require('fs');
 const path = require('path');
 const { makeAsk } = require('./ai-providers');
 // The board's size: the same file the 3D editor builds the board from.
-const { COLS, TOTAL_HOLES } = require('../circuit3d/js/board-geometry.js');
+const { COLS, TOTAL_HOLES, BODY_ROWS } = require('../circuit3d/js/board-geometry.js');
+// The parts registry: every part's tool, prompt lines and circuit behaviour.
+const Parts = require('../circuit3d/js/parts');
 
 // ── Load .env ─────────────────────────────────────────────────
 function loadEnv() {
@@ -49,8 +51,15 @@ const MODEL_NAME = AI_PROVIDER === 'deepseek' ? (process.env.DEEPSEEK_MODEL || '
                  : AI_PROVIDER === 'gemini'   ? GEMINI_MODEL
                  : AI_PROVIDER;
 
-// ── Gemini system prompt ─────────────────────────────────────
-const SYSTEM_PROMPT = [
+// ── System prompt ────────────────────────────────────────────
+// The recipes, battery rules, wiring rules and board layout are hand-written.
+// The part lists (GENERATED, below) come from the registry: labels, the
+// catalogue, pin roles, sizing, values, and the guides of the tools sent.
+const guideLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(def => def && def.ai.guide)
+  .map(def => `- ${toolName(def)}: ${def.ai.guide}`);
+
+// The prompt for a request that sends `tools`: only their guides go in.
+const buildPrompt = tools => [
   `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
   '',
   'BREADBOARD LAYOUT:',
@@ -60,11 +69,15 @@ const SYSTEM_PROMPT = [
   '- tp_N = positive power rail at column N (+9V). tn_N = GND rail at column N.',
   '- Rails are NOT auto-connected to body holes. Always wire from tp/tn to body holes.',
   '',
+  'PARTS:',
+  GENERATED.catalogue,
+  '- If a part\'s place_ tool is not in your tools, call use_parts with its type first.',
+  '',
   'PART LABELS:',
-  '- Every part has a label that never changes: R1, R2 (resistors), LED1 (LEDs), BAT1 (batteries), BZ1 (buzzers), SW1 (buttons).',
+  GENERATED.labels,
   '- The board state lists parts by label, so you can talk about them as R1, LED1 and so on.',
   '- Only a battery pin can be a wire end by label: "BAT1.0" (+) or "BAT1.1" (-).',
-  '- Parts on the board (R, LED, BZ, SW) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.',
+  GENERATED.wiredBy,
   '- A new part gets the next free number for its type. After delete_all, numbering starts again at 1, so the first place_battery is BAT1.',
   '- Without delete_all, a battery added next to BAT1 is BAT2.',
   '',
@@ -76,17 +89,18 @@ const SYSTEM_PROMPT = [
   '- Without BOTH battery wires the circuit WILL NOT WORK. ALWAYS include them.',
   '- Never wire BAT1.0 straight to BAT1.1, or tp to tn: that is a short circuit.',
   '- Battery wires go to the rails at the highest column, the end nearest the battery, so they drop straight in. In the recipes, N = the highest column in the board description (Columns 1-N).',
+  '- A second battery (two separate circuits) goes on the bottom rails, bp_N (+) and bn_N (GND), nearest row j: BAT2.0 -> bp_{N} (red) and BAT2.1 -> bn_{N} (black). Its parts go in rows f–j, with its rail wires in row j. Never wire a second battery to the tp/tn rails.',
   '',
   'COMPONENT RULES:',
-  '- LED: holeA = cathode (-) goes toward GND. holeB = anode (+) goes toward resistor/power.',
-  '- Every LED needs a resistor in series to limit current.',
+  ...GENERATED.pinRoles,
+  ...guideLines(tools),
   '- When the user names a value, pass it: "a 1 kΩ resistor" → place_resistor with resistance: 1000 (ohms), "a green LED" → place_led with color: "green", "a 5 V battery" → place_battery with voltage: 5. Leave it out otherwise.',
   '',
+  'PART VALUES (a plain number in the unit shown, or one of the names):',
+  ...GENERATED.values,
+  '',
   'SIZING (columns apart, same row):',
-  '- place_resistor: exactly 4 columns apart (e.g. b3 and b7)',
-  '- place_led: exactly 2 columns apart (e.g. cathode c9, anode c7)',
-  '- place_button: exactly 3 columns apart (e.g. b12 and b15)',
-  '- place_buzzer: exactly 2 columns apart',
+  ...GENERATED.sizing,
   '- No column overlap between components on the same row.',
   '',
   'HOLE NAMES:',
@@ -97,7 +111,9 @@ const SYSTEM_PROMPT = [
   '',
   'BUILDING BEHAVIOR:',
   '- When asked to build, fix, or create a circuit: call delete_all FIRST, then rebuild from scratch.',
-  '- Never patch an existing circuit. Always clear and rebuild the full correct circuit.',
+  '- To change one part\'s value or control ("make the resistor 1k", "make LED1 green", "press the button"), call set_value or set_control on its label, with no delete_all.',
+  '- To remove one part, call delete_part on its label.',
+  '- Anything that changes wiring or adds parts: never patch. Always clear and rebuild the full correct circuit.',
   '- After building, write 2-3 sentences explaining what you built and how it works.',
   '- When you explain a build with more than one LED, say which topology you built: series, parallel, or separate branches.',
   '',
@@ -155,119 +171,343 @@ const SYSTEM_PROMPT = [
   'For pure questions (no building), just respond with helpful text. Do not call any tools.',
 ].join('\n');
 
-// ── Gemini function declarations ─────────────────────────────
-const CIRCUIT_TOOLS = [{
-  function_declarations: [
-    {
-      name: 'delete_all',
-      description: 'Clear all components and wires from the board. Call this FIRST when building or fixing a circuit.',
-    },
-    {
-      name: 'place_battery',
-      description: 'Place a battery off-board, 9V unless you pass voltage. It gets the next battery label (BAT1 after delete_all). You MUST follow this with add_wire calls to connect BAT1.0 (+) to a positive rail (tp_N) and BAT1.1 (-) to a negative rail (tn_N).',
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          voltage: { type: 'NUMBER', description: 'Optional. Battery voltage in volts, e.g. 5. Only when the user names one.' },
-        },
-      },
-    },
-    {
-      name: 'place_resistor',
-      description: 'Place a resistor. holeA and holeB must be exactly 4 columns apart on the same row.',
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          holeA: { type: 'STRING', description: 'Start hole, e.g. "b3"' },
-          holeB: { type: 'STRING', description: 'End hole, 4 columns from holeA, e.g. "b7"' },
-          resistance: { type: 'NUMBER', description: 'Optional. Resistance in ohms, e.g. 1000 for 1 kΩ. Only when the user names one.' },
-        },
-        required: ['holeA', 'holeB'],
-      },
-    },
-    {
-      name: 'place_led',
-      description: 'Place an LED. holeA = cathode (-), holeB = anode (+). Must be exactly 2 columns apart on the same row.',
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          holeA: { type: 'STRING', description: 'Cathode (-) hole, e.g. "c9"' },
-          holeB: { type: 'STRING', description: 'Anode (+) hole, e.g. "c7"' },
-          // The names are LED_COLORS below. This literal can't reference it.
-          color: { type: 'STRING', description: 'Optional. LED colour: red, yellow, green, blue, or white. Only when the user names one.' },
-        },
-        required: ['holeA', 'holeB'],
-      },
-    },
-    {
-      name: 'place_buzzer',
-      description: 'Place a buzzer. holeA and holeB must be exactly 2 columns apart on the same row.',
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          holeA: { type: 'STRING', description: 'First hole, e.g. "b3"' },
-          holeB: { type: 'STRING', description: 'Second hole, e.g. "b5"' },
-        },
-        required: ['holeA', 'holeB'],
-      },
-    },
-    {
-      name: 'place_button',
-      description: 'Place a push button. holeA and holeB must be exactly 3 columns apart on the same row.',
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          holeA: { type: 'STRING', description: 'First hole, e.g. "b12"' },
-          holeB: { type: 'STRING', description: 'Second hole, e.g. "b15"' },
-        },
-        required: ['holeA', 'holeB'],
-      },
-    },
-    {
-      name: 'add_wire',
-      description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or battery pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -). Other parts are wired through the body holes they sit in.',
-      parameters: {
-        type: 'OBJECT',
-        properties: {
-          from:  { type: 'STRING', description: 'Start point' },
-          to:    { type: 'STRING', description: 'End point' },
-          color: { type: 'STRING', description: 'Wire color: red, yellow, green, blue, black, or white' },
-        },
-        required: ['from', 'to', 'color'],
-      },
-    },
-  ],
-}];
+// ── Tools, generated from the parts registry ─────────────────
+// One place_<type> tool per part (its ai.tool when it sets one), plus the
+// tools that aren't parts. docs/API-CONTRACT.md → "AI tools". Built once at
+// startup from Parts.all(), so a new part file needs no change here.
+const PARTS = Parts.all();
+const toolName = def => (def.ai && def.ai.tool) || `place_${def.type}`;
 
-// ── Part values ──────────────────────────────────────────────
-// The LED colours the board knows. Keep in step with LED_TYPES in
-// circuit3d/js/components.js.
-const LED_COLORS = ['red', 'yellow', 'green', 'blue', 'white'];
+// "resistor", "LED", "push button": a part's name inside a sentence.
+const partName = def => def.name.split(' ').map(w => (/^[A-Z0-9-]{2,}$/.test(w) ? w : w.toLowerCase())).join(' ');
 
-// Drops a value the board can't use from its action, keeping the part at its
-// default. Returns the (possibly copied) action and a note for each drop.
-// A null or missing value is not a value, so it goes without a note.
-function checkPartValues(a) {
-  const notes = [];
-  const drop = (key, note) => {
-    const { [key]: _gone, ...rest } = a;
-    if (a[key] != null) notes.push(note);
-    a = rest;
+// The value keys the AI may set (its tool params): ai.values, or all of them.
+const aiValues = def => (def.ai.values || Object.keys(def.values || {})).filter(k => def.values && def.values[k]);
+
+// A part's elements at its defaults. Only their kinds and pins are read here,
+// so the values don't matter.
+const elementCache = new Map();
+function elementsOf(def) {
+  if (elementCache.has(def)) return elementCache.get(def);
+  const values = {}, controls = {};
+  for (const [k, spec] of Object.entries(def.values || {})) {
+    values[k] = spec.default;
+    if (spec.choices && spec.choices[spec.default]) Object.assign(values, spec.choices[spec.default]);
+  }
+  for (const [k, c] of Object.entries(def.controls || {})) controls[k] = c.default;
+  let els = [];
+  try { els = def.elements(values, controls) || []; } catch { els = []; }
+  elementCache.set(def, els);
+  return els;
+}
+
+// A number with its unit, SI-prefixed for Ω V A F H: 1e7 Ω → "10 MΩ".
+// The same format as Parts.checkValue's reasons.
+const SI = [[1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p']];
+function withUnit(n, unit) {
+  const sep = unit === '%' ? '' : ' ';
+  if (!['Ω', 'V', 'A', 'F', 'H'].includes(unit) || n === 0) return String(n) + sep + unit;
+  const a = Math.abs(n);
+  const [f, p] = SI.find(([f]) => a >= f) || SI[SI.length - 1];
+  return (n < 0 ? '−' : '') + String(Number((a / f).toPrecision(3))) + ' ' + p + unit;
+}
+const UNIT_WORDS = { 'Ω': 'ohms', V: 'volts', A: 'amps', F: 'farads', H: 'henries', '%': 'percent', '°C': 'degrees C', lux: 'lux' };
+const rangeOf = spec => `${withUnit(spec.min, spec.unit)}–${withUnit(spec.max, spec.unit)}`;
+const spanText = s => (s.min === s.max ? `exactly ${s.min}` : `${s.min}–${s.max}`);
+
+function valueParam(key, spec) {
+  if (spec.choices) {
+    const names = Object.keys(spec.choices);
+    return { type: 'STRING', enum: names, description: `Optional. ${key}: ${names.join(', ')}. Only when the user names one.` };
+  }
+  return { type: 'NUMBER', description: `Optional. ${key} in ${UNIT_WORDS[spec.unit] || spec.unit}, ${rangeOf(spec)}. Only when the user names one.` };
+}
+
+function partTool(def) {
+  const props = {}, required = [];
+  if (def.place.kind === 'span') {
+    const s = def.place.span;
+    props.holeA = { type: 'STRING', description: `Hole for the ${def.pins[0]} pin, e.g. "b3"` };
+    props.holeB = { type: 'STRING', description: `Hole for the ${def.pins[1]} pin, ${spanText(s)} columns from holeA on the same row, e.g. "b${3 + s.default}"` };
+    required.push('holeA', 'holeB');
+  } else if (def.place.kind === 'footprint') {
+    props.hole      = { type: 'STRING', description: `Hole for the ${def.pins[0]} pin, e.g. "e10"` };
+    props.direction = { type: 'STRING', enum: ['right', 'left', 'up', 'down'], description: 'Which way the part runs from hole' };
+    required.push('hole', 'direction');
+  }
+  const ranges = [];
+  for (const key of aiValues(def)) {
+    const spec = def.values[key];
+    props[key] = valueParam(key, spec);
+    if (!spec.choices) ranges.push(`${key} ${rangeOf(spec)}${spec.series ? ` (${spec.series} kit values)` : ''}`);
+  }
+  const decl = { name: toolName(def), description: def.ai.about + (ranges.length ? ` ${ranges.join('; ')}.` : '') };
+  if (Object.keys(props).length) {
+    decl.parameters = { type: 'OBJECT', properties: props };
+    if (required.length) decl.parameters.required = required;
+  }
+  return decl;
+}
+
+const DELETE_ALL = {
+  name: 'delete_all',
+  description: 'Clear all components and wires from the board. Call this FIRST when building or fixing a circuit.',
+};
+const ADD_WIRE = {
+  name: 'add_wire',
+  description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or battery pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -). Other parts are wired through the body holes they sit in.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {
+      from:  { type: 'STRING', description: 'Start point' },
+      to:    { type: 'STRING', description: 'End point' },
+      color: { type: 'STRING', description: 'Wire color: red, yellow, green, blue, black, or white' },
+    },
+    required: ['from', 'to', 'color'],
+  },
+};
+const USE_PARTS = {
+  name: 'use_parts',
+  description: 'Ask for the place_ tools of parts you need but do not have yet. Pass their part types from the part list; the tools are added for your next call.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {
+      types: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Part types, e.g. ["led"]' },
+    },
+    required: ['types'],
+  },
+};
+
+// The edit tools change a part already on the board, found by its label.
+// Their params are every part's AI values (typed as in its place_ tool) or
+// every part's controls; only `part` is required.
+const PART_PARAM = { type: 'STRING', description: 'The part\'s label from the Components table, e.g. "R1"' };
+function editTool(name, description, params) {
+  return { name, description, parameters: { type: 'OBJECT', properties: { part: PART_PARAM, ...params }, required: ['part'] } };
+}
+const whose = key => PARTS.filter(d => d.values && aiValues(d).includes(key)).map(partName).join(', ');
+const valueParams = {};
+for (const def of PARTS) {
+  for (const key of aiValues(def)) {
+    const p = valueParam(key, def.values[key]);
+    const had = valueParams[key];
+    if (had && had.enum && p.enum) had.enum = [...new Set([...had.enum, ...p.enum])];
+    if (had) continue;
+    valueParams[key] = { ...p, description: `New ${key} (${whose(key)}). ${p.description.replace(/^Optional\. /, '').replace(/ Only when the user names one\.$/, '')}` };
+  }
+}
+const controlParams = {};
+for (const def of PARTS) {
+  for (const [key, c] of Object.entries(def.controls || {})) {
+    if (controlParams[key]) continue;
+    controlParams[key] = c.type === 'slider'
+      ? { type: 'NUMBER', description: `${key}, ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}` }
+      : { type: 'BOOLEAN', description: `${key}: true or false` };
+  }
+}
+const SET_VALUE = editTool('set_value',
+  'Change a value of one part already on the board, e.g. "make the resistor 1k" → part: "R1", resistance: 1000. Pass only the values that change; the part keeps its holes and wires.',
+  valueParams);
+const SET_CONTROL = editTool('set_control',
+  'Set a control of one part already on the board, e.g. press a button: part: "SW1", pressed: true.',
+  controlParams);
+const DELETE_PART = editTool('delete_part',
+  'Remove one part from the board by its label, with the wires on its pins. The rest of the circuit stays.',
+  {});
+
+// Every tool, in Gemini's shape. The providers that send their tools once
+// (Gemini, claude) send all of them.
+const CIRCUIT_TOOLS = [{ function_declarations: [DELETE_ALL, ...PARTS.map(partTool), ADD_WIRE, USE_PARTS,
+                                                 SET_VALUE, SET_CONTROL, DELETE_PART] }];
+const TOOL_BY_NAME  = new Map(CIRCUIT_TOOLS[0].function_declarations.map(d => [d.name, d]));
+const PART_BY_TOOL  = new Map(PARTS.map(def => [toolName(def), def]));
+
+// ── Tool selection (DeepSeek, per request) ───────────────────
+const BATTERY_TOOL = 'place_battery';
+const ALWAYS_SENT  = ['delete_all', 'add_wire', BATTERY_TOOL, 'use_parts', 'set_value', 'set_control', 'delete_part'];
+const EVERYDAY     = PARTS.filter(def => def.ai.everyday);   // sent when nothing else matched
+const MAX_TOOLS    = 12;
+
+// The other tools a tool's part guide names, e.g. the LED's "(place_resistor)".
+function relatedTools(decl) {
+  const def = PART_BY_TOOL.get(decl.name);
+  const guide = def && def.ai.guide;
+  if (!guide) return [];
+  return [...guide.matchAll(/[a-z][a-z0-9_]*/g)].map(m => TOOL_BY_NAME.get(m[0])).filter(d => d && d !== decl);
+}
+
+// A keyword as a whole word, any case, with a simple plural "s".
+const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const namedIn = (def, text) => def.ai.keywords.some(k => new RegExp(`(^|[^a-z0-9])${escapeRe(k)}s?(?![a-z0-9])`).test(text));
+
+// The tools one request sends, in order: the always-sent tools, the tools of
+// the parts on the board, keyword matches, and the everyday set when nothing
+// else matched. Each tool brings the tools its guide names. At most 12.
+function selectTools(message, boardTypes) {
+  const out = [];
+  const add = decl => {
+    if (!decl || out.includes(decl)) return;
+    out.push(decl);
+    relatedTools(decl).forEach(add);
   };
-  const positive = v => typeof v === 'number' && Number.isFinite(v) && v > 0;
-  const shown = v => typeof v === 'string' ? `"${v}"` : String(v);
+  const partDecl = def => def && TOOL_BY_NAME.get(toolName(def));
 
-  if (a.tool === 'place_resistor' && 'resistance' in a && !positive(a.resistance)) {
-    drop('resistance', `The resistance ${shown(a.resistance)} isn't a usable value, so the resistor at ${a.holeA}/${a.holeB} uses the default resistance.`);
+  ALWAYS_SENT.forEach(n => add(TOOL_BY_NAME.get(n)));
+  const before = out.length;
+  for (const t of boardTypes || []) add(partDecl(Parts.get(String(t))));
+  const text = String(message || '').toLowerCase();
+  for (const def of PARTS) if (namedIn(def, text)) add(partDecl(def));
+  if (out.length === before) EVERYDAY.forEach(def => add(partDecl(def)));
+  return out.slice(0, MAX_TOOLS);
+}
+
+// The part types in the board markdown's Components table ("| BZ1 | buzzer | ...").
+function boardTypes(markdown) {
+  const lines = String(markdown || '').split('\n');
+  const start = lines.findIndex(l => /^##\s*Components\b/i.test(l.trim()));
+  if (start < 0) return [];
+  const types = [];
+  let col = -1;
+  for (const line of lines.slice(start + 1)) {
+    const l = line.trim();
+    if (l.startsWith('#')) break;
+    if (!l.startsWith('|')) continue;
+    const cells = l.split('|').slice(1, -1).map(c => c.trim());
+    if (col < 0) { col = cells.findIndex(c => c.toLowerCase() === 'type'); continue; }
+    if (cells.every(c => /^:?-+:?$/.test(c))) continue;
+    if (cells[col]) types.push(cells[col].toLowerCase());
   }
-  if (a.tool === 'place_battery' && 'voltage' in a && !positive(a.voltage)) {
-    drop('voltage', `The battery voltage ${shown(a.voltage)} isn't a usable value, so the battery uses the default voltage.`);
+  return types;
+}
+
+// use_parts: the tools for those types (and the tools their guides name)
+// that the model doesn't have yet, and the tool result that says so.
+function partTools(types, sentNames) {
+  const added = [], unknown = [];
+  for (const t of Array.isArray(types) ? types : [types]) {
+    const def = Parts.get(String(t).toLowerCase());
+    const decl = def && TOOL_BY_NAME.get(toolName(def));
+    if (!decl) { unknown.push(JSON.stringify(t)); continue; }
+    for (const d of [decl, ...relatedTools(decl)]) {
+      if (!sentNames.includes(d.name) && !added.includes(d)) added.push(d);
+    }
   }
-  if (a.tool === 'place_led' && 'color' in a) {
-    const c = typeof a.color === 'string' ? a.color.toLowerCase() : null;
-    if (!LED_COLORS.includes(c)) {
-      drop('color', `The LED colour ${shown(a.color)} isn't one I have (${LED_COLORS.join(', ')}), so the LED at ${a.holeA}/${a.holeB} uses the default colour.`);
-    } else if (c !== a.color) a = { ...a, color: c };
+  const said = [added.length ? `Added ${added.map(d => d.name).join(', ')}. You can call them now.` : 'You already have those tools.'];
+  for (const d of added) {
+    const def = PART_BY_TOOL.get(d.name);
+    if (def && def.ai.guide) said.push(`${d.name}: ${def.ai.guide}`);
+  }
+  if (unknown.length) said.push(`No part type ${unknown.join(', ')}. Part types: ${PARTS.map(d => d.type).join(', ')}.`);
+  return { added, text: said.join(' ') };
+}
+
+
+// ── Generated prompt sections ────────────────────────────────
+const onBoard = PARTS.filter(def => def.place.kind !== 'offboard');
+
+// Pin roles matter for a part whose elements have a direction (a diode, a
+// source), e.g. "place_led: holeA = cathode, holeB = anode".
+function directional(def) {
+  return elementsOf(def).some(el => !['R', 'SW'].includes(el.kind));
+}
+
+const GENERATED = {
+  labels:     `- Every part has a label that never changes: its prefix and a number, e.g. R1, R2. Prefixes: ${PARTS.map(d => `${d.prefix} = ${partName(d)}`).join(', ')}.`,
+  wiredBy:    `- Parts on the board (${onBoard.map(d => d.prefix).join(', ')}) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.`,
+  catalogue:  `- Every part (type: name): ${PARTS.map(d => `${d.type}: ${d.name}`).join(', ')}.`,
+  pinRoles:   onBoard.filter(d => d.place.kind === 'span' && directional(d))
+                .map(d => `- ${toolName(d)}: holeA = ${d.pins[0]}, holeB = ${d.pins[1]}`),
+  sizing:     onBoard.filter(d => d.place.kind === 'span').map(d => {
+                const s = d.place.span;
+                return `- ${toolName(d)}: ${spanText(s)} columns apart on one row${s.min === s.max ? '' : ` (${s.default} is typical)`}`;
+              }),
+  values:     PARTS.flatMap(d => aiValues(d).map(key => {
+                const spec = d.values[key];
+                return spec.choices
+                  ? `- ${toolName(d)} ${key}: ${Object.keys(spec.choices).join(', ')} (default ${spec.default})`
+                  : `- ${toolName(d)} ${key}: ${rangeOf(spec)}, in ${UNIT_WORDS[spec.unit] || spec.unit} (default ${withUnit(spec.default, spec.unit)})`;
+              })),
+};
+
+// ── Placement: Parts.checkPlacement on the actions so far ────
+// Each place_* is checked against a hole map built from the actions before
+// it (since the last delete_all). A refused part holds no holes.
+const BOARD = { cols: COLS, bodyRows: BODY_ROWS };
+const HOLE  = /^(?:(tp|tn|bp|bn)_(-?\d+)|([a-j])(-?\d+))$/i;
+
+// A leg in the shape checkPlacement reads: { pin, col (0-based), row, hole }.
+// Anything that isn't a hole name gets row '', which checkPlacement refuses.
+function legAt(pin, hole) {
+  const m = HOLE.exec(String(hole == null ? '' : hole).trim());
+  if (!m) return { pin, col: 0, row: '', hole: String(hole) };
+  const row = (m[1] || m[3]).toLowerCase(), n = +(m[2] || m[4]);
+  return { pin, col: n - 1, row, hole: m[1] ? `${row}_${n}` : `${row}${n}` };
+}
+const spanLegs = (def, a) => [legAt(def.pins[0], a.holeA), legAt(def.pins[1], a.holeB)];
+
+// The hole map and the label counts after `prior`. Labels are only known
+// after a delete_all in the same reply; before one, the board may already
+// hold parts, so a part is "the resistor" instead of a guessed R1.
+function boardSoFar(prior) {
+  let map = new Map(), counts = {}, cleared = false;
+  (prior || []).forEach((a, i) => {
+    if (!a) return;
+    if (a.tool === 'delete_all') { map = new Map(); counts = {}; cleared = true; return; }
+    if (a.tool === 'add_wire') {
+      for (const [end, h] of [['from', a.from], ['to', a.to]]) {
+        const leg = legAt(null, h);
+        if (leg.row && !map.has(leg.hole)) map.set(leg.hole, { wire: i, end });
+      }
+      return;
+    }
+    const def = PART_BY_TOOL.get(a.tool);
+    if (!def) return;
+    counts[def.prefix] = (counts[def.prefix] || 0) + 1;
+    if (def.place.kind !== 'span') return;
+    const label = cleared ? def.prefix + counts[def.prefix] : `the ${partName(def)}`;
+    for (const leg of spanLegs(def, a)) if (leg.row && !map.has(leg.hole)) map.set(leg.hole, { label, pin: leg.pin });
+  });
+  return { map, counts, cleared };
+}
+
+// Why this action can't be placed after `prior`, or null if it can. The
+// reason is Parts.checkPlacement's, e.g. "R1 not placed: a resistor's leads
+// must be 3–5 columns apart; b2 to b32 is 30."
+function placementRefusal(a, prior) {
+  const def = a && PART_BY_TOOL.get(a.tool);
+  if (!def || def.place.kind !== 'span') return null;
+  const { map, counts, cleared } = boardSoFar(prior);
+  const who = cleared ? def.prefix + ((counts[def.prefix] || 0) + 1) : `The ${partName(def)} at ${a.holeA}/${a.holeB}`;
+  if (!a.holeA || !a.holeB) return `${who} not placed: it needs both holeA and holeB.`;
+  const check = Parts.checkPlacement(def.type, spanLegs(def, a), map, BOARD);
+  return check.ok ? null : `${who} not placed: ${check.reason}`;
+}
+
+// ── Part values: Parts.checkValue ────────────────────────────
+// Drops a value the board can't use from its action, keeping the part at its
+// default, with a note. A kit hint (350 Ω → 330 Ω) keeps the value and adds a
+// note. A null or missing value is not a value, so it goes without a note.
+// Choice names match without regard to case ("Green" → "green").
+function checkValues(a) {
+  const notes = [];
+  const def = a && PART_BY_TOOL.get(a.tool);
+  if (!def || !def.values) return { action: a, notes };
+  const shown = v => (typeof v === 'string' ? `"${v}"` : String(v));
+  const part = `the ${partName(def)}${def.place.kind === 'span' ? ` at ${a.holeA}/${a.holeB}` : ''}`;
+  for (const [key, spec] of Object.entries(def.values)) {
+    if (!(key in a)) continue;
+    const { [key]: raw, ...rest } = a;
+    if (raw == null) { a = rest; continue; }
+    const v = spec.choices && typeof raw === 'string'
+      ? (Object.keys(spec.choices).find(c => c.toLowerCase() === raw.toLowerCase()) || raw) : raw;
+    const check = Parts.checkValue(def.type, key, v);
+    if (!check.ok) {
+      notes.push(`The ${key} ${shown(raw)} isn't a usable value (${check.reason}), so ${part} uses the default ${key}.`);
+      a = rest;
+      continue;
+    }
+    if (v !== raw) a = { ...a, [key]: v };
+    if (check.hint) notes.push(`${part[0].toUpperCase()}${part.slice(1)} keeps ${key} ${shown(v)} (${check.hint}).`);
   }
   return { action: a, notes };
 }
@@ -305,12 +545,6 @@ function nodeKey(hole) {
   return hole;   // other part pins and anything unrecognised stay as themselves
 }
 
-// LEDs are left out of the plain graph below: they only conduct one way, so
-// treating one as a plain connection would bridge power to ground.
-const CONDUCTORS = ['place_resistor', 'place_button', 'place_buzzer'];
-
-const PART_NAMES = { place_resistor: 'resistor', place_led: 'LED', place_buzzer: 'buzzer', place_button: 'button' };
-
 // A breadboard hole takes one lead. Names each body hole (a-j) that holds
 // more than one part lead or wire end, and what is in it. Rails are one net
 // each and are left alone. Counts start again at each delete_all.
@@ -323,8 +557,9 @@ function findStackedHoles(actions) {
     used.get(h).push(what);
   };
   for (const a of actions) {
+    const def = PART_BY_TOOL.get(a.tool);
     if (a.tool === 'delete_all') used = new Map();
-    else if (PART_NAMES[a.tool]) { put(a.holeA, PART_NAMES[a.tool]); put(a.holeB, PART_NAMES[a.tool]); }
+    else if (def && def.place.kind === 'span') { put(a.holeA, partName(def)); put(a.holeB, partName(def)); }
     else if (a.tool === 'add_wire') { put(a.from, 'wire'); put(a.to, 'wire'); }
   }
   const problems = [];
@@ -345,6 +580,10 @@ function findStackedHoles(actions) {
 // the prompt, unless the AI itself wrote the old form (battery_0_pin0).
 // finishAIReply decides that from the reply as sent, before malformed
 // actions are dropped.
+//
+// The graph comes from each part's elements: R and SW conduct both ways (a
+// button counts as closed, since the user presses it), and D conducts one way,
+// from its first pin to its second (anode to cathode).
 function findCircuitProblems(actions, { labelForm = true } = {}) {
   if (!Array.isArray(actions) || actions.length === 0) return [];
   const problems = [];
@@ -353,11 +592,44 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   const wired = key => ends.some(e => nodeKey(e) === key);
 
   const pinName = (n, k) => labelForm ? `BAT${n + 1}.${k}` : `battery_${n}_pin${k}`;
+  const batName = n => labelForm ? `BAT${n + 1}` : `battery_${n}`;
 
   const wireEdges = wires.map(w => [nodeKey(w.from), nodeKey(w.to)]);
   const edges = wireEdges.slice();
-  for (const c of actions) {
-    if (CONDUCTORS.includes(c.tool)) edges.push([nodeKey(c.holeA), nodeKey(c.holeB)]);
+  // One-way parts: { part, def, el, anode, cathode } with anode/cathode as nodes.
+  const diodes = [];
+  // Every placed part, and a graph where every part element conducts both
+  // ways (a released button counts as closed, a backwards LED still joins its
+  // columns): the "is it on a complete path at all" check reads this one.
+  const placedParts = [];
+  const joins = wireEdges.map(([x, y]) => ({ x, y, part: -1 }));
+  actions.forEach((a, i) => {
+    const def = PART_BY_TOOL.get(a.tool);
+    if (!def || def.place.kind !== 'span') return;
+    const holeOf = { [def.pins[0]]: a.holeA, [def.pins[1]]: a.holeB };
+    const node = p => (p in holeOf ? nodeKey(holeOf[p]) : `part${i}${p}`);   // "#mid" is inside the part
+    placedParts.push({ i, a, def, pinNodes: [node(def.pins[0]), node(def.pins[1])] });
+    for (const el of elementsOf(def)) {
+      if (!Array.isArray(el.pins)) continue;
+      const [x, y] = el.pins;
+      joins.push({ x: node(x), y: node(y), part: i });
+      if (el.kind === 'R' || el.kind === 'SW') edges.push([node(x), node(y)]);
+      if (el.kind === 'D') diodes.push({ i, el, anode: node(x), cathode: node(y), outer: x in holeOf && y in holeOf, holeOf });
+    }
+  });
+
+  // The nodes `seed` reaches in `joins`, leaving out part `skip`'s own elements.
+  function joined(seed, skip) {
+    const seen = new Set([seed]), queue = [seed];
+    while (queue.length) {
+      const at = queue.shift();
+      for (const { x, y, part } of joins) {
+        if (part === skip || !x || !y) continue;
+        const next = x === at ? y : (y === at ? x : null);
+        if (next && !seen.has(next)) { seen.add(next); queue.push(next); }
+      }
+    }
+    return seen;
   }
 
   // An edge [x, y] conducts both ways; [x, y, true] only from x to y.
@@ -375,20 +647,20 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     return seen;
   }
 
-  // LEDs conduct forward only: from + that is anode -> cathode, from - it is
-  // cathode -> anode. So a series chain reaches both ends, and a reversed LED
-  // is still no path.
-  const leds = actions.filter(a => a.tool === 'place_led');
-  const fromPlus  = edges.concat(leds.map(l => [nodeKey(l.holeB), nodeKey(l.holeA), true]));
-  const fromMinus = edges.concat(leds.map(l => [nodeKey(l.holeA), nodeKey(l.holeB), true]));
+  // Diodes conduct forward only: from + that is anode -> cathode, from - it
+  // is cathode -> anode. So a series chain reaches both ends, and a reversed
+  // LED is still no path.
+  const fromPlus  = edges.concat(diodes.map(d => [d.anode, d.cathode, true]));
+  const fromMinus = edges.concat(diodes.map(d => [d.cathode, d.anode, true]));
 
   // Every battery the build places or wires to.
   const batteries = new Set();
   let placed = 0;
-  for (const a of actions) if (a.tool === 'place_battery') batteries.add(placed++);
+  for (const a of actions) if (a.tool === BATTERY_TOOL) batteries.add(placed++);
   for (const e of ends) { const b = batteryPin(e); if (b) batteries.add(b.n); }
 
   const pos = new Set(), neg = new Set();
+  const railPairs = new Map();   // "tp|tn" → the batteries wired to that rail pair
   for (const n of [...batteries].sort((a, b) => a - b)) {
     const plus = `battery_${n}_pin0`, minus = `battery_${n}_pin1`;   // nodeKey form
     if (n < placed) {
@@ -397,12 +669,19 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     }
     // Wires alone joining + to − is a dead short. A resistor or buzzer in
     // the path is a load, not a short.
-    if (reach(plus, wireEdges).has(minus)) {
+    const plusWires = reach(plus, wireEdges);
+    if (plusWires.has(minus)) {
       problems.push(`${pinName(n, 0)} and ${pinName(n, 1)} are joined by wires alone, which is a short circuit across the battery. Put a resistor or other part between them.`);
     }
-    // First each side without LEDs, then grown through forward LEDs without
-    // crossing into the other side: an LED that lit up one branch must not
-    // carry + round through the ground rail and hide a reversed LED elsewhere.
+    // The rails each pin is wired to, for the two-batteries check (#51).
+    const rails = set => [...set].filter(k => /^(tp|tn|bp|bn)$/.test(k)).sort().join(',');
+    const pair = `${rails(plusWires)}|${rails(reach(minus, wireEdges))}`;
+    if (!/^\||\|$/.test(pair)) railPairs.set(pair, [...(railPairs.get(pair) || []), n]);
+
+    // First each side without diodes, then grown through forward diodes
+    // without crossing into the other side: an LED that lit up one branch
+    // must not carry + round through the ground rail and hide a reversed LED
+    // elsewhere.
     const plusSide = reach(plus), minusSide = reach(minus);
     const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
     const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
@@ -412,23 +691,46 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
   }
 
+  // #51: two batteries on one pair of rails fight each other.
+  for (const [pair, ns] of railPairs) {
+    if (ns.length < 2) continue;
+    const names = ns.map(batName);
+    const said = `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    const [p, m] = pair.split('|');
+    problems.push(`${said} are wired to the same rails (${p} and ${m}), so they fight each other. Give the second battery the bottom rails (bp_N and bn_N), with its circuit in rows f–j.`);
+  }
+
   // These checks see only this reply, not the board on screen. Without a
   // delete_all the LED may sit on a battery already placed, so judging it
   // here would be a false alarm (#14). Only a full rebuild is checked.
   const fullRebuild = actions.some(a => a.tool === 'delete_all');
 
-  // holeA is the cathode (-), holeB is the anode (+).
-  for (const led of fullRebuild ? leds : []) {
-    const cathode = nodeKey(led.holeA), anode = nodeKey(led.holeB);
-    const forward  = pos.has(anode) && neg.has(cathode);
-    const reversed = pos.has(cathode) && neg.has(anode);
-    // Any other complete branch makes every node reachable from both terminals,
-    // so orientation is undecidable there. Prefer saying nothing over accusing a
-    // correctly wired LED of being backwards.
-    if (!forward && reversed) {
-      problems.push(`The LED at ${led.holeA}/${led.holeB} is backwards: its cathode ${led.holeA} is on the power side and its anode ${led.holeB} is on the ground side. Swap holeA and holeB.`);
-    } else if (!forward) {
-      problems.push(`The LED at ${led.holeA}/${led.holeB} is not connected between power and ground, so it cannot light.`);
+  // Each part must sit between power and ground: without the part itself,
+  // one pin reaches a battery's + and the other its −. A backwards diode is
+  // its own problem. Any other complete branch makes every node reachable
+  // from both terminals, so orientation is undecidable there: prefer saying
+  // nothing over accusing a correctly wired LED of being backwards.
+  const terminals = [...batteries].map(n => [`battery_${n}_pin0`, `battery_${n}_pin1`]);
+  for (const { i, a, def, pinNodes } of fullRebuild ? placedParts : []) {
+    const backwards = diodes.find(d => d.i === i && d.outer
+      && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode));
+    if (backwards) {
+      const { el, holeOf } = backwards;
+      const [ap, cp] = el.pins;
+      problems.push(`The ${partName(def)} at ${a.holeA}/${a.holeB} is backwards: its ${cp} ${holeOf[cp]} is on the power side and its ${ap} ${holeOf[ap]} is on the ground side. Swap holeA and holeB.`);
+      continue;
+    }
+    const [x, y] = pinNodes.map(e => joined(e, i));
+    const onPath = terminals.some(([p, m]) => (x.has(p) && y.has(m)) || (x.has(m) && y.has(p)));
+    if (!onPath) {
+      problems.push(`The ${partName(def)} at ${a.holeA}/${a.holeB} is not connected between power and ground, so no current flows through it.`);
+      continue;
+    }
+    // On a path, but a diode on it faces the wrong way (e.g. both LEDs of a
+    // series pair flipped, so neither reads as backwards on its own).
+    const stuck = diodes.find(d => d.i === i && d.outer && !(pos.has(d.anode) && neg.has(d.cathode)));
+    if (stuck) {
+      problems.push(`The ${partName(def)} at ${a.holeA}/${a.holeB} has no forward path from + to −, so it cannot light. Check each diode on its path: cathode (holeA) toward −, anode (holeB) toward +.`);
     }
   }
 
@@ -436,10 +738,20 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   return problems;
 }
 
+const SYSTEM_PROMPT = buildPrompt(CIRCUIT_TOOLS[0].function_declarations);
+
 // ── Call Gemini ──────────────────────────────────────────────
 const ask = makeAsk(
   (markdown, userMsg, history) => askGemini(markdown, userMsg, history),
-  { SYSTEM_PROMPT, CIRCUIT_TOOLS, finish: finishAIReply }
+  {
+    SYSTEM_PROMPT, CIRCUIT_TOOLS, finish: finishAIReply,
+    // DeepSeek's tool loop: the tools and prompt per request, use_parts, and
+    // placement refusals it can answer as tool results.
+    toolsFor:  (markdown, message) => selectTools(message, boardTypes(markdown)),
+    promptFor: buildPrompt,
+    partTools,
+    refusal:   placementRefusal,
+  }
 );
 
 async function askGemini(markdown, userMsg, history) {
@@ -535,22 +847,34 @@ function finishAIReply({ reply, actions }) {
   const usedOldForm = actions.some(a => a && a.tool === 'add_wire'
     && [a.from, a.to].some(e => OLD_BATTERY_PIN.test(String(e))));
 
-  // Filter out malformed actions (missing required fields)
+  // Filter out malformed actions (missing required fields), and use_parts,
+  // which only asks for tools and is not a board action.
   actions = actions.filter(a => {
+    if (a.tool === 'use_parts') return false;
     if (a.tool === 'add_wire' && (!a.from || !a.to)) return false;
-    if (['place_resistor','place_led','place_buzzer','place_button'].includes(a.tool)
-        && (!a.holeA || !a.holeB)) return false;
+    const def = PART_BY_TOOL.get(a.tool);
+    if (def && def.place.kind === 'span' && (!a.holeA || !a.holeB)) return false;
     return true;
   });
 
   // Drop bad part values; the parts stay, at their defaults.
-  const valueNotes = [];
+  const notes = [];
   actions = actions.map(a => {
-    const { action, notes } = checkPartValues(a);
-    valueNotes.push(...notes);
+    const { action, notes: said } = checkValues(a);
+    notes.push(...said);
     return action;
   });
-  if (valueNotes.length) reply += `\n\n${valueNotes.join('\n')}`;
+
+  // Drop parts Parts.checkPlacement refuses, in order, so a refused part
+  // holds no holes. The DeepSeek loop has already refused most of them.
+  const kept = [];
+  for (const a of actions) {
+    const why = placementRefusal(a, kept);
+    if (why) notes.push(why);
+    else kept.push(a);
+  }
+  actions = kept;
+  if (notes.length) reply += `\n\n${notes.join('\n')}`;
 
   // Report problems instead of patching them, so a wrong circuit is visible
   // rather than rewritten into a different one.
@@ -716,4 +1040,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, clientKey, finishAIReply, SYSTEM_PROMPT };
+module.exports = { server, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems };

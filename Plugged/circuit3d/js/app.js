@@ -159,65 +159,13 @@
   };
 
   // ── Placement ────────────────────────────────────────────────
-  // Both placeResistor and placeLED now receive hole objects directly
-  // (already resolved by interaction.js hover logic).
-  // Every place* takes an optional last `opts`; opts.label keeps a saved
-  // label (R2, BAT1…), otherwise the part gets the next free one.
+  // Every part goes on the board through App.placePart (hand placement,
+  // rebuildBoard, chat.js). Its optional last `opts`: opts.label keeps a
+  // saved label (R2, BAT1…), otherwise the part gets the next free one.
 
   function partLabel(type, opts) {
     return (opts && opts.label) || App.nextLabel(state.components, type);
   }
-
-  // A thin wrapper over the parts registry (parts/resistor.js), kept for
-  // chat.js and file loading. A value the registry refuses is dropped, so
-  // the part keeps its default.
-  App.placeResistor = function (holeA, holeB, values, opts) {
-    pushHistory();
-    const given = {};
-    for (const [key, v] of Object.entries(values || {})) {
-      const check = Parts.checkValue('resistor', key, v);
-      if (check.ok) given[key] = check.value;
-      else console.warn('Resistor value ignored: ' + check.reason);
-    }
-    const vals = App.componentValues('resistor', given);
-    const holeRefs = [{ col: holeA.col, row: holeA.row },
-                      { col: holeB.col, row: holeB.row }];
-    const { group, pinPositions: pins } = App.buildPart('resistor', Parts.legsOf({ type: 'resistor', holeRefs }), vals);
-    App.scene.add(group);
-    const record = {
-      type: 'resistor', label: partLabel('resistor', opts), group, pins, pinMeshes: [], values: vals, holeRefs,
-    };
-    addPinMarkers(record);
-    state.components.push(record);
-    refreshCounts();
-  };
-
-  // A thin wrapper over the parts registry (parts/led.js), like
-  // placeResistor. holeA = cathode (−), holeB = anode (+). Only the LED's
-  // own values are checked: its vf follows the colour, and older files'
-  // derived keys (vf, forwardVoltage) are left for componentValues to redo.
-  App.placeLED = function (holeA, holeB, values, opts) {
-    pushHistory();
-    const specs = Parts.get('led').values;
-    const given = {};
-    for (const [key, v] of Object.entries(values || {})) {
-      if (key === 'vf' || key === 'forwardVoltage') continue;
-      const check = Parts.checkValue('led', key, v);
-      if (check.ok) given[key] = check.value;
-      else if (Object.hasOwn(specs, key)) console.warn('LED value ignored: ' + check.reason);
-    }
-    const vals = App.componentValues('led', given);
-    const holeRefs = [{ col: holeA.col, row: holeA.row },   // cathode
-                      { col: holeB.col, row: holeB.row }];  // anode
-    const { group, pinPositions: pins } = App.buildPart('led', Parts.legsOf({ type: 'led', holeRefs }), vals);
-    App.scene.add(group);
-    const record = {
-      type: 'led', label: partLabel('led', opts), group, pins, pinMeshes: [], values: vals, holeRefs,
-    };
-    addPinMarkers(record);
-    state.components.push(record);
-    refreshCounts();
-  };
 
   // ── Registry placement ──────────────────────────────────────
   // The values a part keeps from `values`: each of its own keys that
@@ -287,38 +235,65 @@
     return addPart(type, App.buildPart(type, Parts.legsOf({ type, holeRefs }), vals), vals, holeRefs, opts);
   };
 
-  // Thin wrappers over the parts registry (parts/buzzer.js, button.js,
-  // battery.js), kept for chat.js's PLACE until #27.
-  App.placeBuzzer = function (holeA, holeB, values, opts) {
-    pushHistory();
-    const vals = checkedValues('buzzer', values);
-    const holeRefs = [{ col: holeA.col, row: holeA.row }, { col: holeB.col, row: holeB.row }];
-    addPart('buzzer', App.buildPart('buzzer', Parts.legsOf({ type: 'buzzer', holeRefs }), vals), vals, holeRefs, opts);
-  };
-
-  // A button record carries controls: { pressed: false } (momentary, never saved).
-  App.placeButton = function (holeA, holeB, values, opts) {
-    pushHistory();
-    const vals = checkedValues('button', values);
-    const holeRefs = [{ col: holeA.col, row: holeA.row }, { col: holeB.col, row: holeB.row }];
-    addPart('button', App.buildPart('button', Parts.legsOf({ type: 'button', holeRefs }), vals), vals, holeRefs, opts);
-  };
-
-  // Flips a button's momentary control. Kept for the tests and the AI; a
-  // click on the button while simulating goes through App.partGesture. The
-  // cap moves in the button's view.update, after the next simulation.
+  // Flips a part's `pressed` control (the button's). Kept for the tests and
+  // the AI; a click on the part while simulating goes through
+  // App.partGesture. The cap moves in its view.update, after the next
+  // simulation.
   App.toggleButton = function (comp) {
-    if (!comp || comp.type !== 'button') return;
+    const def = comp && Parts.get(comp.type);
+    if (!def || !def.controls || !Object.hasOwn(def.controls, 'pressed')) return;
     comp.controls = comp.controls || {};
     comp.controls.pressed = !comp.controls.pressed;
   };
 
-  // The battery sits beside the board, never over it.
-  App.placeBattery = function (wx, wz, values, opts) {
+  // ── Edits (the AI's set_value, set_control, delete_part) ────
+  // Each changes one part in place, keeping its label, holes and wires, and
+  // records one undo step (inside an AI build's batch, the build's one step).
+
+  // Draws a part's model again, for its current values, where it stands.
+  function redrawPart(comp) {
+    const def = Parts.get(comp.type);
+    if (!def) return;
+    if (state.selected && state.selected.item === comp) App.deselect();
+    (comp.pinMeshes || []).forEach(pm => App.scene.remove(pm));
+    if (comp.group) App.scene.remove(comp.group);
+    let built;
+    if (def.place.kind === 'offboard') {
+      const at = comp.group ? comp.group.position : { x: 0, z: 0 };
+      built = atSpot(App.buildPart(comp.type, Parts.legsOf({ type: comp.type, holeRefs: null }), comp.values), at.x, at.z);
+    } else {
+      built = App.buildPart(comp.type, Parts.legsOf(comp), comp.values);
+    }
+    App.scene.add(built.group);
+    comp.group = built.group;
+    comp.pins = built.pinPositions;
+    comp.pinMeshes = [];
+    addPinMarkers(comp);
+  }
+
+  // values: already checked with Parts.checkValue, e.g. { resistance: 1000 }.
+  App.setValues = function (comp, values) {
     pushHistory();
-    const vals = checkedValues('battery', values);
-    const built = App.buildPart('battery', Parts.legsOf({ type: 'battery', holeRefs: null }), vals);
-    addPart('battery', atSpot(built, offboardX(wx), wz), vals, null, opts);
+    comp.values = App.componentValues(comp.type, Object.assign({}, comp.values, values));
+    redrawPart(comp);
+    refreshCounts();
+    if (App.simRunning) App.runSimulation();
+  };
+
+  // controls: e.g. { pressed: true }, each one the part has.
+  App.setControls = function (comp, controls) {
+    pushHistory();
+    comp.controls = Object.assign({}, comp.controls, controls);
+    if (App.simRunning) App.runSimulation();
+  };
+
+  // Removes the part and the wires on its pins.
+  App.deletePart = function (comp) {
+    pushHistory();
+    if (state.selected && state.selected.item === comp) App.deselect();
+    removeComponent(comp);
+    refreshCounts();
+    if (App.simRunning) App.runSimulation();
   };
 
   // ── Gestures ─────────────────────────────────────────────────
@@ -506,6 +481,20 @@
 
   // ── Delete ───────────────────────────────────────────────────
 
+  function removeComponent(item) {
+    (item.pinMeshes || []).forEach(pm => App.scene.remove(pm));
+    if (item.group) App.scene.remove(item.group);
+    state.components = state.components.filter(c => c !== item);
+    state.unknownWires = state.unknownWires.filter(w => w.startComp !== item && w.endComp !== item);
+    // Wires anchored to this component's pins would keep pointing at the
+    // deleted record, so take them with it.
+    state.wires = state.wires.filter(w => {
+      if (w.startComp !== item && w.endComp !== item) return true;
+      App.scene.remove(w.group);
+      return false;
+    });
+  }
+
   App.deleteSelected = function () {
     if (!state.selected) return;
     const { item, kind } = state.selected;
@@ -513,17 +502,7 @@
     App.deselect();
 
     if (kind === 'component') {
-      (item.pinMeshes || []).forEach(pm => App.scene.remove(pm));
-      if (item.group) App.scene.remove(item.group);
-      state.components = state.components.filter(c => c !== item);
-      state.unknownWires = state.unknownWires.filter(w => w.startComp !== item && w.endComp !== item);
-      // Wires anchored to this component's pins would keep pointing at the
-      // deleted record, so take them with it.
-      state.wires = state.wires.filter(w => {
-        if (w.startComp !== item && w.endComp !== item) return true;
-        App.scene.remove(w.group);
-        return false;
-      });
+      removeComponent(item);
     } else if (kind === 'wire') {
       App.scene.remove(item.group);
       state.wires = state.wires.filter(w => w !== item);
@@ -769,6 +748,14 @@
     return comp.label ? `${id}.${k}` : `${id}_pin${k}`;
   }
 
+  // True when a part's elements have a direction (a diode, a source), so its
+  // pin names matter: the LED's cathode and anode.
+  function oneWay(def, c) {
+    let els = [];
+    try { els = def.elements(App.componentValues(c.type, c.values), c.controls || {}) || []; } catch { els = []; }
+    return els.some(el => el.kind !== 'R' && el.kind !== 'SW');
+  }
+
   App.exportMarkdown = function () {
     function holeStr(ref) {
       if (!ref) return null;
@@ -799,7 +786,9 @@
         if (c.holeRefs) {
           pA = holeStr(c.holeRefs[0]);
           pB = holeStr(c.holeRefs[1]);
-          if (c.type === 'led') { pA += ' (cathode −)'; pB += ' (anode +)'; }
+          // A one-way part says which leg is which, from its pin names.
+          const def = Parts.get(c.type);
+          if (def && oneWay(def, c)) { pA += ` (${def.pins[0]})`; pB += ` (${def.pins[1]})`; }
         } else {
           // Off-board battery — show the wire reference names the AI must use
           pA = `off-board + → wire ref: ${pinRef(comps, c, 0)}`;
@@ -810,7 +799,7 @@
     }
 
     // ── Battery wiring cheat-sheet ──
-    const batteries = comps.filter(c => c.type === 'battery');
+    const batteries = comps.filter(c => { const def = Parts.get(c.type); return def && def.place.kind === 'offboard'; });
     if (batteries.length) {
       md += '\n## Battery wiring (how to connect in add_wire actions)\n';
       batteries.forEach(b => {
@@ -872,15 +861,8 @@
           z: +c.group.position.z.toFixed(2),
         };
       }
-      const v = c.values || App.componentValues(c.type);
-      if (c.type === 'led') {
-        obj.color = v.color;
-        obj.value = v.vf + 'V';
-      } else if (c.type === 'resistor') {
-        obj.value = v.resistance + 'Ω';
-      } else if (c.type === 'battery') {
-        obj.value = v.voltage + 'V';
-      }
+      const value = App.formatValue(c);
+      if (value) obj.value = value;
       return obj;
     });
 

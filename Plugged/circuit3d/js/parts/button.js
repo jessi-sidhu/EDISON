@@ -136,6 +136,7 @@
       about:    'A push button: two leads on one row, exactly 3 columns apart. Open until pressed; ' +
                 'the user clicks it while the simulation runs.',
       keywords: ['button', 'switch', 'push', 'press', 'pushbutton'],
+      everyday: true,
     },
 
     view: { build, update },

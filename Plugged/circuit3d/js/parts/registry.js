@@ -261,9 +261,9 @@
     if (!isObj(ex.expect)) bad(`${at}.expect must be an object`);
   }
 
-  function checkAi(ai, bad) {
+  function checkAi(ai, values, bad) {
     if (!isObj(ai)) return bad('ai must be an AiSpec object');
-    unknownFields(ai, ['tool', 'about', 'keywords', 'guide', 'recipe'], 'ai', bad);
+    unknownFields(ai, ['tool', 'about', 'keywords', 'values', 'guide', 'recipe', 'everyday'], 'ai', bad);
     if (ai.tool !== undefined && (typeof ai.tool !== 'string' || !TYPE_RE.test(ai.tool))) {
       bad(`ai.tool "${ai.tool}" must be lower case letters, digits and _`);
     }
@@ -276,6 +276,17 @@
       if (k.length > 8) bad(`ai.keywords has ${k.length}; at most 8 are allowed`);
       for (const w of k) if (typeof w !== 'string' || !w || w !== w.toLowerCase()) bad(`ai.keywords "${w}" must be lower case`);
     }
+    // The value keys the AI may set, as tool params. Default: all of them.
+    if (ai.values !== undefined) {
+      if (!Array.isArray(ai.values)) bad('ai.values must be a list of value keys');
+      else {
+        const keys = isObj(values) ? Object.keys(values) : [];
+        for (const k of ai.values) if (typeof k !== 'string' || !keys.includes(k)) bad(`ai.values "${k}" is not one of the part's values (${keys.join(', ')})`);
+        if (new Set(ai.values).size !== ai.values.length) bad('ai.values names a value twice');
+      }
+    }
+    // In the set the server sends when a message names no part.
+    if (ai.everyday !== undefined && typeof ai.everyday !== 'boolean') bad('ai.everyday must be true or false');
     if (ai.recipe !== undefined) checkExample(ai.recipe, 'ai.recipe', bad);
   }
 
@@ -391,7 +402,7 @@
     checkBehaviour(def, pins, bad);
 
     if (def.ai !== undefined) {
-      checkAi(def.ai, bad);
+      checkAi(def.ai, def.values, bad);
       if (isObj(def.ai)) {
         const tool = toolOf(def);
         for (const other of registry.values()) {

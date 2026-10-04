@@ -152,6 +152,11 @@
       about:    'A buzzer: two leads on one row, exactly 2 columns apart. Sounds when current flows through it; ' +
                 'put a resistor in series.',
       keywords: ['buzzer', 'beep', 'sound', 'alarm', 'noise', 'tone'],
+      everyday: true,
+      guide:    'Put a resistor in series with the buzzer (place_resistor). Each part shares a column with the next, or no ' +
+                'current flows: resistor b{C}–b{C+4}, buzzer c{C+4}–c{C+6}, wires tp_{C+1} -> a{C} and a{C+6} -> tn_{C+6}. ' +
+                'With a button first: button b{C}–b{C+3}, resistor c{C+3}–c{C+7}, buzzer d{C+7}–d{C+9}, ' +
+                'wires tp_{C+1} -> a{C} and a{C+9} -> tn_{C+9}.',
     },
 
     view: { build, update },

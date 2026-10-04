@@ -15,8 +15,8 @@ async function openEditor(page, reply = { reply: '', actions: [] }) {
 async function placeBatteryAndResistor(page) {
   await page.evaluate(() => {
     const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeBattery(13, 0);
-    App.placeResistor(hole('a2'), hole('a6'));
+    App.placePart('battery', { x: 13, z: 0 });
+    App.placePart('resistor', [hole('a2'), hole('a6')]);
     const bat = App.state.components.find(c => c.type === 'battery');
     const pm = bat.pinMeshes[0];
     const h = hole('tp_2');
@@ -85,7 +85,7 @@ test('a build wired from BAT1.0 previews every wire, applies on Accept and light
 
 test('with a BAT1 already on the board, delete_all then place_battery previews the wire to the new BAT1', async ({ page }) => {
   await openEditor(page, ledBuild(k => `BAT1.${k}`));
-  await page.evaluate(() => App.placeBattery(-20, 0));   // the old BAT1, gone after delete_all
+  await page.evaluate(() => App.placePart('battery', { x: -20, z: 0 }));   // the old BAT1, gone after delete_all
   expect(await previewGhosts(page)).toBe(7);
 
   await page.getByRole('button', { name: 'Accept' }).click();
@@ -102,7 +102,7 @@ test('without delete_all, a battery added next to BAT1 is BAT2, and a wire to BA
       { tool: 'add_wire', from: 'BAT2.0', to: 'tp_20', color: 'red' },
     ],
   });
-  await page.evaluate(() => App.placeBattery(-20, 0));   // BAT1
+  await page.evaluate(() => App.placePart('battery', { x: -20, z: 0 }));   // BAT1
   expect(await previewGhosts(page)).toBe(2);   // battery, wire
 
   await page.getByRole('button', { name: 'Accept' }).click();

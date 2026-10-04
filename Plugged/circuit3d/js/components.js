@@ -52,20 +52,28 @@
     return v;
   }
 
-  function formatOhms(r) {
-    if (!(r > 0)) return '0 Ω';
-    if (r >= 1e6) return +(r / 1e6).toFixed(2) + ' MΩ';
-    if (r >= 1e3) return +(r / 1e3).toFixed(2) + ' kΩ';
-    return r + ' Ω';
+  // A number with its unit, SI-prefixed for Ω V A F H: 1000 Ω → "1 kΩ".
+  // The same format as Parts.checkValue's reasons.
+  const SI = [[1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p']];
+  function withUnit(n, unit) {
+    const sep = unit === '%' ? '' : ' ';
+    if (!['Ω', 'V', 'A', 'F', 'H'].includes(unit) || n === 0) return String(n) + sep + unit;
+    const a = Math.abs(n);
+    const [f, p] = SI.find(([f]) => a >= f) || SI[SI.length - 1];
+    return (n < 0 ? '−' : '') + String(Number((a / f).toPrecision(3))) + ' ' + p + unit;
   }
 
-  // Human-readable value of a placed component, e.g. "220 Ω".
-  function formatValue(comp) {
+  // Human-readable values of a placed component, from its ValueSpecs:
+  // "470 Ω", "red", "9 V", joined by ", ". `keys` defaults to the values the
+  // AI may set (ai.values, else all). '' for a part with none.
+  function formatValue(comp, keys) {
+    const def = registryDef(comp.type);
+    const specs = (def && def.values) || {};
     const v = comp.values || componentValues(comp.type);
-    if (comp.type === 'resistor') return formatOhms(v.resistance);
-    if (comp.type === 'battery') return v.voltage + ' V';
-    if (comp.type === 'led') return (v.color || 'red') + ', ' + Number(v.vf).toFixed(1) + ' V forward';
-    return '';
+    const list = keys || (def && def.ai && def.ai.values) || Object.keys(specs);
+    return list.filter(k => specs[k] && v[k] != null)
+      .map(k => (specs[k].choices ? String(v[k]) : withUnit(Number(v[k]), specs[k].unit)))
+      .join(', ');
   }
 
   // ─── Helpers ─────────────────────────────────────────────────

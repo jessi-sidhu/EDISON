@@ -14,9 +14,9 @@ async function openEditor(page) {
 async function placeThreeResistors(page) {
   await page.evaluate(() => {
     const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeResistor(hole('a2'), hole('a6'));
-    App.placeResistor(hole('a10'), hole('a14'));
-    App.placeResistor(hole('a18'), hole('a22'));
+    App.placePart('resistor', [hole('a2'), hole('a6')]);
+    App.placePart('resistor', [hole('a10'), hole('a14')]);
+    App.placePart('resistor', [hole('a18'), hole('a22')]);
   });
 }
 
@@ -33,11 +33,11 @@ test('every kind of part gets a label when it is placed', async ({ page }) => {
   await openEditor(page);
   await page.evaluate(() => {
     const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeResistor(hole('a2'), hole('a6'));
-    App.placeLED(hole('a8'), hole('a9'));
-    App.placeBattery(-20, 0);
-    App.placeBuzzer(hole('a12'), hole('a13'));
-    App.placeButton(hole('e20'), hole('e22'));
+    App.placePart('resistor', [hole('a2'), hole('a6')]);
+    App.placePart('led', [hole('a8'), hole('a9')]);
+    App.placePart('battery', { x: -20, z: 0 });
+    App.placePart('buzzer', [hole('a12'), hole('a13')]);
+    App.placePart('button', [hole('e20'), hole('e22')]);
   });
   expect(await labels(page)).toEqual(['R1', 'LED1', 'BAT1', 'BZ1', 'SW1']);
 });
@@ -46,8 +46,8 @@ test('a place call can pass its own label', async ({ page }) => {
   await openEditor(page);
   await page.evaluate(() => {
     const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeResistor(hole('a2'), hole('a6'), undefined, { label: 'R7' });
-    App.placeBattery(-20, 0, undefined, { label: 'BAT4' });
+    App.placePart('resistor', [hole('a2'), hole('a6')], undefined, { label: 'R7' });
+    App.placePart('battery', { x: -20, z: 0 }, undefined, { label: 'BAT4' });
   });
   expect(await labels(page)).toEqual(['R7', 'BAT4']);
 });
@@ -60,7 +60,7 @@ test('deleting R1 leaves R2 and R3, and the next resistor is R4', async ({ page 
 
   await page.evaluate(() => {
     const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
-    App.placeResistor(hole('a26'), hole('a30'));
+    App.placePart('resistor', [hole('a26'), hole('a30')]);
   });
   expect(await labels(page)).toEqual(['R2', 'R3', 'R4']);
 });
