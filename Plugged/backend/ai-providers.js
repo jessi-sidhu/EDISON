@@ -162,11 +162,25 @@ async function askDeepSeek(markdown, userMsg, history, ctx) {
   let tools = toOpenAITools([{ function_declarations: decls }]);
   const actions = [];
   let reply = '';
+  let repairs = 0;
   for (let round = 0; round < DEEPSEEK_MAX_ROUNDS; round++) {
     const m = await deepSeekTurn(messages, tools, ctx);
     if (String(m.content || '').trim()) reply = String(m.content).trim();
     const calls = (m.tool_calls || []).filter(c => c && c.function && c.function.name);
-    if (!calls.length) break;
+    if (!calls.length) {
+      // The model ended its turn. A full rebuild the server finds problems
+      // in goes back to it with those problems, at most MAX_REPAIRS times,
+      // and only while a round is left for the answer.
+      const canRepair = !!ctx.checkBuild && repairs < MAX_REPAIRS && round + 1 < DEEPSEEK_MAX_ROUNDS;
+      const problems  = canRepair || (ctx.checkBuild && repairs > 0) ? safeCheck(ctx.checkBuild, actions) : [];
+      if (repairs > 0) console.log(`[repair] after round ${repairs}: ${problems.length ? `${problems.length} problems left` : 'clean'}`);
+      if (!canRepair || !problems.length) break;
+      repairs++;
+      console.log(`[repair] round ${repairs}: ${problems.length} problems`);
+      messages.push({ role: 'assistant', content: m.content || '' });
+      messages.push({ role: 'user', content: `${REPAIR_HEADING}\n${problems.map(p => `- ${p}`).join('\n')}` });
+      continue;
+    }
 
     messages.push({ role: 'assistant', content: m.content || '', tool_calls: calls });
     for (const c of calls) {
@@ -202,6 +216,21 @@ async function askDeepSeek(markdown, userMsg, history, ctx) {
 // A chat turn is resent in full each round, so this bounds the cost of a
 // model that never stops calling tools. A 3-LED build is ~16 calls.
 const DEEPSEEK_MAX_ROUNDS = 12;
+// Repair rounds a full rebuild gets when checkBuild finds problems. They
+// count toward DEEPSEEK_MAX_ROUNDS.
+const MAX_REPAIRS = 2;
+const REPAIR_HEADING = 'Your build has problems. Rebuild it with these fixed (delete_all first, then the whole corrected circuit):';
+
+// checkBuild's problems, or none if it throws: a broken check never costs a round.
+function safeCheck(checkBuild, actions) {
+  try {
+    const problems = checkBuild(actions);
+    return Array.isArray(problems) ? problems : [];
+  } catch (e) {
+    console.warn('[repair] check failed:', e.message);
+    return [];
+  }
+}
 
 // One request to DeepSeek. Returns the assistant message.
 async function deepSeekTurn(messages, tools, ctx) {

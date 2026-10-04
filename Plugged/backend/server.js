@@ -17,6 +17,10 @@ const { makeAsk } = require('./ai-providers');
 const { COLS, TOTAL_HOLES, BODY_ROWS } = require('../circuit3d/js/board-geometry.js');
 // The parts registry: every part's tool, prompt lines and circuit behaviour.
 const Parts = require('../circuit3d/js/parts');
+// The board as plain data and the simulator, so a whole AI build can be
+// checked in Node before the user sees it (the repair loop).
+const Board = require('../circuit3d/js/board-model.js');
+const Sim   = require('../circuit3d/js/simulate.js');
 
 // ── Load .env ─────────────────────────────────────────────────
 function loadEnv() {
@@ -969,6 +973,7 @@ const ask = makeAsk(
     promptFor: buildPrompt,
     partTools,
     refusal:   placementRefusal,
+    checkBuild,
   }
 );
 
@@ -1033,6 +1038,37 @@ async function askGemini(markdown, userMsg, history) {
   return finishAIReply({ reply, actions });
 }
 
+// ── Build check (the repair loop) ────────────────────────────
+// The actions from the last delete_all onward: everything before it is
+// wiped, so the board they leave is the whole result. null without one.
+function fromLastDeleteAll(actions) {
+  let i = -1;
+  (actions || []).forEach((a, k) => { if (a && a.tool === 'delete_all') i = k; });
+  return i < 0 ? null : actions.slice(i);
+}
+
+// A full rebuild's problems as sentences the model can act on: the
+// checker's, then the simulator's. [] for an edit (no delete_all), whose
+// board the server doesn't have. Board.apply errors are not problems (the
+// live board accepts older pin forms), and a simulator that throws leaves
+// just the checker's list.
+function checkBuild(actions) {
+  const build = fromLastDeleteAll(actions);
+  if (!build) return [];
+  const problems = findCircuitProblems(build, { labelForm: true });
+  try {
+    const { components, wires } = Board.toSim(Board.apply(Board.empty(), build).board);
+    const r = Sim.analyze(components, wires);
+    if (r.status === 'unsolvable') problems.push('The simulator cannot solve this circuit. Check that every part sits between power and ground.');
+    if (r.status === 'unsettled')  problems.push('The simulator could not settle this circuit, so it has no readings.');
+    if (r.shorted) problems.push('The battery is shorted: current reaches ground with nothing to limit it.');
+    for (const [label, part] of Object.entries(r.parts || {})) {
+      for (const w of (part && part.warnings) || []) problems.push(`${label}: ${w}`);
+    }
+  } catch { /* the checker's problems stand alone */ }
+  return [...new Set(problems)];
+}
+
 // ── Shared reply clean-up ────────────────────────────────────
 // Every model's { reply, actions } goes through this before the browser
 // sees it: a default reply, JSON-in-text fallback, malformed actions
@@ -1059,6 +1095,10 @@ function finishAIReply({ reply, actions }) {
       } catch { /* ignore parse errors */ }
     }
   }
+
+  // A rebuild wipes what came before it, so send only the final build: the
+  // same board, and a repaired build isn't judged on its first try.
+  actions = fromLastDeleteAll(actions) || actions;
 
   // Name battery pins in problems the way the AI wrote them, judged before
   // malformed actions are dropped so a half-written wire still counts.
@@ -1258,4 +1298,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, ask, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems };
+module.exports = { server, ask, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems, checkBuild };

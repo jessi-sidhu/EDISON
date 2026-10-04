@@ -100,7 +100,8 @@ The element `pins` name the part's pins, or internal nodes written `'#name'` (pr
 | `D` | `pins:[anode,cathode], vf, ron, vz?` | Mode block: `off` / `on` / (`breakdown` if `vz`). Replaces today's LED special case. |
 | `E` | `out:[+,−], ctrl:[+,−], gain, clamp?:[lo,hi]` | Voltage-controlled voltage source. `clamp` makes it a mode block (`linear` / `low` / `high`): the op-amp's rails. Arrives with dependent sources. |
 | `G` | `out:[from,to], ctrl:[+,−], gain` | Voltage-controlled current source. Arrives with dependent sources. |
-| `C`, `L` | none | **Reserved.** Rejected until Phase 5–6. |
+| `C` | `pins:[a,b], farads, vmax?, polarised?` | Open in a plain solve. With `analyze(components, wires, { dt, state })` it is the backward-Euler companion: `G = C/h` plus a current source `G·v_prev`. `vmax` and `polarised` are for the mistake checker. |
+| `L` | none | **Reserved.** Rejected until Phase 5–6. |
 
 **Mode blocks** (`D`, and `E` with `clamp`) are solved by one generic loop:
 1. Solve.
@@ -135,6 +136,7 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
   recipe?: Example,            // a worked build; must also pass the testing contract
 }
 ```
+- `ai: false` instead of an object: the part is never offered to the AI as a tool or listed in the prompt (e.g. the multimeter, the capacitor).
 
 ### `ViewSpec` (browser only)
 ```js
@@ -287,6 +289,35 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
   - `status` can also be `'unsettled'` or `'no-source'`
   - `parts: { [label]: { r: PartResult, m: measured, warnings: string[] } }`
 - `ledsOn` and `buzzersOn` are gone (#26): the page reads `parts[label].m` and calls each part's `view.update`. `'no-source'` replaced `'no-battery'`.
+- **Optional third argument `{ dt, state }`** (additive): `analyze(components, wires, { dt, state })` runs one time step of length `dt`.
+  - Each `C` starts at its voltage in `state` (0 V when missing, i.e. discharged).
+  - `result.state` holds each capacitor's voltage after the step.
+  - Without `dt`, a `C` is an open circuit.
+  - Called without the third argument on a board with no `C` elements, it behaves exactly as today.
+
+### `Readings` (`circuit3d/js/readings.js`)
+- **Owner:** readings (`circuit3d/js/readings.js`). A plain module that loads in Node, like `simulate.js`. It never changes the solver.
+- **Called by:** the tools (`circuit3d/js/tools/`), and `simulate.js`, which builds the readings for `plugged:sim`.
+- **Units:** V, mA and W, the same as the results panel. `energy` is in µJ.
+- **Input:** `Readings.from(result, board)`. `result` is from `Sim.analyze`; `board` is `{ components, wires }`, the same arguments given to `Sim.analyze`. In Node that is `Board.toSim(board)`'s output; in the page it is `App.state`. Readings are recomputed from the latest result.
+- **Output:** an object with:
+  - `netOf(hole)` → `{ id, holes[], pins[] }`
+  - `voltage(hole | net)` → volts, or `null` when floating
+  - `part(label)` → `{ V, I, P, rating, over, energy? }`
+    - V is the voltage across the part's outer pins, I is its current, and P = V·I, in W (I is in mA, so P = V × I ÷ 1000).
+    - `rating` comes from the part's own values where it has one. Resistors are rated **¼ W**. A part with no rating has none.
+    - `energy` is ½CV², in µJ, for capacitors only.
+  - `kcl(net)` → `[{ label, pin, amps }]`: each element current into the net, signed, in mA. It sums to 0 within 1 µA.
+  - `thevenin(a, b)` → `{ Vth, Rth, In }` or `{ why }`. It solves copies of the board when called, never on every solve. `{ why }` when there is no source, or when a and b are on the same net.
+  - `problems()` → `[{ kind, labels[], why }]`, built from the simulation result. It covers shorts, LEDs with no resistor, backwards parts, open circuits and parts over their rating. `why` is plain English.
+- **`Readings.nets(board)`:** which holes and pins are joined, with no solve needed (for the connection highlight). `board` is `{ components, wires }`, as for `Readings.from`.
+- **Errors:** never throws. `voltage` gives `null` when floating; `thevenin` gives `{ why }`; `part(label)` for an unknown label and `netOf(hole)` for a hole not on the board give `null`.
+- **Mock:** none. Tests build a real result in Node with `Board.toSim` and `Sim.analyze`.
+
+### Page events (`plugged:sim`, `plugged:sim-stop`)
+- **`plugged:sim`** on `document`, with `detail: { result, readings }`. Sent after every solve, and once per frame while time runs.
+- **`plugged:sim-stop`** on `document`, sent on Stop.
+- **Tools** live in `Plugged/circuit3d/js/tools/`. They only read `Readings`. A tool never calls the solver itself; the one exception is `thevenin()`.
 
 ### Legacy entry points (deleted in #27)
 The per-type wrappers (`App.placeResistor` and the rest) and `chat.js`'s `PLACE` map are gone. Every placement goes through `App.placePart(type, where, values, opts)`, and the AI reaches it through the tools `server.js` generates from the registry. **Every change must keep the AI demo path working** ("Build a single LED circuit…" → preview → Accept → lit).
