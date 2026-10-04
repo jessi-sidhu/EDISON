@@ -1,16 +1,16 @@
 ---
 name: new-task
-description: Turn a rough description into one or more well-formed GitHub issues that a teammate's agent can finish without asking questions. Use when anyone wants to create, split or re-scope tasks, or to file a bug.
+description: Turn a rough description into one or more well-formed GitHub issues that an agent can finish without asking questions. Use when anyone wants to create, split or re-scope tasks, or to file a bug.
 argument-hint: "[what needs doing]"
 ---
 
 # Write a task issue
 
-A good issue lets a less-experienced teammate's agent finish the work alone. The teammate should never need to understand the whole system.
+A good issue lets an agent finish the work alone, without needing to understand the whole system.
 
 1. **Ground it.** Read the relevant parts of `docs/PRD.md`, `docs/ARCHITECTURE.md` and `docs/API-CONTRACT.md`, and look at the actual files involved.
 2. **Size it.** One issue is about 1 to 2 hours of work, one owner, about 300 changed lines or fewer, and touches one module. Split anything bigger into separate issues and note their order.
-3. **Check the contract.** If the task needs an interface that isn't in `docs/API-CONTRACT.md`, stop and propose the contract addition on an issue first; it needs one other teammate to agree. Tasks build against contracts, never invent them.
+3. **Check the contract.** If the task needs an interface that isn't in `docs/API-CONTRACT.md`, stop and propose the contract addition to the user first. Tasks build against contracts, never invent them.
 4. **Fill in the template** from `.github/ISSUE_TEMPLATE/task.md`:
    - **Files** are exact paths inside the assignee's owned folder.
    - **Steps** are concrete and name the functions, components and contract interfaces to use.

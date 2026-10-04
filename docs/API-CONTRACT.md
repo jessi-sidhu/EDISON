@@ -1,7 +1,7 @@
 # API contract
 
 <!-- Shared. This is how modules talk to each other. Agents build against it exactly.
-     Changing it needs one other teammate to agree: propose it on the issue, and PRs touching this file need one other teammate's approval. -->
+     Aarmen changes it; say what changed in the commit. Physics behind a shape (units, ratings) goes past Thandi. -->
 
 ## Rules
 - Every interface lists its input and output shapes, its error cases, and a mock response.

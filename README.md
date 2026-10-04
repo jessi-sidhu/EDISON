@@ -14,19 +14,18 @@ GitHub issue ──/start-task──▶ local branch ──build + verify──�
                 main (tested, demo-ready) ◀── /promote (CI green + demo walk) ◀───────────┘
 ```
 
-- **Everyone has an equal say.** A change to anything shared (the API contract, architecture, dependencies, config) needs the proposer plus one other teammate agreeing.
-- **Every piece of work is a GitHub issue.** Anyone can write one with `/new-task`. Pick one with `/start-task`, or run `/start-task 12` for a specific issue.
-- **Your Claude follows the issue.** It touches only the files the issue lists and builds against `docs/API-CONTRACT.md`. If something is unclear, comment on the issue and ask the team.
-- **Finish with `/ship`.** It runs the checks, reviews the diff, and pushes straight to `dev`, the shared workspace. No PR and no waiting. Shared files need one other teammate's OK first.
-- **Moving to `main` is a quick test.** Anyone runs `/promote`: CI must be green on `dev`, then it walks the demo path in a browser and merges a `dev → main` PR. Do it at the end of each build day, and at sprint checkpoints.
-- **Full QA is for checkpoints.** Guneev runs `/qa-pass` (the real prompts and circuits in `docs/QA.md`) about once a day and before submitting, and files what breaks as `bug` issues for Aarmen.
+- **Aarmen decides; Thandi on the physics.** Aarmen writes the code and makes the calls. Anything that rests on circuit physics (a part's model or rating, a simulator rule, an expected reading) goes past Thandi first.
+- **Every piece of work is a GitHub issue.** Write one with `/new-task`. Pick one with `/start-task`, or run `/start-task 12` for a specific issue.
+- **Your Claude follows the issue.** It touches only the files the issue lists and builds against `docs/API-CONTRACT.md`. If something is unclear, it stops and asks.
+- **Finish with `/ship`.** It runs the checks, reviews the diff, and pushes straight to `dev`. No PR and no waiting.
+- **Moving to `main` is a quick test.** `/promote`: CI must be green on `dev`, then it walks the demo path in a browser and merges a `dev → main` PR. Do it at the end of each build day, and at sprint checkpoints.
+- **Full QA is for checkpoints.** `/qa-pass` runs the real prompts and circuits in `docs/QA.md` about once a day and before submitting, and files what breaks as `bug` issues.
 - **`main` is always demo-ready.** `/demo-check` walks the demo story on it.
 
 | Who | Focus |
 |---|---|
-| Aarmen | Architecture (shared), fixing `bug` issues, testing features as they land on `dev` |
-| Guneev | QA/QC: owns `docs/QA.md` and runs `/qa-pass` at checkpoints |
-| Manav, Armaan | Fast feature sprints, shipped straight to `dev` on green checks |
+| Aarmen | All the code: architecture, features, `bug` fixes, `/qa-pass` and `/promote` |
+| Thandi | Engineer: circuit design and physical testing; checks the simulator and the expected results in `docs/QA.md` against real parts |
 
 The full rules are in [AGENTS.md](AGENTS.md). The plan and design docs are in [docs/](docs/).
 

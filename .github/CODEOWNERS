@@ -1,9 +1,4 @@
-# Shared files. Equal say: any one teammate other than the author can approve.
-# Add Manav's, Guneev's and Armaan's GitHub usernames to each line, e.g.
-#   /docs/  @aarmens702-hub @manav-handle @guneev-handle @armaan-handle
-# Until they're added, don't turn on "Require review from Code Owners" in
-# branch protection, or only Aarmen could approve. Use "Require 1 approval"
-# on main instead; that already enforces the two-agree rule.
+# Shared files. Aarmen owns the code and docs.
 /docs/                  @aarmens702-hub
 /AGENTS.md              @aarmens702-hub
 /CLAUDE.md              @aarmens702-hub

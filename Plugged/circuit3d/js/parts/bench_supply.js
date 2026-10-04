@@ -183,9 +183,24 @@
       about:    'A bench power supply beside the board: + (PS1.0), COM (PS1.1) and − (PS1.2) terminals, ' +
                 '12 V unless given a voltage, with a current limit.',
       keywords: ['bench supply', 'power supply', 'lab supply', 'dual supply', '±12', 'current limit'],
-      guide:    'Wire PS1.0 (+) to a + rail (tp_N, red) and PS1.1 (COM = ground) to a ground rail (tn_N, black). ' +
-                'For a − rail too, wire PS1.2 (−) to bn_N; parts between COM and − see −V. Never wire two ' +
-                'terminals straight together. The current limit only warns; it does not hold the current.',
+      guide:    'Wire PS1.0 (+) to tp_N (red) and PS1.1 (COM = ground) to tn_N (black). One rail: use only + and ' +
+                'COM; leave PS1.2 unwired. For ± rails also wire PS1.2 (−) to bn_N; a − side LED has its anode ' +
+                'toward COM (tn) and its cathode toward − (bn). Never wire two terminals straight together. ' +
+                'The current limit only warns; it does not hold the current.',
+      recipe:   {
+        name:  '±12 V (both rails): an LED and 1 kΩ from + to COM, and another from COM to −, its anode toward COM',
+        parts: [{ type: 'bench_supply', label: 'PS1', values: { voltage: 12 } },
+                { type: 'resistor', label: 'R1', holes: ['b2', 'b6'], values: { resistance: 1000 } },
+                { type: 'led', label: 'LED1', holes: ['c8', 'c6'] },        // cathode c8, anode c6 (toward +)
+                { type: 'resistor', label: 'R2', holes: ['g10', 'g14'], values: { resistance: 1000 } },
+                { type: 'led', label: 'LED2', holes: ['h16', 'h14'] }],     // cathode h16 (toward −), anode h14 (toward COM)
+        wires: [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63'], ['PS1.2', 'bn_63'],
+                ['tp_3', 'a2'], ['a8', 'tn_8'],
+                ['tn_10', 'f10'], ['j16', 'bn_16']],
+        expect: { LED1: { on: true, current: [9.9, 10.1] },
+                  LED2: { on: true, current: [9.9, 10.1] },
+                  PS1:  { posAmps: [9.9, 10.1], negAmps: [9.9, 10.1], posOver: false, negOver: false } },
+      },
     },
 
     view: { build, update },

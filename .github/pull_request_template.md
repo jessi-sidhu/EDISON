@@ -9,7 +9,7 @@ Closes #
 <!-- URL / steps to see it working in the app. -->
 
 ## Shared files touched
-<!-- None, or list them (contract, schema, config, layout, lockfile). If any: needs one other teammate's approval. -->
+<!-- None, or list them (contract, schema, config, layout, lockfile). Say what changed. -->
 None
 
 ## Checks

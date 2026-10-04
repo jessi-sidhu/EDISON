@@ -1,6 +1,6 @@
 # PRD
 
-<!-- Shared: anyone edits, one other teammate agrees. Fill in during build week; revise at track drop with /adapt-to-tracks. Keep it to one page. -->
+<!-- Aarmen keeps this current. Fill in during build week; revise at track drop with /adapt-to-tracks. Keep it to one page. -->
 
 ## Problem
 <!-- Who has what problem, in one or two sentences. Why it matters now. -->

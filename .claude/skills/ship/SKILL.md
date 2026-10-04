@@ -21,7 +21,7 @@ description: Finish the current task - run checks, review, commit, rebase onto t
    - Otherwise, run the **reviewer** subagent with the issue text.
    - On FIX, fix the listed items, run the checks again, and run the reviewer once more. If it still says FIX, stop and show the user.
    - Remove debug logs, commented-out code and anything out of scope.
-4. **Shared files.** If the diff touches shared files (docs/, config, lockfiles, .claude/, .github/, schema, root layout), ask the user whether one other teammate has OK'd it. If not, stop until they have.
+4. **Circuit physics.** If the diff changes a part's model or rating, a simulator rule, a mistake rule, a lab circuit or an expected value in `docs/QA.md`, ask the user whether Thandi has checked it. If not, stop until he has.
 5. **Commit.** Stage only this task's files, never `.env*`. Use a short imperative message, ending with `Closes #<n>` when there's an issue.
 6. **Rebase and push to `dev`.**
    - Run `git fetch origin dev && git rebase origin/dev`.

@@ -1,6 +1,6 @@
 # QA script
 
-<!-- Guneev owns this file: add, change and retire cases freely (it's the one doc that doesn't need a second teammate).
+<!-- Thandi owns the expected results here (the circuits and the numbers a real board gives); Aarmen keeps the cases runnable.
      /qa-pass runs every case here against `dev`, in a real browser, the way a user would.
      Each case: what to do, and what must be true. Keep expected results concrete (numbers, exact messages) so a
      pass/fail is never a judgment call. At track drop, add the new demo path first. -->
@@ -36,6 +36,7 @@
 | AI-20 | Fresh board. Send: `Make a motor spin with a switch` Accept, then Run Simulation. Then, while it simulates, click the switch. | The build sets the battery to 3 V and places a toggle switch (S1) and a DC motor (M1) in one series loop, then closes the switch; the reply has no "Heads up". The simulation shows `⚙️ MOTOR spinning (300.0 mA)` and the red blade on top of the motor turns; there is no "over the 0.5 A" warning. A click on the switch opens it: `MOTOR not spinning (0.0 mA, …)` and the blade stops; a second click starts it again. No console errors. |
 | AI-21 | Fresh board. Send: `Build a nodal analysis circuit with a 10 mA current source and two resistors` Accept, then Run Simulation. | The build places a current source (IS1, 10 mA, no battery) with its `from` end (holeA) wired to a ground rail and its `to` end (holeB) feeding two 1 kΩ resistors, each back to ground; the reply has no "Heads up". The simulation shows `CURRENT SOURCE 10 mA · 5.0 V across`, with no "No path for the current" or "Circuit open" line. On the board the source is a round blue body with an arrow pointing to its `to` end. No console errors. |
 | AI-22 | Fresh board. Send: `Make an RGB LED glow purple` Accept, then Run Simulation. | The build places an RGB LED (RGB1) with its cathode (second leg) wired to the ground rail, and a 470 Ω resistor from + into the red pin and another into the blue pin, green left unconnected; the reply has no "Heads up". The simulation shows `💡 RGB LED ON: red 14.9 mA, blue 12.3 mA`, with no "over its 20 mA rating" line. On the board the dome glows purple, and goes dark again on Stop. No console errors. |
+| AI-23 | Fresh board. Send: `Use the bench supply at ±12 V: an LED with a resistor on the + rail and another on the − rail` Accept, then Run Simulation. | The build places a bench supply (PS1) at 12 V and wires PS1.0 to tp, PS1.1 (COM) to tn and PS1.2 (−) to bn; one LED and resistor run from + to COM, the other from COM to −, that LED's anode toward COM. The reply has no "Heads up". The simulation shows both LEDs ON at about 10 mA and the supply's ± headline, with no "current-limit" warning and no "backwards" line. No console errors. |
 
 ## Logic checks (are the numbers right?)
 Build these by hand, then click Run Simulation.

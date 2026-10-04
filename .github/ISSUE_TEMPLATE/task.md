@@ -11,7 +11,7 @@ labels: task
 <!-- Which part of the demo story this serves. Links: docs/PRD.md section, docs/API-CONTRACT.md interface(s). -->
 
 ## Files
-<!-- Exact files/folders to create or edit. Anything else needs one other teammate to agree. -->
+<!-- Exact files/folders to create or edit. Anything else: ask first. -->
 -
 
 ## Steps

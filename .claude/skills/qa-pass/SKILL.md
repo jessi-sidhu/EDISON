@@ -1,6 +1,6 @@
 ---
 name: qa-pass
-description: Full QA pass on dev like a real user - run every case in docs/QA.md (AI prompts, simulator numbers, core flows) in a real browser, report pass/fail and file failures as bug issues. For checkpoints (about daily, and before submitting), not every promotion. Use when Guneev (or anyone) says QA dev, run QA, or full test pass. For a quick check before moving dev to main, use /promote instead.
+description: Full QA pass on dev like a real user - run every case in docs/QA.md (AI prompts, simulator numbers, core flows) in a real browser, report pass/fail and file failures as bug issues. For checkpoints (about daily, and before submitting), not every promotion. Use when the user says QA dev, run QA, or full test pass. For a quick check before moving dev to main, use /promote instead.
 ---
 
 # QA pass on dev

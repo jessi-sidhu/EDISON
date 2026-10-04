@@ -1,6 +1,6 @@
 # Plan
 
-<!-- Shared: anyone edits, one other teammate agrees. The big picture: phases, order, checkpoints. Individual tasks live in GitHub Issues, not here. -->
+<!-- Aarmen keeps this current. The big picture: phases, order, checkpoints. Individual tasks live in GitHub Issues, not here. -->
 
 ## Build week (pre-event)
 <!-- Every serious team pre-builds. Goal: arrive with the core demo working on real code. Adjust dates. -->
@@ -10,21 +10,20 @@
 - [ ] PRD, ARCHITECTURE, API-CONTRACT first drafts
 - [ ] `docs/QA.md` covers the demo path, and a first `/qa-pass` runs clean on `dev`
 - [ ] `/promote` at the end of each build day
-- [ ] Dry run: each teammate completes one real issue end to end with /start-task and /ship. Turn every mistake into a Gotcha or a hook.
 - [ ] Foundations: auth, UI shell and navigation, API wrappers, ML/agent core (behind the contract)
 - [ ] Core product built for real: demo path works end to end on real implementations, deployed
 - [ ] Modules kept swappable behind the contract, ready to reshape for the tracks
 - [ ] Pitch draft and demo script written; first backup demo video recorded
 
 ## Track drop
-- [ ] Someone runs `/adapt-to-tracks`, a second teammate agrees, and the updated PRD and issue list go to the team.
-- [ ] Guneev adds the new demo path to `docs/QA.md`.
+- [ ] Aarmen runs `/adapt-to-tracks`; Thandi checks any new circuits.
+- [ ] The new demo path goes into `docs/QA.md`, with Thandi's expected numbers.
 
 ## Sprint (T = hacking starts; adjust to the real schedule)
 | Time | Checkpoint |
 |---|---|
 | T+0:00 | Track drop re-plan done; everyone has an issue |
-| T+1:00 | Kickoff: each person states their first issue |
+| T+1:00 | Kickoff: first issue picked; Thandi has the circuits to check |
 | T+4:00 | Track-specific changes visible on `dev` (mocks OK for new parts); first sprint `/promote` |
 | T+10:00 | New parts real; sponsor integrations in; `/qa-pass` checkpoint, then `/promote` |
 | T+14:00 | Checkpoint: cut anything that isn't nearly done |
