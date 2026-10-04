@@ -58,7 +58,7 @@
   const PHOTO_PAGE_TIMEOUT_MS = 60000;   // above the server's 45 s PHOTO_TIMEOUT_MS
   const PHOTO_LEADS_PAGE_TIMEOUT_MS = 45000;   // the server's 40 s PHOTO_LEADS_TIMEOUT_MS plus the upload
   const MAX_SIDE  = 3000;                // the original is resized to this before flattening
-  const SAMPLE_READ_MS = 1000;           // a board sample's photo under READING, then its board (#15)
+  const SAMPLE_READ_MS = 7000;           // a board sample's photo under READING, then its board (#15; 7 s since #19)
   const READING   = 'Reading your board…';
   const DEFAULT_Q = "What's wrong with my circuit?";       // Build it with nothing typed
   // docs/API-CONTRACT.md → "POST /api/photo" → Errors
