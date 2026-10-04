@@ -159,11 +159,14 @@
     });
 
     // 4. Resolve each pin to its root
-    return components.map((comp, ci) => ({
+    const graph = components.map((comp, ci) => ({
       comp,
       // nodes[pi] = root node of pin pi
       nodes: comp.pins.map((_, pi) => uf.find(pinNode[ci][pi])),
     }));
+    // nodeOf({ col, row }) = root node of any breadboard hole, pin or not.
+    graph.nodeOf = hole => uf.find(bbNodeId(hole.col, hole.row));
+    return graph;
   }
 
   // ── Nodal analysis ──────────────────────────────────────────
@@ -309,9 +312,14 @@
   //                  the part (so a lit LED is negative); null for a pressed
   //                  button, whose pins are one node
   //    shorted       true when a battery is shorted
+  //    voltageAt     ({ col, row }) -> volts at any breadboard hole, same
+  //                  reference as nodeVoltages; null when the hole's node is
+  //                  not connected to the first battery through wires or
+  //                  parts, or nothing was solved
   //
   function analyze(components, wires) {
-    const blank = { lines: [], ledsOn: [], buzzersOn: [], nodeVoltages: {}, currents: [], shorted: false };
+    const blank = { lines: [], ledsOn: [], buzzersOn: [], nodeVoltages: {}, currents: [], shorted: false,
+                    voltageAt: () => null };
 
     if (!components.length) {
       return Object.assign({}, blank, {
@@ -354,6 +362,22 @@
 
     const nodeVoltages = {};
     graph.forEach(g => g.nodes.forEach(n => { nodeVoltages[n] = sol.v(n); }));
+    // Nodes reachable from the first battery through parts. Wires and pressed
+    // buttons are already merged into one root; a released button is open.
+    // Anything else only reads a GMIN leak, so it is floating, not 0 V.
+    const live = new Set(bats[0].nodes);
+    for (let grew = true; grew;) {
+      grew = false;
+      graph.forEach(({ comp, nodes }) => {
+        if (comp.type === 'button' && !comp.pressed) return;
+        if (!nodes.some(n => live.has(n))) return;
+        nodes.forEach(n => { if (!live.has(n)) { live.add(n); grew = true; } });
+      });
+    }
+    const voltageAt = hole => {
+      const n = graph.nodeOf(hole);
+      return live.has(n) ? nodeVoltages[n] : null;
+    };
 
     const currents = graph.map(g => {
       const { comp, nodes } = g;
@@ -374,7 +398,7 @@
       } else {
         lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
       }
-      return Object.assign({}, blank, { status: 'ok', lines, nodeVoltages, currents, shorted: true });
+      return Object.assign({}, blank, { status: 'ok', lines, nodeVoltages, currents, shorted: true, voltageAt });
     }
 
     const ledsOn = [], buzzersOn = [];
@@ -419,7 +443,7 @@
       lines.push({ text: '  No output components in circuit path.', cls: 'sim-info' });
     }
 
-    return { status: 'ok', lines, ledsOn, buzzersOn, nodeVoltages, currents, shorted: false };
+    return { status: 'ok', lines, ledsOn, buzzersOn, nodeVoltages, currents, shorted: false, voltageAt };
   }
 
   // ── Presentation ─────────────────────────────────────────────

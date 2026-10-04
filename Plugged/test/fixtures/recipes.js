@@ -16,43 +16,49 @@ const HIGHEST_COL = (() => {
   return +m[1];
 })();
 
-// One LED: resistor on row a, LED on row b, the wires in their own holes.
-//   col 2: a2 resistor, b2 wire from tp_3
-//   col 6: a6 resistor, b6 LED anode
-//   col 8: b8 LED cathode, c8 wire to tn_8
+// Row a is the row nearest the rails, so every rail-to-body wire lands in
+// row a and the parts sit one row further back (rows b-d). No wire passes
+// under or between a part's legs (issue #16). Columns are as in #10, so each
+// part sits on the same nodes.
+
+// One LED: resistor on row b, LED on row c, the rail wires in row a.
+//   col 2: a2 wire from tp_3, b2 resistor
+//   col 6: b6 resistor, c6 LED anode
+//   col 8: a8 wire to tn_8, c8 LED cathode
 const ONE_LED = [
   { tool: 'delete_all' },
   { tool: 'place_battery' },
   { tool: 'add_wire', from: 'BAT1.0', to: `tp_${HIGHEST_COL}`, color: 'red' },
   { tool: 'add_wire', from: 'BAT1.1', to: `tn_${HIGHEST_COL}`, color: 'black' },
-  { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
-  { tool: 'place_led', holeA: 'b8', holeB: 'b6' },
-  { tool: 'add_wire', from: 'tp_3', to: 'b2', color: 'red' },
-  { tool: 'add_wire', from: 'c8', to: 'tn_8', color: 'black' },
+  { tool: 'place_resistor', holeA: 'b2', holeB: 'b6' },
+  { tool: 'place_led', holeA: 'c8', holeB: 'c6' },
+  { tool: 'add_wire', from: 'tp_3', to: 'a2', color: 'red' },
+  { tool: 'add_wire', from: 'a8', to: 'tn_8', color: 'black' },
 ];
 
 // Two LEDs in parallel: both across columns 6 and 8, one shared resistor.
-//   col 6: a6 resistor, b6 LED1 anode, d6 LED2 anode
-//   col 8: b8 LED1 cathode, c8 ground wire, d8 LED2 cathode
+//   col 6: b6 resistor, c6 LED1 anode, d6 LED2 anode
+//   col 8: a8 ground wire, c8 LED1 cathode, d8 LED2 cathode
 const PARALLEL_2 = [
   ...ONE_LED,
   { tool: 'place_led', holeA: 'd8', holeB: 'd6' },
 ];
 
 // Two LEDs in series: resistor -> LED1 -> LED2 -> ground.
-//   col 6: a6 resistor, b6 LED1 anode
-//   col 8: b8 LED1 cathode, c8 LED2 anode
-//   col 10: c10 LED2 cathode, d10 wire to tn_10
+//   col 2: a2 wire from tp_3, b2 resistor
+//   col 6: b6 resistor, c6 LED1 anode
+//   col 8: c8 LED1 cathode, d8 LED2 anode
+//   col 10: a10 wire to tn_10, d10 LED2 cathode
 const SERIES_2 = [
   { tool: 'delete_all' },
   { tool: 'place_battery' },
   { tool: 'add_wire', from: 'BAT1.0', to: `tp_${HIGHEST_COL}`, color: 'red' },
   { tool: 'add_wire', from: 'BAT1.1', to: `tn_${HIGHEST_COL}`, color: 'black' },
-  { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
-  { tool: 'place_led', holeA: 'b8', holeB: 'b6' },
-  { tool: 'place_led', holeA: 'c10', holeB: 'c8' },
-  { tool: 'add_wire', from: 'tp_3', to: 'b2', color: 'red' },
-  { tool: 'add_wire', from: 'd10', to: 'tn_10', color: 'black' },
+  { tool: 'place_resistor', holeA: 'b2', holeB: 'b6' },
+  { tool: 'place_led', holeA: 'c8', holeB: 'c6' },
+  { tool: 'place_led', holeA: 'd10', holeB: 'd8' },
+  { tool: 'add_wire', from: 'tp_3', to: 'a2', color: 'red' },
+  { tool: 'add_wire', from: 'a10', to: 'tn_10', color: 'black' },
 ];
 
 // ── Actions -> the simulator's input ──────────────────────────

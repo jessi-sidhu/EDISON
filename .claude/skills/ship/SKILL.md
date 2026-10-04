@@ -28,5 +28,8 @@ description: Finish the current task - run checks, review, commit, rebase onto t
    - If a conflict touches someone else's module or is unclear, stop and ask.
    - Then push: `git push origin HEAD:dev`. Never force-push.
    - If the push is rejected because `dev` moved, fetch, rebase and check again, then retry once.
-7. **Tidy up.** If you were on a task branch, run `git switch dev && git pull && git branch -d <task branch>`. If the commit message didn't close the issue, run `gh issue close <n> --comment "Shipped to dev in <sha>"`.
+7. **Tidy up.**
+   - On a task branch in the main checkout: run `git switch dev && git pull && git branch -d <task branch>`.
+   - On a task branch in a worktree (`.worktrees/<n>`): from the main checkout, run `git worktree remove .worktrees/<n>`, then `git branch -d <task branch>`. Never leave a finished worktree behind.
+   - If the commit message didn't close the issue, run `gh issue close <n> --comment "Shipped to dev in <sha>"`.
 8. **Report.** Give the commit on `dev`, and remind the user that CI runs on it now (`gh run list --branch dev --limit 1`). It reaches `main` at the next `/promote`.

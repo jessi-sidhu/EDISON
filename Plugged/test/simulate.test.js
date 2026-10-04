@@ -303,3 +303,149 @@ test('series recipe: both LEDs lit with equal current (9-4)/470 (#10)', () => {
   assert.ok(Math.abs(mA(ledI(r, a)) - mA(ledI(r, b))) < 1e-6, `LED1 ${mA(ledI(r, a))}, LED2 ${mA(ledI(r, b))}`);
   assert.ok(Math.abs(mA(ledI(r, a)) - 10.63) < 0.05, `got ${mA(ledI(r, a))}`);
 });
+
+// ── Voltage at any hole, issue #4 ─────────────────────────────
+// analyze() returns voltageAt({ col, row }): volts relative to the first
+// battery's −, or null when the hole's node is floating or nothing was
+// solved. Built on the series 9V - 470R - LED layout above: the anode sits
+// at column 10 top, about Vf = 2.0 V above ground.
+
+function seriesLedCircuit(extraWires) {
+  const components = [
+    battery(),
+    comp('resistor', [h(5, 'a'), h(10, 'a')]),
+    comp('led',      [h(15, 'a'), h(10, 'a')]), // pin0 cathode, pin1 anode
+  ];
+  const wires = [wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn'))].concat(extraWires || []);
+  return { components, wires };
+}
+
+// Reads a hole's voltage, failing on an assertion (not a TypeError) while
+// voltageAt does not exist yet.
+function vAt(r, hole) {
+  assert.equal(typeof r.voltageAt, 'function', 'analyze() should return voltageAt(hole)');
+  return r.voltageAt(hole);
+}
+
+const nearV = (got, want, why) =>
+  assert.ok(typeof got === 'number' && Math.abs(got - want) < 1e-3, `${why}: expected ${want} V, got ${got}`);
+
+test('an empty hole in the LED anode column reads the anode voltage (#4)', () => {
+  const { components, wires } = seriesLedCircuit();
+  const r = Sim.analyze(components, wires);
+  const anode = r.nodeVoltages[Sim.buildGraph(components, wires)[2].nodes[1]];
+
+  assert.ok(anode > 1.5 && anode < 2.5, `anode should sit near Vf, got ${anode}`);
+  nearV(vAt(r, h(10, 'e')), anode, 'h(10, e)');
+  nearV(vAt(r, h(10, 'a')), anode, 'the anode hole itself');
+});
+
+test('holes on the + rail, or wired only to it, read 9 V; the − rail reads 0 V (#4)', () => {
+  const { components, wires } = seriesLedCircuit([wire(h(30, 'tp'), h(30, 'a'))]);
+  const r = Sim.analyze(components, wires);
+
+  nearV(vAt(r, h(30, 'c')),  9, 'column 30, wired only to the + rail');
+  nearV(vAt(r, h(40, 'tp')), 9, 'an empty + rail hole');
+  nearV(vAt(r, h(40, 'tn')), 0, 'an empty − rail hole');
+  nearV(vAt(r, h(5, 'd')),   9, 'the resistor top column, wired to +');
+});
+
+test('an empty column, the other half of a used column and an unwired rail read null (#4)', () => {
+  const { components, wires } = seriesLedCircuit();
+  const r = Sim.analyze(components, wires);
+
+  assert.strictEqual(vAt(r, h(25, 'c')),  null, 'empty column 25');
+  assert.strictEqual(vAt(r, h(10, 'g')),  null, 'bottom half of column 10, across the channel');
+  assert.strictEqual(vAt(r, h(12, 'bp')), null, 'bottom rail, wired to nothing');
+});
+
+test('a column wired only to another floating column reads null (#4)', () => {
+  const { components, wires } = seriesLedCircuit([wire(h(30, 'a'), h(35, 'a'))]);
+  const r = Sim.analyze(components, wires);
+
+  assert.strictEqual(vAt(r, h(30, 'c')), null, 'column 30');
+  assert.strictEqual(vAt(r, h(35, 'e')), null, 'column 35');
+});
+
+test('voltageAt exists and returns null when analyze returns early (#4)', () => {
+  const early = {
+    empty:       Sim.analyze([], []),
+    'no-battery': Sim.analyze([comp('resistor', [h(5, 'a'), h(10, 'a')])], []),
+    'wire short': Sim.analyze([battery()], [wire(h(4, 'tp'), h(4, 'tn'))]),
+    unsolvable:  Sim.analyze([battery(), comp('battery', [h(9, 'tp'), h(9, 'tn')], { values: { voltage: 6 } })], []),
+  };
+  for (const [name, r] of Object.entries(early)) {
+    assert.strictEqual(vAt(r, h(5, 'a')),  null, `${name}: h(5, a)`);
+    assert.strictEqual(vAt(r, h(1, 'tp')), null, `${name}: h(1, tp)`);
+  }
+});
+
+test('analyze keeps its existing result fields and adds voltageAt (#4)', () => {
+  const { components, wires } = seriesLedCircuit();
+  const r = Sim.analyze(components, wires);
+
+  assert.deepEqual(Object.keys(r).sort(),
+    ['buzzersOn', 'currents', 'ledsOn', 'lines', 'nodeVoltages', 'shorted', 'status', 'voltageAt']);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.ledsOn.length, 1);
+  assert.equal(r.shorted, false);
+});
+
+// ── Parts not connected to the solved circuit read null (#4 review) ──
+// The solver leaks every node to ground through GMIN, so a floating part's
+// nodes come out near 0 V (or ±4.5 V for a lone battery). voltageAt must
+// report those as floating, not as a real reading.
+
+test('a resistor not connected to the battery reads null, the main circuit is unchanged (#4)', () => {
+  const { components, wires } = seriesLedCircuit();
+  components.push(comp('resistor', [h(20, 'a'), h(25, 'a')]));
+  const r = Sim.analyze(components, wires);
+  const anode = r.nodeVoltages[Sim.buildGraph(components, wires)[2].nodes[1]];
+
+  assert.strictEqual(vAt(r, h(20, 'c')), null, 'column 20, one end of the loose resistor');
+  assert.strictEqual(vAt(r, h(25, 'c')), null, 'column 25, the other end');
+  assert.ok(anode > 1.5 && anode < 2.5, `anode should sit near Vf, got ${anode}`);
+  nearV(vAt(r, h(10, 'e')), anode, 'the LED anode column');
+  nearV(vAt(r, h(5, 'd')),  9,     'the resistor top column, wired to +');
+});
+
+test('an LED whose leads sit in unwired columns reads null (#4)', () => {
+  const { components, wires } = seriesLedCircuit();
+  components.push(comp('led', [h(35, 'a'), h(30, 'a')])); // pin0 cathode, pin1 anode
+  const r = Sim.analyze(components, wires);
+
+  assert.strictEqual(vAt(r, h(30, 'c')), null, 'column 30, the loose LED anode');
+  assert.strictEqual(vAt(r, h(35, 'c')), null, 'column 35, the loose LED cathode');
+  nearV(vAt(r, h(5, 'd')), 9, 'the main circuit still reads');
+});
+
+test('a second battery wired to nothing reads null, not ±4.5 V (#4)', () => {
+  const { components, wires } = seriesLedCircuit();
+  components.push(comp('battery', [h(40, 'a'), h(45, 'a')])); // pin0 +, pin1 −
+  const r = Sim.analyze(components, wires);
+
+  assert.equal(r.status, 'ok');
+  assert.strictEqual(vAt(r, h(40, 'c')), null, 'column 40, the loose battery +');
+  assert.strictEqual(vAt(r, h(45, 'c')), null, 'column 45, the loose battery −');
+  nearV(vAt(r, h(5, 'd')), 9, 'the main circuit still reads');
+});
+
+test('the column behind a released button reads null, and 9 V once pressed (#4)', () => {
+  const build = pressed => {
+    const { components, wires } = seriesLedCircuit();
+    components.push(comp('button', [h(5, 'b'), h(40, 'b')], { pressed })); // col 5 sits at 9 V
+    return Sim.analyze(components, wires);
+  };
+
+  assert.strictEqual(vAt(build(false), h(40, 'd')), null, 'column 40, behind the open button');
+  nearV(vAt(build(true), h(40, 'd')), 9, 'column 40, through the pressed button');
+});
+
+test('a second battery in series is reached through the first and reads 18 V (#4)', () => {
+  const { components, wires } = seriesLedCircuit();
+  components.push(comp('battery', [h(20, 'a'), h(3, 'tp')])); // + on column 20, − on the + rail
+  const r = Sim.analyze(components, wires);
+
+  nearV(vAt(r, h(20, 'c')), 18, 'column 20, the top of the stacked battery');
+  nearV(vAt(r, h(5, 'd')),   9, 'the + rail column');
+});

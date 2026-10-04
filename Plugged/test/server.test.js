@@ -122,7 +122,7 @@ test('finishAIReply drops resistance: -5 but keeps the resistor, and says so in 
   const out = Server.finishAIReply({ reply: 'Built it.', actions: valuedBuild({ resistance: -5 }) });
   const r = find(out, 'place_resistor');
   assert.ok(r, 'the resistor is still placed');
-  assert.deepStrictEqual(r, { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' });
+  assert.deepStrictEqual(r, { tool: 'place_resistor', holeA: 'b2', holeB: 'b6' });
   assert.equal(out.actions.length, 8, 'no action is removed');
   assert.match(out.reply, /resistance/i);
   assert.match(out.reply, /default/i);
@@ -151,7 +151,7 @@ test('finishAIReply drops an unknown LED colour (purple) but keeps the LED', () 
   const out = Server.finishAIReply({ reply: 'Built it.', actions: valuedBuild({ color: 'purple' }) });
   const led = find(out, 'place_led');
   assert.ok(led, 'the LED is still placed');
-  assert.deepStrictEqual(led, { tool: 'place_led', holeA: 'b8', holeB: 'b6' });
+  assert.deepStrictEqual(led, { tool: 'place_led', holeA: 'c8', holeB: 'c6' });
   assert.match(out.reply, /colou?r/i);
   assert.match(out.reply, /purple/i);
   assert.match(out.reply, /default/i);
@@ -252,11 +252,13 @@ test('findCircuitProblems flags a3 holding both a resistor leg and a wire end', 
   assert.match(out.reply, hole('a3'));
 });
 
-test('hole names are compared without case: A2 and a2 are the same hole', () => {
-  const actions = Recipes.ONE_LED.map(a => a.to === 'b2' ? { ...a, to: 'A2' } : { ...a });
+test('hole names are compared without case: B2 and b2 are the same hole', () => {
+  // Move the rail wire from a2 into B2, the resistor's hole b2.
+  const actions = Recipes.ONE_LED.map(a => a.to === 'a2' ? { ...a, to: 'B2' } : { ...a });
+  assert.ok(actions.some(a => a.to === 'B2'), 'the build must really move a wire end into B2');
   const out = Server.finishAIReply({ reply: 'Built it.', actions });
   assert.match(out.reply, /Heads up/);
-  assert.match(out.reply, hole('a2'));
+  assert.match(out.reply, hole('b2'));
 });
 
 for (const name of ['ONE_LED', 'PARALLEL_2', 'SERIES_2']) {
@@ -303,7 +305,7 @@ test('the system prompt teaches one lead per hole and series vs parallel, with n
   assert.match(prompt, /explain[^\n]*(series|parallel|topology)|(series|parallel|topology)[^\n]*explain/i);
   // The old row-a recipe lines that stacked two leads in one hole.
   assert.doesNotMatch(prompt, /tp_\{C\}\s*->\s*a\{C\}/, 'rail wire into the resistor hole a{C}');
-  assert.doesNotMatch(prompt, /a\{C\+6\}\s*->\s*tn_/, 'ground wire out of the LED cathode hole a{C+6}');
+  assert.doesNotMatch(prompt, /holeA=a\{C\+6\}/, 'LED cathode in the ground wire hole a{C+6}');
   assert.doesNotMatch(prompt, /place_led: holeA=a\{C\+6\} \(cathode\), holeB=a\{C\+4\}/, 'LED anode in the resistor hole a{C+4}');
 });
 
@@ -351,10 +353,69 @@ test('the system prompt defines N as the highest column and has the battery-wire
     'rule line: battery wires go to the rails at the highest column');
 });
 
-// Guard: only the battery wires move. The rail-to-body wires stay at the start column.
+// Guard: only the battery wires move. The rail-to-body wires stay at the start
+// column (and land in row a, issue #16).
 test('the system prompt keeps the rail-to-body wires at the start column', () => {
   const prompt = promptText();
-  assert.match(prompt, /tp_\{C\+1\}\s*->\s*b\{C\}/);
-  assert.match(prompt, /c\{C\+6\}\s*->\s*tn_\{C\+6\}/);
-  assert.match(prompt, /d\{C\+8\}\s*->\s*tn_\{C\+8\}/);
+  assert.match(prompt, /tp_\{C\+1\}\s*->\s*a\{C\}/);
+  assert.match(prompt, /a\{C\+6\}\s*->\s*tn_\{C\+6\}/);
+  assert.match(prompt, /a\{C\+8\}\s*->\s*tn_\{C\+8\}/);
+});
+
+// ── Rail wires land in row a, issue #16 ────────────────────────────────────
+// Row a is the row nearest the rails. A rail wire that lands in row b or c
+// arcs over (under) whatever sits in row a, so the rail-to-body wires land in
+// row a and every part sits in rows b-e.
+
+const BODY = /^[a-j]\d+$/i, RAIL = /^(tp|tn|bp|bn)_\d+$/i;
+const railBodyWires = actions => actions.filter(a => a.tool === 'add_wire' &&
+  ((RAIL.test(a.from) && BODY.test(a.to)) || (BODY.test(a.from) && RAIL.test(a.to))));
+
+for (const name of ['ONE_LED', 'PARALLEL_2', 'SERIES_2']) {
+  test(`the ${name} recipe build lands its rail wires in row a and keeps its parts out of row a`, () => {
+    const wires = railBodyWires(Recipes[name]);
+    assert.equal(wires.length, 2, `${name} has two rail-to-body wires`);
+    const bodyEnds = wires.map(w => (BODY.test(w.from) ? w.from : w.to).toLowerCase());
+    assert.deepEqual(bodyEnds.filter(h => h[0] !== 'a'), [], `${name}: rail-to-body wires must land in row a`);
+    const leads = Recipes[name].filter(a => /^place_/.test(a.tool) && a.holeA)
+      .flatMap(a => [a.holeA, a.holeB]).map(h => h.toLowerCase());
+    assert.deepEqual(leads.filter(h => h[0] === 'a'), [], `${name}: no part lead may sit in row a`);
+  });
+}
+
+test('the system prompt lands every recipe rail wire in row a and places no part in row a', () => {
+  const prompt = promptText();
+  // Rail-to-body wire lines in the recipes: "tp_{..} -> x{..}" and "x{..} -> tn_{..}".
+  const toBody   = [...prompt.matchAll(/\b(?:tp|tn)_\{[^}]*\}\s*->\s*([a-j])\{[^}]*\}/g)];
+  const fromBody = [...prompt.matchAll(/\b([a-j])\{[^}]*\}\s*->\s*(?:tp|tn)_\{[^}]*\}/g)];
+  const all = [...toBody, ...fromBody];
+  // one LED (2), series (2), separate branches (2)
+  assert.ok(all.length >= 6, `expected at least 6 recipe rail-to-body wires, got ${all.length}`);
+  assert.deepEqual(all.filter(m => m[1].toLowerCase() !== 'a').map(m => m[0]), [],
+    'every recipe rail-to-body wire must land in row a');
+  // The separate-branches line names both wires of each group.
+  assert.match(prompt, /tp_\{C\+1\}\s*->\s*a\{C\} and a\{C\+6\}\s*->\s*tn_\{C\+6\}/,
+    'separate branches: tp_{C+1}->a{C} and a{C+6}->tn_{C+6}');
+  // No recipe puts a part lead in row a.
+  const placeLines = prompt.split('\n').filter(l => /place_(resistor|led|buzzer|button)/.test(l) && /hole[AB]=/.test(l));
+  assert.ok(placeLines.length >= 5, `expected at least 5 recipe place_ lines, got ${placeLines.length}`);
+  assert.deepEqual(placeLines.filter(l => /hole[AB]=a\{/.test(l)), [], 'no recipe places a part in row a');
+  // The old rail wires behind the parts are gone.
+  assert.doesNotMatch(prompt, /tp_\{C\+1\}\s*->\s*[b-e]\{C\}/, 'tp_{C+1} -> b{C} (under the resistor)');
+  assert.doesNotMatch(prompt, /c\{C\+6\}\s*->\s*tn_/, 'c{C+6} -> tn_ (between the LED legs)');
+  assert.doesNotMatch(prompt, /d\{C\+8\}\s*->\s*tn_/, 'd{C+8} -> tn_ (series ground wire behind LED2)');
+});
+
+test('the system prompt worked example at C=2 uses the row-a wires', () => {
+  const prompt = promptText();
+  assert.match(prompt, /tp_3\s*->\s*a2\b/, 'At C=2: tp_3 -> a2');
+  assert.match(prompt, /\ba8\s*->\s*tn_8\b/, 'At C=2: a8 -> tn_8');
+  assert.doesNotMatch(prompt, /tp_3\s*->\s*b2\b/, 'old example wire tp_3 -> b2');
+  assert.doesNotMatch(prompt, /\bc8\s*->\s*tn_8\b/, 'old example wire c8 -> tn_8');
+});
+
+test('the system prompt has a rule that rail wires land in row a', () => {
+  const lines = promptText().split('\n');
+  assert.ok(lines.some(l => /\brow a\b/i.test(l) && /rail/i.test(l)),
+    'a rule line says rail wires land in row a, nearest the rails');
 });

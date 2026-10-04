@@ -23,6 +23,7 @@ __pycache__/
 .playwright-mcp/
 
 # local scratch
+.worktrees/
 .Rhistory
 .superpowers/
 **/.claude/tdd-guard/
