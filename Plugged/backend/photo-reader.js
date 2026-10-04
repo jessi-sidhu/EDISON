@@ -16,10 +16,14 @@
 //  Fixtures (test/fixtures/photo/<key>.json, key = the sample id, else
 //  the SHA-256 of the image bytes):
 //    PHOTO_PROVIDERS=fixture   replays only.
-//    live mode                 a fixture answers only after every
+//    a sample with a fixture   answered from it straight away, no
+//                              provider call (fallback false) (#157).
+//    live mode, an image       its fixture answers only after every
 //                              provider failed, a fatal error, or the
-//                              deadline passed.
-//    PHOTO_RECORD=1            saves each live Reading.
+//                              deadline passed. So does a sample with
+//                              no fixture: it goes live.
+//    PHOTO_RECORD=1            sends a sample live too, and saves each
+//                              live Reading.
 //
 //  The live readers (#139) ask for a box per part and wire (photo-prompt.js)
 //  and start each one's 2 legs at the ends of its box, hole '?', for the
@@ -136,7 +140,8 @@ function boxesToReading(answer, grid) {
     const guess = /^null$/i.test(said) ? '' : said;
 
     if (type === 'wire') {
-      wires.push({ id: nextId('W'), color: '', ends: ends.map(pt => ({ hole: '?', pt })), confidence: num(it.conf), unsure: ['leads'] });
+      wires.push({ id: nextId('W'), color: '', ends: ends.map(pt => ({ hole: '?', pt })), box: [x0, y0, x1, y1],
+                   confidence: num(it.conf), unsure: ['leads'] });
       continue;
     }
     const kind = type === 'resistor' || type === 'led' ? type : 'other';
@@ -176,28 +181,36 @@ const GEMINI_BASE       = 'https://generativelanguage.googleapis.com/v1beta/mode
 const GEMINI_ATTEMPT_MS = 25000;
 const photoGeminiModel  = () => process.env.PHOTO_GEMINI_MODEL || 'gemini-robotics-er-2-preview';
 
+// A data URL as a Gemini image part, read at ULTRA_HIGH.
+function geminiImagePart(dataUrl) {
+  const image = String(dataUrl);
+  const mime  = (/^data:([^;,]+)/.exec(image) || [])[1] || 'image/jpeg';
+  return { inline_data: { mime_type: mime, data: image.slice(image.indexOf(',') + 1) }, mediaResolution: { level: 'MEDIA_RESOLUTION_ULTRA_HIGH' } };
+}
+
+// A generateContent reply's text, thoughts left out. Throws when it was
+// cut off or is empty.
+function geminiText(data, who) {
+  const cand = (data && data.candidates && data.candidates[0]) || {};
+  if (cand.finishReason === 'MAX_TOKENS') throw failed(`${who}: the answer was cut off`);
+  const text = list(obj(cand.content).parts).filter(p => p && typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
+  if (!text.trim()) throw failed(`${who}: empty reply`);
+  return text;
+}
+
 const geminiProvider = {
   name: 'gemini',
   read: async (input, ctx) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw failed('GEMINI_API_KEY is not set');
     const model = photoGeminiModel();
-    const image = String(input.image);
-    const mime  = (/^data:([^;,]+)/.exec(image) || [])[1] || 'image/jpeg';
     const body  = {
-      contents: [{ role: 'user', parts: [
-        { text: PHOTO_PROMPT },
-        { inline_data: { mime_type: mime, data: image.slice(image.indexOf(',') + 1) }, mediaResolution: { level: 'MEDIA_RESOLUTION_ULTRA_HIGH' } },
-      ] }],
+      contents: [{ role: 'user', parts: [{ text: PHOTO_PROMPT }, geminiImagePart(input.image)] }],
       generationConfig: { responseMimeType: 'application/json', responseSchema: PHOTO_SCHEMA, temperature: 1, maxOutputTokens: 32768 },
     };
     const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(GEMINI_ATTEMPT_MS)].filter(Boolean));
     const data = await postJSON(ctx, signal, `gemini ${model}`, `${GEMINI_BASE}${model}:generateContent`, { 'x-goog-api-key': apiKey }, body);
-    const cand = (data && data.candidates && data.candidates[0]) || {};
-    if (cand.finishReason === 'MAX_TOKENS') throw failed(`gemini ${model}: the answer was cut off`);
-    const text = list(obj(cand.content).parts).filter(p => p && typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
-    if (!text.trim()) throw failed(`gemini ${model}: empty reply`);
-    return { reading: boxesToReading(parseLooseJSON(text), input.grid), model };
+    return { reading: boxesToReading(parseLooseJSON(geminiText(data, `gemini ${model}`)), input.grid), model };
   },
 };
 
@@ -275,7 +288,8 @@ function validateReading(raw) {
   const wires = [];
   for (const w of list(raw.wires).map(obj)) {
     if (list(w.ends).length !== 2) { notes.push(`dropped wire ${str(w.id) || '?'}: needs 2 ends`); continue; }
-    wires.push({ id: str(w.id), color: str(w.color), ends: w.ends.map(endOf), confidence: num(w.confidence), unsure: strs(w.unsure) });
+    wires.push({ id: str(w.id), color: str(w.color), ends: w.ends.map(endOf), box: list(w.box).length ? nums(w.box, 4) : [],
+                 confidence: num(w.confidence), unsure: strs(w.unsure) });
   }
 
   const power = list(raw.power).map(obj).map(s => ({
@@ -307,12 +321,20 @@ async function readPhoto(input, opts = {}) {
   const replayOnly  = names.length === 1 && (names[0] === 'fixture' || names[0] === fixtureProvider);
   const ctxBase     = { fetch: opts.fetch || globalThis.fetch, fixturesDir, key };
 
-  const fromFixture = () => {
+  const fromFixture = fallback => {
     const file = loadFixture(fixturesDir, key);
     if (!file) return null;
     const { reading, notes } = validateReading(file.reading);
-    return { reading, provider: 'fixture', model: file.model, fallback: true, notes, key };
+    return { reading, provider: 'fixture', model: file.model, fallback, notes, key };
   };
+
+  // Use sample photo (the demo's photo beat, and the button on every photo
+  // error) replays its recording at once, never the AI, unless re-recording.
+  // A sample is input.sample being a plain id, never the key's shape (#157).
+  if (isSafeId(input.sample) && process.env.PHOTO_RECORD !== '1') {
+    const saved = fromFixture(false);
+    if (saved) return saved;
+  }
 
   let out;
   try {
@@ -334,7 +356,7 @@ async function readPhoto(input, opts = {}) {
   } catch (e) {
     // Past the deadline, or after a bad request or key, a live read still
     // falls back to a recording, for the stage.
-    const fixed = (e.code === 'AI_TIMEOUT' || e.fatal) && !replayOnly && fromFixture();
+    const fixed = (e.code === 'AI_TIMEOUT' || e.fatal) && !replayOnly && fromFixture(true);
     if (fixed) return fixed;
     throw e;
   }
@@ -343,9 +365,13 @@ async function readPhoto(input, opts = {}) {
     if (process.env.PHOTO_RECORD === '1' && out.provider !== 'fixture' && key) record(fixturesDir, key, input, out);
     return out;
   }
-  const fixed = !replayOnly && fromFixture();
+  const fixed = !replayOnly && fromFixture(true);
   if (fixed) return fixed;
   throw failed('every photo provider failed');
 }
 
-module.exports = { readPhoto, validateReading, parseLooseJSON, PROVIDERS, isSafeId };
+module.exports = {
+  readPhoto, validateReading, parseLooseJSON, PROVIDERS, isSafeId,
+  // Shared with photo-leads.js (#159).
+  GEMINI_BASE, photoGeminiModel, photoProviders, geminiImagePart, geminiText, postJSON, loadFixture, failed, num, obj, list,
+};

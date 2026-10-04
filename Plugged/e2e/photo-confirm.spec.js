@@ -105,6 +105,12 @@
 //                           in tap order) with an unused id is appended to the
 //                           Reading, with its own row. Her added part is not
 //                           flagged (a resistor gets a real default value).
+//
+// Bug #158 (a long parts list), CSS only:
+//   - However many rows #photo-parts has, the card stays inside the window:
+//     #photo-confirm-canvas (at the size photo-confirm.js gives it: its box is
+//     its style.width × style.height), #photo-add, the rails buttons and
+//     #photo-build are fully on screen, and only #photo-parts scrolls.
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
@@ -672,5 +678,80 @@ test('#142 + Add a part: a resistor tapped onto a30 → a34 and a wire b30 → t
   expect(s.reading.parts.map(p => p.id)).toEqual(['R1', 'LED1']);
   expect(s.result.actions.filter(a => a.tool === 'place_resistor' && a.holeA === 'a30'), 'its action is gone').toEqual([]);
   expect(await refusals(page, s.result.actions)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+// ── A long parts list (bug #158) ─────────────────────────────────────────────
+
+// A real lab board's worth: the stage board plus a chain of ten resistors on
+// the j side (f5–f8, f10–f13, … f50–f53) joined by six jumpers on row i
+// (i8 → i10, i13 → i15, …): 12 parts and 8 wires, 21 rows with the battery.
+// Every other resistor's value is unread, as in a live reading, so five rows
+// are amber with a why line under them.
+function longReading() {
+  const r = stageReading();
+  for (let k = 0; k < 10; k++) {
+    const c = 5 + 5 * k;
+    r.parts.push({ id: `R${k + 2}`, type: 'resistor', what: 'resistor', value: k % 2 ? 0 : 1000, bands: [], color: '',
+                   leads: [lead(`f${c}`), lead(`f${c + 3}`)], box: [0, 0, 0, 0], confidence: 0.8, unsure: [] });
+  }
+  for (let k = 0; k < 6; k++) {
+    const c = 5 + 5 * k;
+    r.wires.push({ id: `W${k + 3}`, color: 'yellow', ends: [end(`i${c + 3}`), end(`i${c + 5}`)], confidence: 0.9, unsure: [] });
+  }
+  return r;
+}
+
+// A box fully inside a vw × vh window (half a pixel for rounding).
+const inWindow = (b, vw, vh) => !!b && b.x >= -0.5 && b.y >= -0.5 && b.x + b.width <= vw + 0.5 && b.y + b.height <= vh + 0.5;
+
+test('#158 a 20-item Reading at 1440×900 and 1280×720: the photo and its dots, + Add, the rails buttons and Build it stay on screen, only the parts list scrolls, and Build it builds', async ({ page }) => {
+  const errors = watchErrors(page);
+  const reading = longReading();
+  expect(reading.parts.length + reading.wires.length, 'a Reading with at least 20 parts and wires').toBeGreaterThanOrEqual(20);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openEditor(page);
+
+  let first = true;
+  for (const [vw, vh] of [[1440, 900], [1280, 720]]) {
+    const at = `${vw}×${vh}`;
+    if (!first) {
+      await page.unroute('**/api/photo');
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#photo-modal')).toBeHidden();
+      await page.setViewportSize({ width: vw, height: vh });
+    }
+    first = false;
+    await openConfirm(page, reading);
+    await expect(rowOf(page, 'W8'), `${at}: every part and wire has a row`).toHaveCount(1);
+
+    // The photo: its top on screen, all of it inside the window, at the size photo-confirm.js gave it.
+    const photo = await page.locator('#photo-confirm-canvas').boundingBox();
+    expect.soft(photo.y, `${at}: the top of the photo is on screen, got y = ${photo.y}`).toBeGreaterThanOrEqual(0);
+    expect.soft(inWindow(photo, vw, vh), `${at}: the photo and its dots fit in the window, got ${JSON.stringify(photo)}`).toBe(true);
+    const asked = await page.locator('#photo-confirm-canvas').evaluate(c => [parseFloat(c.style.width), parseFloat(c.style.height)]);
+    expect.soft([photo.width, photo.height].map(Math.round), `${at}: the photo is not scaled down`).toEqual(asked.map(Math.round));
+
+    // The controls beside the list stay put.
+    for (const id of ['#photo-build', '#photo-add', '#photo-rails-a', '#photo-rails-j']) {
+      const b = await page.locator(id).boundingBox();
+      expect.soft(inWindow(b, vw, vh), `${at}: ${id} is fully on screen, got ${JSON.stringify(b)}`).toBe(true);
+    }
+
+    // The list scrolls; scrolled to its end, the last row shows and the photo hasn't moved.
+    const list = await page.locator('#photo-parts').evaluate(el => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+    expect.soft(list.scroll, `${at}: the parts list scrolls (scrollHeight ${list.scroll} > clientHeight ${list.client})`).toBeGreaterThan(list.client);
+    await page.locator('#photo-parts').evaluate(el => { el.scrollTop = el.scrollHeight; });
+    const [last, box] = [await page.locator('#photo-parts li').last().boundingBox(), await page.locator('#photo-parts').boundingBox()];
+    const shown = inWindow(last, vw, vh) && last.y >= box.y - 1.5 && last.y + last.height <= box.y + box.height + 1.5;   // scrollHeight is rounded
+    expect.soft(shown, `${at}: scrolled to the end, the last row ${JSON.stringify(last)} is inside the list ${JSON.stringify(box)} and the window`).toBe(true);
+    expect.soft(await page.locator('#photo-confirm-canvas').boundingBox(), `${at}: scrolling the list leaves the photo where it was`).toEqual(photo);
+  }
+
+  // Build it, at 1280×720 (only once it is reachable: an off-screen button would just time out).
+  if (test.info().errors.length) return;
+  await page.locator('#photo-build').click();
+  await expect(page.locator('#photo-modal'), 'Build it closes the overlay').toBeHidden();
+  expect((await confirmState(page)).built, 'Build it hands on PhotoImport\'s result').toEqual(await expectedBuild(page, reading));
   expect(errors).toEqual([]);
 });

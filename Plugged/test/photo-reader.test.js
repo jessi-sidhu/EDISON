@@ -435,3 +435,159 @@ test('the Gemini photo prompt and schema are exactly the golden (fixtures/prompt
       + `photo.txt line ${i + 1}:\n  golden: ${exp[i]}\n  sent:   ${act[i]}`);
   }
 });
+
+// ── 7. A wire keeps its box (#159) ──────────────────────────────────────────
+// The crop round (photo crops 2/2) cuts each wire's crop from its box, so a
+// wire carries box [x0, y0, x1, y1] in flattened pixels like a part ([] when
+// unknown).
+
+test('a wire keeps its pixel box [x0, y0, x1, y1] from box_2d, through boxesToReading and validateReading, like a part', async () => {
+  // 2040 × 710: x = xn · 2.04, y = yn · 0.71.
+  const items = [
+    { type: 'wire', value: null, conf: 0.9, box_2d: [600, 800, 700, 900] },
+    { type: 'wire', value: null, conf: 0.7, box_2d: [500, 300, 100, 250] },   // corners given the other way round
+  ];
+  const fake = fakeFetch({ gemini: () => geminiSays({ rails: RAILS, items }) });
+  const { reading } = await read(['gemini'], fake);
+  assert.equal(reading.wires.length, 2, `wires: ${JSON.stringify(reading.wires)}`);
+  close(reading.wires[0].box, [1632, 426, 1836, 497], 'W1 box');
+  close(reading.wires[1].box, [510, 71, 612, 355], 'W2 box, corners sorted');
+});
+
+test('validateReading keeps a wire\'s box, coerces a bad one with nums, and gives [] when it is missing or empty', () => {
+  const wire = (id, box) => ({ id, color: 'red', ends: [{ hole: 'a1', pt: [90, 190] }, { hole: 'a5', pt: [210, 190] }],
+    confidence: 0.9, unsure: [], ...(box === undefined ? {} : { box }) });
+  const raw = {
+    board: { visible: true, cols: 63, rails: RAILS, split: false }, parts: [], power: [],
+    wires: [wire('W1', [75, 175, 225, 205]), wire('W2', ['12', 30, null, 40]), wire('W3'), wire('W4', [])],
+  };
+  const { reading } = Reader.validateReading(raw);
+  assert.deepStrictEqual(reading.wires.map(w => [w.id, w.box]), [
+    ['W1', [75, 175, 225, 205]],
+    ['W2', [0, 30, 0, 40]],
+    ['W3', []],
+    ['W4', []],
+  ], 'a box is kept, coerced to 4 numbers, and [] when unknown (so a valid Reading comes back unchanged)');
+});
+
+// ── 8. A sample with a recording replays it straight away (#157) ────────────
+// Use sample photo is the demo's photo beat and the button on every photo
+// error. When input.sample is a plain id and <fixturesDir>/<sample>.json
+// exists, readPhoto answers from that file at once: provider 'fixture',
+// fallback false, the file's model, no AI call. Unless PHOTO_RECORD=1, which
+// still sends it to the AI and records it (to re-record the samples). It is a
+// sample because input.sample was sent, never because of the key's shape. An
+// image with no sample keeps providers first, its hash fixture last.
+
+const SAVED = {
+  board: { visible: true, cols: 63, rails: { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' }, split: false },
+  parts: [{ id: 'LED1', type: 'led', what: 'red LED', value: 0, bands: [], color: 'red',
+    leads: [{ hole: 'c20', pt: [660, 250], role: 'cathode' }, { hole: 'c21', pt: [690, 250], role: 'anode' }],
+    box: [645, 235, 705, 265], confidence: 0.9, unsure: [] }],
+  wires: [], power: [],
+};
+const IMG_SHA = crypto.createHash('sha256').update(Buffer.from(B64, 'base64')).digest('hex');
+const ONE_LED = { rails: RAILS, items: [{ type: 'led', value: null, conf: 0.6, box_2d: [100, 500, 500, 520] }] };
+
+// A temp fixtures folder holding { key: file } for the length of run(dir).
+async function withFixtures(files, run) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'photo-reader-sample-'));
+  try {
+    for (const [key, file] of Object.entries(files)) fs.writeFileSync(path.join(dir, `${key}.json`), JSON.stringify(file));
+    return await run(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+// A Gemini that never answers; aborting its signal rejects, as a real fetch does.
+const hangs = call => new Promise((_, reject) => {
+  call.signal.addEventListener('abort', () => reject(call.signal.reason || new DOMException('aborted', 'AbortError')));
+});
+
+test('#157 bug: a sample with a recording is answered from it straight away in live mode: provider fixture, fallback false, its model and Reading, and the AI is never called', async () => {
+  const hashShaped = crypto.createHash('sha256').update('another photo').digest('hex');   // 64 hex digits, still a sample id
+  const cases = [
+    ['sample bench-board, Gemini would answer', 'bench-board', () => geminiSays(ONE_LED)],
+    ['sample bench-board, Gemini hangs (the sample is the button on every photo error)', 'bench-board', hangs],
+    ['a sample id shaped like an image hash', hashShaped, () => geminiSays(ONE_LED)],
+  ];
+  for (const [what, id, gemini] of cases) {
+    await withFixtures({ [id]: { sample: id, sha256: null, reading: SAVED, provider: 'gemini', model: 'gemini-recorded-1' } }, async dir => {
+      const fake = fakeFetch({ gemini, deepseek: () => deepseekSays(ONE_LED) });
+      const started = Date.now();
+      // No providers option: the default list, gemini,deepseek, as the route reads it.
+      const out = await Reader.readPhoto({ image: IMG, grid: GRID, sample: id }, { fetch: fake.fetch, fixturesDir: dir, deadlineMs: 1000 });
+      const ms = Date.now() - started;
+      assert.equal(out.provider, 'fixture', `${what}: answered by ${out.provider} (${out.model}), not the sample's recording`);
+      assert.equal(fake.calls.gemini.length + fake.calls.deepseek.length, 0,
+        `${what}: the sample went to the AI (gemini ×${fake.calls.gemini.length}, deepseek ×${fake.calls.deepseek.length})`);
+      assert.equal(out.fallback, false, `${what}: a sample's recording is its answer, not a fallback`);
+      assert.equal(out.model, 'gemini-recorded-1', `${what}: the model the file recorded`);
+      assert.equal(out.key, id, `${what}: key`);
+      assert.deepStrictEqual(out.reading, SAVED, `${what}: the recorded Reading`);
+      assert.ok(Array.isArray(out.notes), `${what}: notes: ${JSON.stringify(out.notes)}`);
+      assert.ok(ms < 500, `${what}: took ${ms} ms; a recording answers at once`);
+    });
+  }
+});
+
+test('pin (#157): with PHOTO_RECORD=1 a sample with a recording still goes to the AI, returns its answer, and records it over the old file', async () => {
+  process.env.PHOTO_RECORD = '1';
+  await withFixtures({ 'bench-board': { sample: 'bench-board', sha256: null, reading: SAVED, provider: 'gemini', model: 'stale-model' } }, async dir => {
+    const fake = fakeFetch({ gemini: () => geminiSays(ONE_LED) });
+    const out = await Reader.readPhoto({ image: IMG, grid: GRID, sample: 'bench-board' }, { fetch: fake.fetch, fixturesDir: dir });
+    assert.equal(fake.calls.gemini.length, 1, `re-recording a sample asks Gemini once; it was asked ${fake.calls.gemini.length} times`);
+    assert.equal(out.provider, 'gemini');
+    assert.equal(out.model, DEFAULT_MODEL);
+    assert.equal(out.fallback, false);
+    assert.equal(out.key, 'bench-board');
+    assert.deepStrictEqual(out.reading.parts.map(p => p.type), ['led'], 'the live answer, not the old recording');
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(dir, 'bench-board.json'), 'utf8')),
+      { sample: 'bench-board', sha256: IMG_SHA, reading: out.reading, provider: 'gemini', model: DEFAULT_MODEL },
+      'the sample\'s file now holds the live Reading');
+  });
+});
+
+test('pin (#157): a sample with no recording, or one that is not a plain id, goes to the AI', async () => {
+  await withFixtures({ 'bench-board': { sample: 'bench-board', sha256: null, reading: SAVED, provider: 'gemini', model: 'gemini-recorded-1' } }, async dir => {
+    const cases = [
+      ['a sample with no file', 'no-such-sample', 'no-such-sample'],
+      // path.join(dir, '../<dir>/bench-board.json') is bench-board's file: a path is never a key.
+      ['a sample that climbs out of the folder to a real file', `../${path.basename(dir)}/bench-board`, null],
+    ];
+    for (const [what, sample, key] of cases) {
+      const fake = fakeFetch({ gemini: () => geminiSays(ONE_LED) });
+      const out = await Reader.readPhoto({ image: IMG, grid: GRID, sample }, { fetch: fake.fetch, fixturesDir: dir });
+      assert.equal(fake.calls.gemini.length, 1, `${what}: Gemini was asked ${fake.calls.gemini.length} times`);
+      assert.equal(out.provider, 'gemini', what);
+      assert.equal(out.key, key, `${what}: key`);
+      assert.deepStrictEqual(out.reading.parts.map(p => p.type), ['led'], `${what}: the live answer`);
+    }
+  });
+});
+
+test('pin (#157): an image with no sample (absent, undefined, null or \'\') whose hash has a recording still tries the AI first; the recording answers only after every provider failed', async () => {
+  const inputs = [
+    ['no sample field', {}],
+    ['sample undefined (what the route passes for a chosen photo)', { sample: undefined }],
+    ['sample null', { sample: null }],
+    ['sample \'\'', { sample: '' }],
+  ];
+  await withFixtures({ [IMG_SHA]: { sample: null, sha256: IMG_SHA, reading: SAVED, provider: 'gemini', model: 'gemini-recorded-1' } }, async dir => {
+    for (const [what, extra] of inputs) {
+      const ok = fakeFetch({ gemini: () => geminiSays(ONE_LED) });
+      const live = await Reader.readPhoto({ image: IMG, grid: GRID, ...extra }, { providers: ['gemini', 'deepseek'], fetch: ok.fetch, fixturesDir: dir });
+      assert.equal(ok.calls.gemini.length, 1, `${what}: Gemini was asked ${ok.calls.gemini.length} times`);
+      assert.equal(live.provider, 'gemini', `${what}: a working Gemini answers before the image's recording`);
+      assert.equal(live.key, IMG_SHA, `${what}: key`);
+
+      const down = fakeFetch({ gemini: () => status(503), deepseek: () => status(503) });
+      const last = await Reader.readPhoto({ image: IMG, grid: GRID, ...extra }, { providers: ['gemini', 'deepseek'], fetch: down.fetch, fixturesDir: dir });
+      assert.deepStrictEqual([down.calls.gemini.length, down.calls.deepseek.length], [1, 1], `${what}: both providers are tried before the recording`);
+      assert.equal(last.provider, 'fixture', what);
+      assert.equal(last.fallback, true, `${what}: the image's recording is a fallback`);
+      assert.equal(last.model, 'gemini-recorded-1', what);
+      assert.deepStrictEqual(last.reading, SAVED, what);
+    }
+  });
+});

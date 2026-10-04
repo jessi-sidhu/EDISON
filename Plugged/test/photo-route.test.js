@@ -23,9 +23,11 @@
 //   deadline the signal handed to the provider is aborted.
 // - Fixtures: <fixturesDir>/<key>.json = { sample, sha256, reading, provider,
 //   model }; key = sample, else the hex SHA-256 of the data URL's decoded
-//   bytes. providers === ['fixture'] replays only. Otherwise the fixture is
-//   only a last resort, after every listed provider failed, and comes back
-//   with provider 'fixture' and the model the file recorded.
+//   bytes. providers === ['fixture'] replays only. A request with a sample
+//   whose fixture exists is answered from it straight away, with no provider
+//   call, unless PHOTO_RECORD=1 (#157). For an image with no sample, the
+//   fixture is only a last resort, after every listed provider failed. Either
+//   way it comes back with provider 'fixture' and the model the file recorded.
 // - PHOTO_RECORD=1 saves each live Reading to <fixturesDir>/<key>.json.
 // - Env read per request (PHOTO_PROVIDERS, PHOTO_TIMEOUT_MS, PHOTO_RECORD,
 //   TRUST_PROXY), so these tests change them between requests.
@@ -221,19 +223,30 @@ test('live mode (default gemini,deepseek), every provider fails: the fixture ans
   assertError(noFixture, 502, 'AI_FAILED', REPLY.AI_FAILED);
 });
 
-test('live mode tries the providers in order and only falls back to the fixture last', async () => {
+// An image with no sample whose hash has a recording, in a temp fixtures folder.
+function withHashFixture(seed, run) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'photo-hash-'));
+  const img = photo(4096, seed);
+  fs.writeFileSync(path.join(dir, `${img.sha256}.json`),
+    JSON.stringify({ sample: null, sha256: img.sha256, reading: clone(MOCK_READING), provider: 'gemini', model: 'gemini-recorded' }));
+  return Promise.resolve(run(img, dir)).finally(() => fs.rmSync(dir, { recursive: true, force: true }));
+}
+
+test('live mode tries the providers in order and only falls back to the fixture last (an image with no sample)', async () => {
   const { readPhoto } = Reader();
   const tried = [];
   const broken = { name: 'broken', read: async () => { tried.push('broken'); throw new Error('503'); } };
   const works  = { name: 'works',  read: async () => { tried.push('works'); return { reading: clone(MOCK_READING), model: 'works-1' }; } };
   const never  = { name: 'never',  read: async () => { tried.push('never'); throw new Error('should not be asked'); } };
 
-  // demo-board has a fixture, yet a working provider is the one that answers.
-  const out = await readPhoto(demoBody(), { providers: [broken, works, never] });
-  assert.deepStrictEqual(tried, ['broken', 'works']);
-  assert.equal(out.provider, 'works');
-  assert.equal(out.model, 'works-1');
-  assert.deepStrictEqual(out.reading, MOCK_READING);
+  // The image has a recording, yet a working provider is the one that answers.
+  await withHashFixture('p', async (img, dir) => {
+    const out = await readPhoto({ image: img.dataUrl, grid: GRID }, { providers: [broken, works, never], fixturesDir: dir });
+    assert.deepStrictEqual(tried, ['broken', 'works']);
+    assert.equal(out.provider, 'works');
+    assert.equal(out.model, 'works-1');
+    assert.deepStrictEqual(out.reading, MOCK_READING);
+  });
 });
 
 test('PHOTO_RECORD=1 saves a live Reading as { sample, sha256, reading, provider, model }', async () => {
@@ -319,6 +332,45 @@ test('live readers: Gemini 400 → 502 AI_FAILED without ever asking deepseek', 
     const res = await postPhoto({ image: photo(2048, 'x').dataUrl, grid: GRID });
     assertError(res, 502, 'AI_FAILED', REPLY.AI_FAILED);
     assert.deepStrictEqual(calls.map(c => c.service), ['gemini'], `a 400 must not fall back: ${JSON.stringify(calls)}`);
+  } finally {
+    restore();
+  }
+});
+
+// ── Use sample photo replays its recording (#157) ───────────────────────────
+
+test('#157 bug: live mode, Use sample photo (sample demo-board) is answered from its recording with no AI call, whether the AI would answer or is down; the log says provider=fixture fallback=no', async () => {
+  const restore = withAiKeys();
+  const geminiReply = { candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify({
+    rails: { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' },
+    items: [{ type: 'resistor', value: '470', conf: 0.8, box_2d: [300, 100, 400, 250] }] }) }] }, finishReason: 'STOP' }] };
+  const cases = [
+    ['the AI would answer', service => (service === 'gemini' ? { status: 200, body: geminiReply } : { status: 503, body: { error: { code: 503 } } })],
+    ['the AI is down', () => ({ status: 503, body: { error: { code: 503 } } })],
+  ];
+  try {
+    for (const [what, answer] of cases) {
+      const calls = [];
+      vi.stubGlobal('fetch', vi.fn(async url => {
+        const u = String(url);
+        const service = u.includes('generativelanguage.googleapis.com') ? 'gemini' : u.includes('api.deepseek.com') ? 'deepseek' : u;
+        calls.push(service);
+        const { status, body } = answer(service);
+        return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      }));
+      logs.length = 0;
+      const res = await postPhoto(demoBody());
+      assert.equal(res.status, 200, `${what}: status ${res.status}: ${res.raw.slice(0, 200)}`);
+      assert.equal(res.body.provider, 'fixture', `${what}: answered by ${res.body.provider} (${res.body.model}), not the demo-board recording`);
+      assert.deepStrictEqual(calls, [], `${what}: the sample went to the AI: ${calls.join(', ')}`);
+      assert.equal(res.body.model, 'deepseek-flash', `${what}: the model the recording holds`);
+      assert.equal(res.body.key, 'demo-board', what);
+      assert.deepStrictEqual(res.body.reading, MOCK_READING, what);
+      const line = logs.find(l => l.startsWith('[photo]')) || '';
+      assert.match(line, /sample=demo-board/, `${what}: [photo] line: ${line}`);
+      assert.match(line, /provider=fixture/, `${what}: [photo] line: ${line}`);
+      assert.match(line, /fallback=no/, `${what}: a sample's recording is its answer, not a fallback: ${line}`);
+    }
   } finally {
     restore();
   }
@@ -422,18 +474,22 @@ test('readPhoto: past deadlineMs it rejects with AI_TIMEOUT', async () => {
   assert.ok(Date.now() - started < 600, `took ${Date.now() - started} ms with an 80 ms deadline`);
 });
 
-test('readPhoto in live mode: past deadlineMs a fixture for the key answers instead, and no later provider starts', async () => {
+test('readPhoto in live mode: past deadlineMs a fixture for the image answers instead, and no later provider starts', async () => {
   const { readPhoto } = Reader();
   const slow = { name: 'slow', read: () => new Promise(() => {}) };
   let neverCalled = false;
   const never = { name: 'never', read: async () => { neverCalled = true; throw new Error('should not be asked'); } };
-  const started = Date.now();
-  const out = await readPhoto(demoBody(), { providers: [slow, never], deadlineMs: 80 });
-  assert.ok(Date.now() - started < 600, `took ${Date.now() - started} ms with an 80 ms deadline`);
-  assert.equal(out.provider, 'fixture');
-  assert.equal(out.model, 'deepseek-flash');
-  assert.deepStrictEqual(out.reading, MOCK_READING);
-  assert.equal(neverCalled, false, 'a provider after the slow one was started past the deadline');
+  await withHashFixture('d', async (img, dir) => {
+    const started = Date.now();
+    const out = await readPhoto({ image: img.dataUrl, grid: GRID }, { providers: [slow, never], deadlineMs: 80, fixturesDir: dir });
+    assert.ok(Date.now() - started >= 70, `answered after ${Date.now() - started} ms, before the 80 ms deadline`);
+    assert.ok(Date.now() - started < 600, `took ${Date.now() - started} ms with an 80 ms deadline`);
+    assert.equal(out.provider, 'fixture');
+    assert.equal(out.fallback, true);
+    assert.equal(out.model, 'gemini-recorded');
+    assert.deepStrictEqual(out.reading, MOCK_READING);
+    assert.equal(neverCalled, false, 'a provider after the slow one was started past the deadline');
+  });
 });
 
 test('422 NO_BOARD when the Reading says board.visible is false', async () => {

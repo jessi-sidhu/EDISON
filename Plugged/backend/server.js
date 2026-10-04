@@ -6,6 +6,7 @@
  *
  * POST /api/ask            { markdown, message, history }  →  { reply, actions[] }
  * POST /api/photo          { image, grid, sample? }        →  { reading, provider, model, ms, key }
+ * POST /api/photo/leads    { key, items }                  →  { items, provider, model, ms }
  * GET  /api/health
  * GET  anything else       the app's static files
  */
@@ -15,6 +16,7 @@ const fs   = require('fs');
 const path = require('path');
 const { makeAsk, isFixRequest } = require('./ai-providers');
 const { readPhoto, isSafeId } = require('./photo-reader');
+const { readLeads } = require('./photo-leads');
 // The board's size: the same file the 3D editor builds the board from.
 const { COLS, TOTAL_HOLES, BODY_ROWS } = require('../circuit3d/js/board-geometry.js');
 // The parts registry: every part's tool, prompt lines and circuit behaviour.
@@ -1370,12 +1372,15 @@ function sendJSON(res, status, obj) {
 // /api/ask spends the Gemini key, so cap it per IP or it is an open proxy.
 const MAX_BODY_BYTES  = 256 * 1024;
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
+const MAX_LEADS_BYTES = 6 * 1024 * 1024;   // up to 24 crops
 
 const RATE_WINDOW_MS       = 60000;
 const ASK_MAX_PER_WINDOW   = 20;
 const PHOTO_MAX_PER_WINDOW = 6;
+const LEADS_MAX_PER_WINDOW = 6;
 const askHits   = new Map();
 const photoHits = new Map();
+const leadsHits = new Map();
 
 // Behind a proxy (Render and similar) every request arrives from the proxy,
 // so the limit would be shared by every visitor. Only trust the header when
@@ -1479,6 +1484,61 @@ async function handlePhoto(req, res) {
   return sendJSON(res, 200, { reading: out.reading, provider: out.provider, model: out.model, ms: Date.now() - started, key: out.key });
 }
 
+// ── /api/photo/leads ─────────────────────────────────────────
+// The page never shows these: it keeps its placeholder dots.
+const LEADS_REPLY = {
+  BAD_ITEMS: 'Send 1 to 24 crops, each with an id, a JPEG or PNG image and its window.',
+  TOO_LARGE: 'Those crops are too large.',
+  RATE:      'Too many crop requests at once. Wait a minute and try again.',
+};
+const LEADS_MAX_ITEMS = 24;
+const WINDOW_KEYS     = ['x', 'y', 'scale', 'padLeft', 'padTop', 'width', 'height'];
+
+const isCropDataUrl = s => typeof s === 'string' && /^data:image\/(jpeg|png);base64,/.test(s);
+const isCropWindow  = w => !!w && typeof w === 'object' && !Array.isArray(w) &&
+  WINDOW_KEYS.every(k => typeof w[k] === 'number' && Number.isFinite(w[k])) && w.scale > 0;
+const isLeadsItem   = it => !!it && typeof it === 'object' && typeof it.id === 'string' && it.id !== '' &&
+  isCropDataUrl(it.image) && isCropWindow(it.window);
+
+// The one [photo-leads] line per request. Never a crop or an upstream body;
+// a key that isn't a plain id is shown as '?'.
+function logLeads({ key, count, out, error, started, bytes }) {
+  const id = key === undefined || key === null ? '-' : isSafeId(key) ? key : '?';
+  const n  = code => (out ? out.items.filter(x => x.error === code).length : 0);
+  console.log(`[photo-leads] key=${id} items=${count} ok=${out ? out.items.filter(x => !x.error).length : 0} ` +
+    `timeout=${n('AI_TIMEOUT')} failed=${n('AI_FAILED')} resent=${out ? out.resent || 0 : 0} provider=${out ? out.provider : '-'} ` +
+    `${((Date.now() - started) / 1000).toFixed(1)}s ${(bytes / 1048576).toFixed(1)}MB${error ? ` error=${error}` : ''}`);
+}
+
+async function handleLeads(req, res) {
+  const started = Date.now();
+  if (rateLimited(req, leadsHits, LEADS_MAX_PER_WINDOW)) {
+    logLeads({ count: 0, error: 'RATE', started, bytes: 0 });
+    return sendJSON(res, 429, { reply: LEADS_REPLY.RATE });
+  }
+  const body = await readBody(req, res, MAX_LEADS_BYTES, { reply: LEADS_REPLY.TOO_LARGE, code: 'TOO_LARGE' });
+  if (body === null) return logLeads({ count: 0, error: 'TOO_LARGE', started, bytes: MAX_LEADS_BYTES });
+  const bytes = Buffer.byteLength(body);
+  let input;
+  try { input = JSON.parse(body || '{}'); } catch { input = {}; }
+  const { key, items } = input && typeof input === 'object' ? input : {};
+  const count = Array.isArray(items) ? items.length : 0;
+  if (!count || count > LEADS_MAX_ITEMS || !items.every(isLeadsItem)) {
+    logLeads({ key, count, error: 'BAD_ITEMS', started, bytes });
+    return sendJSON(res, 400, { reply: LEADS_REPLY.BAD_ITEMS, code: 'BAD_ITEMS' });
+  }
+
+  let out;
+  try {
+    out = await readLeads({ key, items });
+  } catch (e) {   // readLeads never rejects; if it ever does, every item failed
+    console.error('photo-leads: readLeads failed:', e.message);
+    out = { items: items.map(it => ({ id: it.id, error: 'AI_FAILED' })), provider: null, model: null };
+  }
+  logLeads({ key, count, out, started, bytes });
+  return sendJSON(res, 200, { items: out.items, provider: out.provider, model: out.model, ms: Date.now() - started });
+}
+
 // A sent board in the board-model shape; anything else is ignored, as
 // from an older client.
 const isBoard = b => !!b && Array.isArray(b.parts) && Array.isArray(b.wires);
@@ -1512,6 +1572,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'POST' && req.url === '/api/photo') return handlePhoto(req, res);
+  if (req.method === 'POST' && req.url === '/api/photo/leads') return handleLeads(req, res);
 
   // ── Static file serving ───────────────────────────────────
   const STATIC_ROOT = path.join(__dirname, '..');

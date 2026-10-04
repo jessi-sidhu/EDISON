@@ -403,7 +403,7 @@ Maya photographs her real breadboard, confirms every lead, and the app rebuilds 
 
 ```
 photo.js  pick / drop / sample, corner taps → PhotoGrid.homography → PhotoGrid.warp (flattened image)
-          → POST /api/photo → Reading → confirm screen (PhotoGrid.snap) → PhotoImport.build
+          → POST /api/photo → Reading → photo-crops.js → POST /api/photo/leads → confirm screen (PhotoGrid.snap) → PhotoImport.build
           → SparkyChat.applyBuild(actions) → App.runSimulation() → sparkyAsk(question, { context })
 ```
 - **Loading:** `photo-grid.js` and `photo-import.js` are UMD modules (Node + browser, like `simulate.js`), after `ids.js` and before `app.js` in `circuit3d/index.html`; `samples/samples.js` and then `photo.js` (DOM) after `chat.js`. Node requires them from `circuit3d/js/`.
@@ -432,16 +432,53 @@ photo.js  pick / drop / sample, corner taps → PhotoGrid.homography → PhotoGr
 - **Rate limit:** `askRateLimited` becomes `rateLimited(req, hits, max)`; photos get their own map, 6 a minute per IP (`TRUST_PROXY` as for `/api/ask`).
 - **Providers:** `PHOTO_PROVIDERS`, tried in order, default `gemini,deepseek`. The names are in `.env.example`.
   - `gemini`: model `PHOTO_GEMINI_MODEL`, default `gemini-robotics-er-2-preview` (a pinned version, never a `-latest` alias), key `GEMINI_API_KEY` in the `x-goog-api-key` header, JSON output with a response schema, `MEDIA_RESOLUTION_ULTRA_HIGH` on the image, temperature 1, `maxOutputTokens` 32768 (its thinking counts toward it), 25 s per attempt.
-  - **The box prompt** (`backend/photo-prompt.js`, golden `test/fixtures/prompts/photo.txt`), the same for both readers: every part and wire with its type, a value guess, `conf` and a `box_2d [ymin, xmin, ymax, xmax]` on 0–1000 enclosing the item including its metal legs, plus each rail's printed sign by side. No leg points: each part's 2 leads and each wire's 2 ends **start at the midpoints of its box's short edges** (in pixels), `hole: '?'`, with `'leads'` in `unsure`; the page snaps them. Types other than resistor, LED and wire become `other`. A forgiving parser (`parseLooseJSON`) takes a fence, prose, stray braces, trailing commas or a bare list, but not cut-off JSON.
+  - **The box prompt** (`backend/photo-prompt.js`, golden `test/fixtures/prompts/photo.txt`), the same for both readers: every part and wire with its type, a value guess, `conf` and a `box_2d [ymin, xmin, ymax, xmax]` on 0–1000 enclosing the item including its metal legs, plus each rail's printed sign by side. No leg points: each part's 2 leads and each wire's 2 ends **start at the midpoints of its box's short edges** (in pixels), `hole: '?'`, with `'leads'` in `unsure`; the page snaps them. Parts and wires both keep the pixel box as `box` (the crop round cuts each crop from it). Types other than resistor, LED and wire become `other`. A forgiving parser (`parseLooseJSON`) takes a fence, prose, stray braces, trailing commas or a bare list, but not cut-off JSON.
   - `deepseek`: `deepseek-flash` only, `json_object`, whatever time is left of `PHOTO_TIMEOUT_MS`. **Never `deepseek-v4-pro`**: it has no vision, so the #130 fallback (`DEEPSEEK_FALLBACK_MODEL`) never applies to this route.
   - **Falls back to the next provider** on a timeout, 5xx, 429, network error, empty reply, or invalid JSON or Reading. **Never** on a 4xx bad request or bad key.
   - Each provider converts its own output to Reading v1 (`box_2d` on 0–1000 → pixels: x = xn / 1000 · `grid.width`, y = yn / 1000 · `grid.height`), then everything goes through `validateReading()`.
 - **Fixtures** (`Plugged/test/fixtures/photo/<key>.json`): the key is the `sample` id, else the hex SHA-256 of the image bytes decoded from the data URL.
   - `PHOTO_PROVIDERS=fixture` replays only: no fixture for the key → 502 `AI_FAILED`.
-  - In live mode, when every provider fails (or one fails on a bad request or key) and a fixture exists for the key, it is returned with `provider: 'fixture'`.
-  - `PHOTO_RECORD=1` saves each live Reading as `{ sample, sha256, reading, provider, model }` (`sample` null when none). Fixtures store the **Reading**, so `PhotoImport` changes never make them stale.
+  - A request with `sample` whose fixture exists is answered from that fixture straight away (`provider: 'fixture'`, `fallback` false), unless `PHOTO_RECORD=1` (#157). A request is a sample by its `sample` field being a plain id, never by the key's shape.
+  - In live mode, an image with no sample fixture (no `sample`, or a `sample` with no file) goes to the providers first; when every provider fails (or one fails on a bad request or key) and a fixture exists for the key, it is returned with `provider: 'fixture'`.
+  - `PHOTO_RECORD=1` always goes live, a sample included, and saves each live Reading as `{ sample, sha256, reading, provider, model }` (`sample` null when none). Fixtures store the **Reading**, so `PhotoImport` changes never make them stale.
 - **Logging:** one line per request, e.g. `[photo] sample=demo-board provider=gemini model=… 8.2s parts=3 wires=3 fallback=no 612KB`. Never the image or an upstream body.
 - **Mock:** `{ reading: <the mock Reading below>, provider: 'fixture', model: 'deepseek-flash', ms: 12, key: 'demo-board' }`.
+
+### `POST /api/photo/leads` (#159, #160)
+The crop round: where each leg enters the board, one zoomed, labelled crop per part and wire. The backend has no image packages, so **the page cuts and labels the crops** (`photo-crops.js`) and this route only asks Gemini and does arithmetic.
+- **Owner:** `backend/photo-leads.js` (`readLeads(body, opts)`, `opts.fetch` injectable like `readPhoto`'s), routed by `backend/server.js`. **Called by:** `photo-crops.js`.
+  - The page crops only resistors, LEDs and wires: a part of type `other` is never built in Tier 1, so it isn't cropped or sent.
+- **Request:** `{ key, items: [{ id, kind, type, value, image, window }] }`
+  - `key`: the `key` `/api/photo` returned.
+  - `id`: the Reading's id (`'R1'`, `'W1'`). `kind`: `'part'` or `'wire'`. `type`, `value`: from the Reading (`value` may be 0).
+  - `image`: a JPEG or PNG data URL of the labelled crop, at most 2 MP.
+  - `window`: `{ x, y, scale, padLeft, padTop, width, height }`. A crop pixel `(u, v)` is the flattened-image pixel `(x + (u − padLeft) / scale, y + (v − padTop) / scale)`; `width` and `height` are the crop image's own size.
+- **Response 200:** `{ items, provider, model, ms }`, one entry per requested id, in request order:
+  - `{ id, found, leads: [{ pin, pt, role }], conf }`: `pin` as Gemini named it (`'1'`, `'anode'`, `'?'`); `pt` is `[x, y]` in flattened-image pixels, rounded to 0.1, or `null` (the end leaves the crop or board); `role` is `'anode'`/`'cathode'` when Gemini named the pin so, `'none'` for resistors and wires, else `'unknown'`.
+  - or `{ id, error: 'AI_TIMEOUT' | 'AI_FAILED' }`.
+  - `provider` is `'fixture'` only when no item was answered live: a replay (a sample id with a file, or `PHOTO_PROVIDERS=fixture`), or saved answers filling in after every live call failed. Otherwise `'gemini'`, mixed rounds (some items live, some saved) included.
+  - `model` is the model that answered (a saved file gives the model it recorded; `null` under `PHOTO_PROVIDERS=fixture` with no file), `ms` the server's time for the request.
+  - **A valid request is always 200:** a failed item never fails the request.
+- **Errors:** body `{ reply, code }` (429 has no `code`). The page never shows them: it keeps its placeholder dots.
+
+| Status | `code` | When | `reply` |
+|---|---|---|---|
+| 400 | `BAD_ITEMS` | `items` not a list of 1 to 24; an item's `id` not a non-empty string, its `image` not a JPEG or PNG data URL, its `window` missing or a field of it not a finite number, or `scale` ≤ 0 | `"Send 1 to 24 crops, each with an id, a JPEG or PNG image and its window."` |
+| 413 | `TOO_LARGE` | the body is over 6 MB (its own `readBody` cap) | `"Those crops are too large."` |
+| 429 | | more than 6 requests a minute from one IP (its own map, separate from `/api/photo`'s; `TRUST_PROXY` as for `/api/photo`) | `"Too many crop requests at once. Wait a minute and try again."` |
+
+- **Gemini only** (no deepseek: much weaker at pointing). One call per item, **all at once**: model `PHOTO_GEMINI_MODEL` (as for `/api/photo`), key `GEMINI_API_KEY` in `x-goog-api-key`, the crop inline at `MEDIA_RESOLUTION_ULTRA_HIGH`, JSON with `PHOTO_CROP_SCHEMA`, temperature 1, `maxOutputTokens` 32768. No key: every item `AI_FAILED`, nothing sent.
+  - **The crop prompt** (`PHOTO_CROP_PROMPT(item)` in `backend/photo-prompt.js`, golden `test/fixtures/prompts/photo-crop.txt`): "It shows a resistor (470)" (just the type when `value` is 0), or "a jumper wire" with "off" for an end that leaves the crop. The answer is `{"found":true,"type":"...","leads":[["1",[y,x]],["2",[y,x]]],"conf":0.8}`, a pin and a point `[y, x]` on 0–1000 over the whole crop, or `"off"`.
+  - `parseLooseJSON` reads it, and a bare list is taken (`[{...}]` → its first object, `[["1",[y,x]], …]` → the leads). A point becomes crop pixels `(x / 1000 · width, y / 1000 · height)`, then flattened pixels through `window`; `"off"` → `pt: null`.
+  - **Resend:** an item with no good answer after `PHOTO_HEDGE_MS` (default 12000) gets a second identical call; the first good answer wins and the other call is aborted. At most 2 calls per item. A bad request or key (400/401/403) isn't resent.
+  - **Cutoff:** at `PHOTO_LEADS_TIMEOUT_MS` (default 25000) every call is aborted and the unanswered items are `AI_TIMEOUT`. It runs from when the calls go out, after the whole body is read and checked, so the page's own timeout must leave room for the upload too.
+  - A call that fails early (5xx, 429, network error, not JSON, cut off, empty) is resent at `PHOTO_HEDGE_MS`, not at once. An item is `AI_FAILED` only when both its calls failed, or a call got a 400/401/403 (never resent); an item still unanswered at the cutoff is `AI_TIMEOUT`.
+- **Saved leads** (`Plugged/test/fixtures/photo/leads/<key>.json` = `{ key, model, items }`, `items` as the response has them). Points are already flattened pixels, so a change to how crops are drawn never makes them stale. A key is an id, never a path: only a plain id (as for `/api/photo`'s `sample`) has a file.
+  - A `key` that is a **sample id** (anything but 64 hex digits) with a file is answered from it straight away, with `provider: 'fixture'`; an id the file lacks is `AI_FAILED`.
+  - A `key` that is an **image hash** (64 hex digits) goes live first; an item that fails or times out takes that id's saved answer when the file has one.
+  - `PHOTO_PROVIDERS=fixture` replays only, never a fetch: no file → every item `AI_FAILED`.
+  - `PHOTO_RECORD=1` always goes live and saves the answered items (a saved answer kept for an item that failed) as `{ key, model, items }`.
+- **Logging:** one line per request, e.g. `[photo-leads] key=demo-board items=13 ok=12 timeout=1 failed=0 resent=3 provider=gemini 22.1s 1.6MB` (a key that isn't a plain id shows as `?`). Never a crop, the API key or an upstream body.
 
 ### Reading v1 (what `/api/photo` returns)
 The reader's first guess at the board. On the confirm screen Maya moves every wrong dot; the confirmed Reading (same shape) goes to `PhotoImport.build`.
@@ -457,7 +494,9 @@ The reader's first guess at the board. On the confirm screen Maya moves every wr
              color: '',                            // as seen: an LED's colour ('red'); '' when it doesn't matter
              leads: [ { hole, pt: [x, y], role } ],          // role: 'anode' | 'cathode' | 'none' | 'unknown'
              box: [x0, y0, x1, y1], confidence: 0.8, unsure: [] } ],
-  wires: [ { id: 'W1', color: 'black', ends: [ { hole, pt }, { hole, pt } ], confidence, unsure: [] } ],
+  wires: [ { id: 'W1', color: 'black', ends: [ { hole, pt }, { hole, pt } ],
+             box: [x0, y0, x1, y1],                // as a part's; [] when unknown (#159)
+             confidence, unsure: [] } ],
   power: [ { kind: 'battery_9v',                   // 'battery_9v' | 'bench_supply' | 'unknown'
              volts: 9,                             // 0 = unknown
              plus: { hole, pt }, minus: { hole, pt }, unsure: [] } ],
@@ -505,7 +544,7 @@ The prototype's demo board (`docs/superpowers/specs/photo-reference/prototype/ch
         { "hole": "b17", "pt": [570, 220] },
         { "hole": "rail:aInner:19", "pt": [630, 103] }
       ],
-      "confidence": 0.9, "unsure": []
+      "box": [555, 88, 645, 235], "confidence": 0.9, "unsure": []
     }
   ],
   "power": [
