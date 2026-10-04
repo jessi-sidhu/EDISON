@@ -151,6 +151,25 @@ test('a label-form ref to a named pin like U1.OUT resolves to null', () => {
   assert.equal(Chat.resolveEndpoint('U1.OUT', board), null);
 });
 
+// The meter's guide teaches MM1.red / MM1.black, and Board.apply (the server
+// and the eval) accepts a registry pin name. The page refused every one, so
+// an AI build's meter probes never landed; with #199 the whole build was
+// taken back at Accept.
+test('a registry pin name resolves to its index: MM1.red is pin 0, MM1.black pin 1, PS1.com2 pin 3', () => {
+  const mm = { type: 'multimeter', label: 'MM1' }, ps = { type: 'bench_supply', label: 'PS1' };
+  const board = fakeBoard([mm, ps]);
+  assert.deepEqual(Chat.resolveEndpoint('MM1.red', board), { comp: mm, pin: 0 });
+  assert.deepEqual(Chat.resolveEndpoint('MM1.black', board), { comp: mm, pin: 1 });
+  assert.deepEqual(Chat.resolveEndpoint('PS1.com2', board), { comp: ps, pin: 3 });
+  assert.deepEqual(Chat.resolveEndpoint('MM1.red', board), Chat.resolveEndpoint('MM1.0', board));
+});
+
+test('a pin the part doesn\'t have resolves to null, by name or by number: MM1.blue, MM1.2', () => {
+  const board = fakeBoard([{ type: 'multimeter', label: 'MM1' }]);
+  assert.equal(Chat.resolveEndpoint('MM1.blue', board), null);
+  assert.equal(Chat.resolveEndpoint('MM1.2', board), null);
+});
+
 test('accepting delete_all, place_battery, then a wire from BAT1.0 wires the new battery', () => {
   const parts = [{ type: 'battery', label: 'BAT1' }, { type: 'resistor', label: 'R1' }];
   const board = labellingBoard(parts);

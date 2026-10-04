@@ -78,7 +78,7 @@ test('accepting an AI build with an over-stretched resistor shows the refusal an
   const system = page.locator('.chat-msg.system');
   await expect(system.filter({ hasText: '3–5' }), 'a visible note with the allowed range').toHaveCount(1);
   await expect(system.filter({ hasText: '3–5' })).toContainText("a resistor's leads must be 3–5 columns apart; a3 to a33 is 30.");
-  await expect(system.last()).toHaveText("Nothing was changed: 1 of Edison's 2 changes didn't match your board. Ask again.");
+  await expect(system.last()).toHaveText("Nothing was changed: 1 of Edison's 2 changes didn't match your board (place_resistor a3/a33). Ask again.");
   expect(await page.evaluate(() => App.state.components.map(c => c.type))).toEqual([]);
   expect(errors).toEqual([]);
 });

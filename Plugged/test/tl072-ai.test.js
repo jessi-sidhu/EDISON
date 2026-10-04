@@ -166,7 +166,9 @@ test('selectTools sends place_tl072 for op-amp, opamp, amplifier, comparator, TL
 });
 
 test('pin: selectTools does not send place_tl072 for the demo or for any other ai-eval case message', () => {
-  const others = [DEMO, ...CASES.filter(c => !(c.tags || []).includes('opamp')).map(c => c.message)];
+  // The bank's op-amp cases (#202) build a TL072 too, so they send it.
+  const buildsChip = c => ((c.checks || {}).parts || {}).tl072 > 0;
+  const others = [DEMO, ...CASES.filter(c => !(c.tags || []).includes('opamp') && !buildsChip(c)).map(c => c.message)];
   assert.ok(others.length > 5, `sanity: the cases file has its AI-xx messages (${others.length})`);
   const wrong = others.filter(m => selected(m).includes('place_tl072'));
   assert.deepStrictEqual(wrong, [], 'messages with no op-amp in them that send place_tl072');

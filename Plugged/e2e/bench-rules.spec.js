@@ -8,8 +8,10 @@
 //   board, isn't placed; the hint (#hint-text) says
 //   "PS2 not placed: the bench has one bench supply; use PS1's two channels".
 // - An AI build's off-board ghosts stand where Accept puts each part. A part
-//   over the limit gets no ghost; on Accept it places nothing and the chat
-//   notes "PS2 not placed: …" (".chat-msg.system"), counted as not applied.
+//   over the limit gets no ghost; on Accept the chat notes "PS2 not placed: …"
+//   (".chat-msg.system"), and since a build lands whole or not at all (#199),
+//   nothing is placed. (The server refuses it first, so the AI rarely sends
+//   one; this is the page's own guard.)
 // - The AI's battery stays on App.batterySpot(); every instrument goes in
 //   front of the board, all of it on screen from the home view in Edison's
 //   layout at 1440 × 900 (not under a panel), no two overlapping.
@@ -68,15 +70,28 @@ test('by hand: a second bench supply is refused, and the hint says why: "PS2 not
   expect(errors).toEqual([]);
 });
 
-// Two supplies and three meters asked for: one supply and two meters placed.
+// A full bench, every part within the limits: a battery, the supply, the
+// generator and both meters.
 const BENCH_BUILD = {
   reply: 'Here is your bench: a battery, a supply, a generator and the meters.',
   actions: [
     { tool: 'delete_all' },
     { tool: 'place_battery' },
     { tool: 'place_bench_supply', voltage: 12 },
-    { tool: 'place_bench_supply', voltage: 5 },
     { tool: 'place_function_generator' },
+    { tool: 'place_multimeter' },
+    { tool: 'place_multimeter' },
+  ],
+};
+
+// The same asked for with a second supply and a third meter.
+const OVER_BUILD = {
+  reply: 'Here is your bench, with two supplies and three meters.',
+  actions: [
+    { tool: 'delete_all' },
+    { tool: 'place_battery' },
+    { tool: 'place_bench_supply', voltage: 12 },
+    { tool: 'place_bench_supply', voltage: 5 },
     { tool: 'place_multimeter' },
     { tool: 'place_multimeter' },
     { tool: 'place_multimeter' },
@@ -86,31 +101,46 @@ const BENCH_BUILD = {
 const round = p => ({ x: +p.x.toFixed(2), z: +p.z.toFixed(2) });
 const byXz = (a, b) => a.x - b.x || a.z - b.z;
 
-test('an AI build with two supplies and three meters: the preview shows one of each it can place, Accept places them there (PS2 and MM3 noted), each on its own spot in front of the board, all on screen', async ({ page }) => {
-  test.setTimeout(60_000);
-  const errors = watchErrors(page);
-  await openEditor(page, BENCH_BUILD);
-
+async function askForGhosts(page) {
   await page.evaluate(() => { window.__before = new Set(App.scene.children); });
   await page.locator('#sparky-input').fill('Set up my bench');
   await page.locator('#sparky-input').press('Enter');
   await expect(page.locator('#sparky-pending-bar')).toBeVisible();
-
-  const ghosts = await page.evaluate(() => App.scene.children.filter(o => !window.__before.has(o))
+  return page.evaluate(() => App.scene.children.filter(o => !window.__before.has(o))
     .map(o => ({ x: o.position.x, z: o.position.z })));
-  expect(ghosts, 'one ghost per part Accept will place: BAT1, PS1, FG1, MM1, MM2').toHaveLength(5);
+}
+
+test('an AI build over the limits (two supplies, three meters): no ghost for PS2 or MM3, and Accept notes both and changes nothing', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openEditor(page, OVER_BUILD);
+  const ghosts = await askForGhosts(page);
+  expect(ghosts, 'a ghost only for BAT1, PS1, MM1 and MM2').toHaveLength(4);
 
   await page.getByRole('button', { name: 'Accept' }).click();
-  await expect(page.locator('.chat-msg.system').last()).toHaveText('✓ Applied 6 changes to your circuit. 2 could not be applied.');
+  await expect(page.locator('.chat-msg.system').last())
+    .toHaveText("Nothing was changed: 2 of Edison's 7 changes didn't match your board (place_bench_supply, place_multimeter). Ask again.");
   const notes = await page.locator('.chat-msg.system').allTextContents();
   expect(notes).toContain("PS2 not placed: the bench has one bench supply; use PS1's two channels");
   expect(notes).toContain('MM3 not placed: the bench has two multimeters; use MM1 or MM2');
+  expect(await onBoard(page), 'nothing placed').toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('an AI build of a full bench: Accept places the battery, supply, generator and both meters where their ghosts stood, each on its own spot in front of the board, all on screen', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = watchErrors(page);
+  await openEditor(page, BENCH_BUILD);
+  const ghosts = await askForGhosts(page);
+  expect(ghosts, 'one ghost per part: BAT1, PS1, FG1, MM1, MM2').toHaveLength(5);
+
+  await page.getByRole('button', { name: 'Accept' }).click();
+  await expect(page.locator('.chat-msg.system').last()).toHaveText('✓ Applied 6 changes to your circuit.');
 
   const placed = await page.evaluate(() => App.state.components.map(c => ({
     label: c.label, type: c.type, voltage: c.values.voltage, x: c.group.position.x, z: c.group.position.z,
   })));
   expect(placed.map(p => p.label).sort()).toEqual(['BAT1', 'FG1', 'MM1', 'MM2', 'PS1']);
-  expect(placed.find(p => p.label === 'PS1').voltage, 'the first supply asked for is the one placed').toBe(12);
+  expect(placed.find(p => p.label === 'PS1').voltage).toBe(12);
   expect(placed.map(round).sort(byXz), 'each part stands where its ghost stood').toEqual(ghosts.map(round).sort(byXz));
 
   const spot = await page.evaluate(() => App.batterySpot());

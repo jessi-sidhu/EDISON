@@ -26,6 +26,8 @@ const Parts = require('../circuit3d/js/parts');
 // The board as plain data and the simulator, so a whole AI build can be
 // checked in Node before the user sees it (the repair loop).
 const Board = require('../circuit3d/js/board-model.js');
+const Bench = require('../circuit3d/js/bench.js');
+const Ids   = require('../circuit3d/js/ids.js');
 const Sim   = require('../circuit3d/js/simulate.js');
 
 // ── Load .env ─────────────────────────────────────────────────
@@ -1129,7 +1131,7 @@ const askAI = makeAsk(
     toolsFor:  (markdown, message) => selectTools(message, boardTypes(markdown)),
     promptFor: buildPrompt,
     partTools,
-    refusal:   (action, prior, board) => placementRefusal(action, prior) || referenceRefusal(action, prior, board),
+    refusal:   (action, prior, board) => placementRefusal(action, prior) || benchRefusal(action, prior, board) || referenceRefusal(action, prior, board),
     duplicate: duplicateWire,
     checkBuild,
   }
@@ -1290,7 +1292,8 @@ function referenceRefusal(a, prior, board) {
   if (!a || ![...REFERS, 'add_wire'].includes(a.tool) || !isBoard(board)) return null;   // no board sent: nothing to check against
   const before = prior || [];
   const b = board;
-  const mine = Board.apply(b, [...before, a]).errors.find(e => e.index === before.length);
+  let mine;
+  try { mine = Board.apply(b, [...before, a]).errors.find(e => e.index === before.length); } catch { return null; }
   if (!mine) return null;
   const known = a.tool === 'delete_wire'
     ? `The board's wires are ${b.wires.map(w => w.id).join(', ') || 'none'} (the Wires table).`
@@ -1298,13 +1301,35 @@ function referenceRefusal(a, prior, board) {
   return `${mine.why}. ${known}`;
 }
 
-// What a reply's edits name that isn't there: wire ids and part labels,
-// each once, in order. [] when no board was sent.
+// A second bench supply or function generator, or a third multimeter
+// (#197's limits, Bench.LIMITS), refused here so the model hears why in the
+// same turn and uses PS1, FG1 or MM1/MM2 instead; the page would refuse it
+// only at Accept. Counted on the board as it will be: the sent board (an
+// empty one when none was sent) with the earlier steps applied.
+function benchRefusal(a, prior, board) {
+  const def = a && PART_BY_TOOL.get(a.tool);
+  if (!def || !Object.hasOwn(Bench.LIMITS, def.type)) return null;
+  let parts;
+  try {
+    parts = Board.apply(isBoard(board) ? board : Board.empty(), prior || []).board.parts;
+  } catch {
+    return null;   // a malformed board: the page refuses it at Accept instead
+  }
+  const why = Bench.refusal(def.type, parts);
+  return why ? `${Ids.nextLabel(parts, def.type)} not placed: ${why}.` : null;
+}
+
+// What a reply's steps name that isn't there: wire ids, part labels and
+// wire ends (a part not on the board, or a pin it doesn't have), each once,
+// in order. [] when no board was sent.
 function missingReferences(actions, board) {
   if (!isBoard(board)) return [];
-  const names = Board.apply(board, actions).errors
-    .filter(e => REFERS.includes(e.tool))
-    .map(e => { const a = actions[e.index]; return String(a.tool === 'delete_wire' ? a.wire : a.part); });
+  let errors;
+  try { errors = Board.apply(board, actions).errors; } catch { return []; }
+  const nameOf = a => a.tool === 'delete_wire' ? a.wire : a.tool === 'add_wire' ? `the wire ${a.from} → ${a.to}` : a.part;
+  const names = errors
+    .filter(e => [...REFERS, 'add_wire'].includes(e.tool))
+    .map(e => String(nameOf(actions[e.index])));
   return [...new Set(names)];
 }
 
@@ -1366,7 +1391,7 @@ function finishAIReply({ reply, actions, board, fullCheck = false }) {
   for (const a of actions) {
     const dup = duplicateWire(a, kept, board);
     if (dup) { console.warn(`[edit] dropped: ${dup}`); continue; }
-    const why = placementRefusal(a, kept);
+    const why = placementRefusal(a, kept) || benchRefusal(a, kept, board);
     if (why) notes.push(why);
     else kept.push(a);
   }

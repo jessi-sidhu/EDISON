@@ -262,3 +262,25 @@ test('Chat.predictSpots starts again after delete_all, as Accept does', () => {
   assert.equal(spots[0], null);
   assert.ok(spots[1] && spots[1].z >= FRONT_Z, `after delete_all PS1 is placed again, in front: ${JSON.stringify(spots[1])}`);
 });
+
+// Every worked build the AI is shown (a part's ai.recipe and ai.recipes) is
+// one the bench can hold: the model copies these, and a build over the limits
+// is refused by the server and taken back at Accept (#199). No guide names a
+// second supply or generator or a third meter either.
+test('every registry recipe stays within Bench.LIMITS, and no ai.guide names PS2, FG2 or MM3', () => {
+  const PartsAll = require('../circuit3d/js/parts');
+  const BenchMod = require('../circuit3d/js/bench.js');
+  const over = [];
+  for (const def of PartsAll.all()) {
+    const ai = def.ai || {};
+    const recipes = [ai.recipe, ...(Array.isArray(ai.recipes) ? ai.recipes : [])].filter(Boolean);
+    recipes.forEach((r, i) => {
+      for (const [type, max] of Object.entries(BenchMod.LIMITS)) {
+        const n = (r.parts || []).filter(p => p.type === type).length;
+        if (n > max) over.push(`${def.type} recipe ${i}: ${n} × ${type} (max ${max})`);
+      }
+    });
+    if (/\b(PS2|FG2|MM3)\b/.test(ai.guide || '')) over.push(`${def.type} guide names ${ai.guide.match(/\b(PS2|FG2|MM3)\b/)[0]}`);
+  }
+  assert.deepStrictEqual(over, []);
+});

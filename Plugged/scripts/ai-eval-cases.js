@@ -11,10 +11,12 @@
 //                recipe's own order lands every id back where it was, so
 //                keep alone can't catch it)
 //    noHeadsUp   the reply has no "Heads up, this build has a problem:"
-//    parts       { type: count } on the board
+//    parts       { type: count | [lo, hi] } on the board
 //    expect      { LABEL: { field: value | [lo, hi] } }, field of the part's
 //                simulator reading (PartResult m)
 //    expectAll   { type: { field: … } }, every part of that type
+//    pins        { LABEL: { pin: value | [lo, hi] } }, a pin's volts vs
+//                ground (PartResult r.pins), for a node no reading gives
 //    status      'ok' and not shorted
 //  `states: [{ name, after, checks }]` grade the same built board in another
 //  state (the button released, the switch clicked), each with its own
@@ -22,6 +24,18 @@
 //  A case or state may carry `t` (and optionally `dt`, default 1 ms): its
 //  board is solved as one time step at t seconds, so a wave source reads
 //  its value then, not just its offset (#120).
+//  The bank cases (#202, docs/AI-TEST-SET.md) add two case-level keys:
+//    lab         { wires: n }: graded as a lab bench. Every function
+//                generator runs at 1 Hz whatever the AI set, and the built
+//                board must pass the wiring checks (no dangling wire end,
+//                no duplicate wire, at most n + 2 wires where n is the clean
+//                build's count, no idle part leg, every TL072 powered),
+//                failing as 'wiring.<check>'. Only the bank sets it, so the
+//                other cases grade exactly as before.
+//    logic       { type, mA, none: [state…], one: [state…] }: across the
+//                named states, none of `type` carries mA in a `none` state,
+//                exactly one does in each `one` state, and a different one
+//                each time ('logic.<state>', 'logic.distinct').
 //  Readings are the ones a correct build gives (test/ai-eval.test.js proves
 //  each against one). What code can't see (the preview, hover and scroll,
 //  3D glow, reply wording, console errors) stays with /qa-pass.
@@ -42,6 +56,14 @@ const BACKWARDS = captured('backwards-led');
 // The one-LED build's resistor and wire ids, kept by every edit.
 const KEEP_R1 = { R1: ['b2', 'b6'] };
 const WIRES = ['W1', 'W2', 'W3', 'W4'];
+
+// The bank (#202): a 1 Hz sine's peak and trough, and the push buttons.
+const PEAK = 0.25, TROUGH = 0.75;   // s
+const press   = { tool: 'set_control', part: 'SW1', pressed: true };
+const release = { tool: 'set_control', part: 'SW1', pressed: false };
+// Case 16's button states: exactly these held, the others released.
+const hold = (...down) => ['SW1', 'SW2', 'SW3'].map(part => ({ tool: 'set_control', part, pressed: down.includes(part) }));
+const held = (...down) => ({ name: down.length ? down.join('+') : 'none', after: hold(...down), checks: { status: 'ok' } });
 
 module.exports = [
   {
@@ -301,5 +323,174 @@ module.exports = [
               expectAll: { led: { on: true, current: [5, 20] } }, status: 'ok' },
     states: [{ name: 'trough', after: [{ tool: 'set_value', part: 'FG1', frequency: 1 }], t: 0.75,
                checks: { expectAll: { led: { on: false } }, status: 'ok' } }],
+  },
+
+  // ── The bank (#202): Aarmen's 16 lab prompts, docs/AI-TEST-SET.md ──────
+  // `npm run ai-eval -- --only bank`. Each is graded as a lab bench (`lab`:
+  // every generator at 1 Hz, the wiring checks), sine cases at the peak
+  // (t = 0.25 s, the main checks) and the trough (t = 0.75 s). Instrument
+  // counts follow the doc's Parts column; ±3 % and the like are the doc's.
+  // test/prompt-bank.test.js passes a hand-built clean build of each (the
+  // numbers below) and fails a wrong one. The server's checker puts a
+  // "Heads up" on the clean builds of BANK-07 (it calls the superdiode's
+  // diode backwards) and BANK-15 (an LED the generator only forward-biases
+  // on the trough), so those two can't pass live until it learns them.
+  {
+    // −Rf/(Rin + 50 Ω): 20k/10.05k × 1 V = −1.990 V at the peak, +1.990 V at the trough.
+    id: 'BANK-01', tags: ['bank'], lab: { wires: 10 },
+    message: 'Build an inverting amplifier with a gain of −2 driven by a 1 V sine from the function generator.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1 },
+              expect: { U1: { vout1: [-2.06, -1.94], mode1: 'linear' } }, status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH, checks: { expect: { U1: { vout1: [1.94, 2.06], mode1: 'linear' } }, status: 'ok' } }],
+  },
+  {
+    // 1 + Rf/Rg = 3; no input current, so the 50 Ω drops nothing: ±3.000 V.
+    id: 'BANK-02', tags: ['bank'], lab: { wires: 10 },
+    message: 'Build a non-inverting amplifier with a gain of 3, driven by a 1 V sine from the function generator.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1 },
+              expect: { U1: { vout1: [2.91, 3.09], mode1: 'linear' } }, status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH, checks: { expect: { U1: { vout1: [-3.09, -2.91], mode1: 'linear' } }, status: 'ok' } }],
+  },
+  {
+    // 12 V × 10k/20k = 6.000 V, buffered (the follower's input draws nothing); a plain solve.
+    id: 'BANK-03', tags: ['bank'], lab: { wires: 10 },
+    message: 'Divide the 12 V supply with two 10 kΩ resistors, buffer it with a TL072 follower, and measure the output with the multimeter.',
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 0, multimeter: 1, resistor: 2 },
+              expect: { MM1: { mode: 'V', reading: [5.9, 6.1] } }, status: 'ok' },
+  },
+  {
+    // Pressed: IN+ above the threshold, OUT1 high, the LED lit (e.g. 8.1 mA
+    // through 1 kΩ); released: dark. A plain solve in each state.
+    id: 'BANK-04', tags: ['bank'], lab: { wires: 10 },
+    message: 'Build a comparator that lights an LED only while I hold the push button.',
+    after: [press],
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 0, button: 1, led: 1 },
+              expectAll: { led: { on: true } }, status: 'ok' },
+    states: [{ name: 'released', after: [release], checks: { expectAll: { led: { on: false } }, status: 'ok' } }],
+  },
+  {
+    // −(V1 + V2): the 1 V sine and the divider's 1 V. With 100 kΩ all round
+    // and an 11k/1k divider (917 Ω behind it): −(0.9995 + 0.9909) = −1.991 V
+    // at the peak, +0.009 V at the trough. Within 0.1 V, as the doc says.
+    id: 'BANK-05', tags: ['bank'], lab: { wires: 13 },
+    message: 'Build an inverting summing amplifier that adds a 1 V sine from the function generator and 1 V from a divider.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1 },
+              expect: { U1: { vout1: [-2.1, -1.9] } }, status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH, checks: { expect: { U1: { vout1: [-0.1, 0.1] } }, status: 'ok' } }],
+  },
+  {
+    // V2 − V1 with V2 the sine, V1 a 2 V divider: −1.0 V at the peak, −3.0 V
+    // at the trough (±3 %). The divider must be stiff against its 10 kΩ load:
+    // 500/100 Ω (83 Ω behind it) gives −0.990 and −2.977 V; 10k/2k sags to −0.79 V at the peak.
+    id: 'BANK-06', tags: ['bank'], lab: { wires: 13 },
+    message: 'Build a difference amplifier with all 10 kΩ resistors that outputs V2 − V1, with V2 a 1 V sine from the function generator and V1 2 V from a divider.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1 },
+              expect: { U1: { vout1: [-1.03, -0.97] } }, status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH, checks: { expect: { U1: { vout1: [-3.09, -2.91] } }, status: 'ok' } }],
+  },
+  {
+    // The superdiode: the output is the diode's cathode (its load to ground,
+    // fed back to IN1−). Peak: 1.000 V (OUT1 at 1.65 V); trough: the diode
+    // off, OUT1 at the − rail, the output 0 V. An inverting precision
+    // rectifier reads 0 V at the peak and fails, as the doc's rule wants.
+    id: 'BANK-07', tags: ['bank'], lab: { wires: 10 },
+    message: 'Build a precision half-wave rectifier with the TL072 and a diode, fed by a 1 V sine from the function generator.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1, diode: 1 },
+              pins: { D1: { cathode: [0.95, 1.05] } }, status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH, checks: { pins: { D1: { cathode: [-0.1, 0.1] } }, status: 'ok' } }],
+  },
+  {
+    // The follower's OUT1 swings ±5 V: (5 − 2.0)/470 Ω = 6.4 mA lit at the peak, dark at the trough.
+    id: 'BANK-08', tags: ['bank'], lab: { wires: 10 },
+    message: 'Use the TL072 as a buffer between a 5 V sine from the function generator and an LED so the LED blinks.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1, led: 1 },
+              expectAll: { led: { on: true } }, status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH, checks: { expectAll: { led: { on: false } }, status: 'ok' } }],
+  },
+  {
+    // −2 then −1: vout1 = −20k/10.05k = −1.990 V, vout2 = +1.990 V at the peak, −1.990 V at the trough.
+    id: 'BANK-09', tags: ['bank'], lab: { wires: 13 },
+    message: 'Use both halves of the TL072: the first inverts with a gain of −2, the second inverts that again with a gain of −1. Drive it with a 1 V sine.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1 },
+              expect: { U1: { vout2: [1.94, 2.06], mode1: 'linear', mode2: 'linear' } }, status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH,
+               checks: { expect: { U1: { vout2: [-2.06, -1.94], mode1: 'linear', mode2: 'linear' } }, status: 'ok' } }],
+  },
+  {
+    // A plain solve. 1 V from an 11k/1k divider into Rin 100 kΩ (917 Ω
+    // behind it: 0.991 V), Rf 500 kΩ: the meter reads −4.955 V.
+    id: 'BANK-10', tags: ['bank'], lab: { wires: 13 },
+    message: 'Build an inverting amplifier with a gain of −5. Its input is 1 V from a divider off the supply. Show the output on the multimeter.',
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 0, multimeter: 1 },
+              expect: { MM1: { mode: 'V', reading: [-5.1, -4.9] }, U1: { mode1: 'linear' } }, status: 'ok' },
+  },
+  {
+    // −100k/10.05k × 0.5 V = −4.975 V at the peak, +4.975 V at the trough;
+    // the meter on OUT1 reads the same moment (−4.975 V).
+    id: 'BANK-11', tags: ['bank'], lab: { wires: 12 },
+    message: 'ENSC 220 Lab 2: an inverting amplifier with a gain of −10 on ±12 V, fed by a 0.5 V sine from the function generator, with the multimeter on the output.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1, multimeter: 1 },
+              expect: { U1: { vout1: [-5.15, -4.85], mode1: 'linear' }, MM1: { mode: 'V', reading: [-5.15, -4.85] } },
+              status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH, checks: { expect: { U1: { vout1: [4.85, 5.15], mode1: 'linear' } }, status: 'ok' } }],
+  },
+  {
+    // Pressed: (5 − 0.7 − 2.0)/150 Ω = 15.3 mA through the 1N4001 and the LED; released: dark.
+    id: 'BANK-12', tags: ['bank'], lab: { wires: 4 },
+    message: 'Make an LED that turns on with a push button, with a 1N4001 for reverse-polarity protection, on the 5 V bench supply.',
+    after: [press],
+    checks: { noHeadsUp: true, parts: { bench_supply: 1, battery: 0, function_generator: 0, button: 1, diode: 1, led: 1 },
+              expectAll: { led: { on: true, current: [5, 20] }, diode: { on: true } }, status: 'ok' },
+    states: [{ name: 'released', after: [release], checks: { expectAll: { led: { on: false } }, status: 'ok' } }],
+  },
+  {
+    // The grader solves one moment, so "charged" is a plain solve with the
+    // capacitor open: the 10 MΩ meter over 10 kΩ reads 9 × 10M/10.01M =
+    // 8.991 V. The bench supply at 9 V or a 9 V battery, one of them.
+    id: 'BANK-13', tags: ['bank'], lab: { wires: 6 },
+    message: 'Charge a 100 µF capacitor through 10 kΩ from 9 V while the button is held, with the multimeter across the capacitor.',
+    after: [press],
+    checks: { noHeadsUp: true, parts: { bench_supply: [0, 1], battery: [0, 1], function_generator: 0, button: 1, capacitor: 1, multimeter: 1 },
+              expect: { MM1: { mode: 'V', reading: [8.8, 9.1] } }, status: 'ok' },
+  },
+  {
+    // (5 − 0.65 − 2.0)/(1 kΩ + 50 Ω) = 2.2 mA lit at the peak; the 1N4148 blocks the trough.
+    id: 'BANK-14', tags: ['bank'], lab: { wires: 4 },
+    message: 'Build a half-wave rectifier: a 5 V sine from the function generator, then a 1N4148, then a 1 kΩ load, with an LED showing when current flows.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { function_generator: 1, bench_supply: 0, battery: 0, diode: 1, led: 1 },
+              expectAll: { led: { on: true } }, status: 'ok' },
+    states: [{ name: 'trough', t: TROUGH, checks: { expectAll: { led: { on: false } }, status: 'ok' } }],
+  },
+  {
+    // (5 − 2.0)/(220 + 50 Ω) = 11.1 mA: one LED at the peak, the other at
+    // the trough, whichever the AI put which way round.
+    id: 'BANK-15', tags: ['bank'], lab: { wires: 4 },
+    message: 'Put two LEDs back to back on a 5 V sine from the function generator, through one resistor, so they take turns.',
+    t: PEAK,
+    checks: { noHeadsUp: true, parts: { function_generator: 1, bench_supply: 0, battery: 0, led: 2, resistor: 1 }, status: 'ok' },
+    states: [{ name: 'peak', t: PEAK, checks: { status: 'ok' } }, { name: 'trough', t: TROUGH, checks: { status: 'ok' } }],
+    logic: { type: 'led', mA: 1, one: ['peak', 'trough'] },
+  },
+  {
+    // Diode AND gates (5 V; each button pulls its line up, 150 Ω pulls it
+    // down; each LED's node has 1 kΩ up and a 1N4148 to each of its two
+    // lines): a pair lights its LED at (5 − 2.0)/1 kΩ = 3.0 mA; a low line
+    // holds the others' nodes at 1.65 V at most, under 2.0 V. "On" is 1 mA or more.
+    // All three held isn't graded.
+    id: 'BANK-16', tags: ['bank'], lab: { wires: 15 },
+    message: 'Build a circuit with 3 LEDs and 3 push buttons. Pressing any two buttons together lights one LED, and each pair lights a different LED.',
+    after: hold(),
+    checks: { noHeadsUp: true, parts: { bench_supply: [0, 1], battery: [0, 1], function_generator: 0, button: 3, led: 3 }, status: 'ok' },
+    states: [held(), held('SW1'), held('SW2'), held('SW3'), held('SW1', 'SW2'), held('SW2', 'SW3'), held('SW1', 'SW3')],
+    logic: { type: 'led', mA: 1, none: ['none', 'SW1', 'SW2', 'SW3'], one: ['SW1+SW2', 'SW2+SW3', 'SW1+SW3'] },
   },
 ];

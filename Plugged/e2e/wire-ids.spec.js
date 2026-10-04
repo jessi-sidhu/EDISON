@@ -61,7 +61,7 @@ async function accept(page, n, failed) {
   await expect(page.locator('#sparky-pending-bar')).toBeVisible();
   await page.getByRole('button', { name: 'Accept' }).click();
   await expect(page.locator('.chat-msg.system').last())
-    .toHaveText(failed ? /^Nothing was changed: .* didn't match your board\. Ask again\.$/ : `✓ Applied ${n} change${n === 1 ? '' : 's'} to your circuit.`);
+    .toHaveText(failed ? /^Nothing was changed: .* didn't match your board \(.+\)\. Ask again\.$/ : `✓ Applied ${n} change${n === 1 ? '' : 's'} to your circuit.`);
 }
 
 // Types a message and waits for its reply (a preview when it has actions).

@@ -103,3 +103,15 @@ test('accepted with no failures (failed = [] or left out): no "could not be appl
     assert.match(text, /\nApplied:[^\n]*R1/, text);
   }
 });
+
+// #199 review: an Accept taken back because steps failed isn't a decline.
+// modelHistoryText(reply, actions, true, failed, reverted = true) is one line
+// saying she accepted, nothing changed, and which steps didn't match, so the
+// AI changes those before sending the build again.
+test('accepted but reverted: the AI is told which steps failed and that nothing changed, not that she declined', () => {
+  const bad = { tool: 'add_wire', from: 'MM1.red', to: 'i30' };
+  const actions = [{ tool: 'place_multimeter' }, bad];
+  const text = Chat.modelHistoryText('Built it with the meter on the output.', actions, true, [bad], true);
+  assert.equal(text, "(The user accepted this build, but these steps didn't match the board, so nothing was changed: add_wire MM1.red→i30.)");
+  assert.ok(!/declined/.test(text), text);
+});

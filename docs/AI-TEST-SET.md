@@ -4,10 +4,12 @@ These are the prompts we send to Edison's AI to check that it builds circuits th
 
 **Parts in play:** capacitor, resistor, bench supply, function generator (sine), diode, LED, TL072 op-amp, push button, multimeter and jumper wires.
 
-**Status:** not coded yet.
-- The cases go in `Plugged/scripts/ai-eval-cases.js` and run with `npm run ai-eval`.
-- The wiring checks and the logic check below are new grader features for `Plugged/scripts/ai-eval.js`.
-- Run the set once the AI fixes in #197, #198 and #199 have landed. The cases assume those rules.
+**Status:** coded (#202). The cases are `BANK-01`…`BANK-16` (tag `bank`) in `Plugged/scripts/ai-eval-cases.js`; the wiring and logic checks are in `Plugged/scripts/ai-eval.js`, on the bank cases only (`lab: { wires }`), so the older cases grade as before. Run with `npm run ai-eval -- --only bank` (48 calls, about 50 cents).
+
+**Baseline, 2026-10-03** (DeepSeek `deepseek-flash`, with #197–#199, 3 runs each): **11 of 48 runs pass**.
+- Pass 3/3: 01, 13, 14. Pass 2/3: 08 (one dangling wire).
+- Fail 3/3: 02, 03, 05, 06, 07, 09, 10, 11 (TL072 pins mixed up: + and − inputs swapped, probes on the wrong column, a wire across the feedback resistor; idle legs and dangling wires), 04 (built without the TL072 or the supply), 12 (LED current outside 5–20 mA), 15 and 16 (logic).
+- Known grader limits: the circuit checker puts a Heads up on correct builds of 07 and 15 (a false positive, pinned in `test/prompt-bank.test.js`), and 05, 06 and 10 need a stiff divider at these tolerances.
 
 ## How a case is graded
 

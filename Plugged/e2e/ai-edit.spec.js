@@ -154,7 +154,7 @@ test('a refused edit (an unknown label) changes nothing and says so', async ({ p
   });
   await ask(page, 'make R9 1k');
   await page.getByRole('button', { name: 'Accept' }).click();
-  await expect(page.locator('.chat-msg.system').last()).toHaveText("Nothing was changed: Edison's change didn't match your board. Ask again.");   // #199
+  await expect(page.locator('.chat-msg.system').last()).toHaveText("Nothing was changed: Edison's change didn't match your board (set_value R9 resistance=1000). Ask again.");   // #199
   await expect(page.locator('.chat-msg.system').filter({ hasText: 'R9' })).not.toHaveCount(0);
   expect(await resistance(page)).toBe(470);
 });

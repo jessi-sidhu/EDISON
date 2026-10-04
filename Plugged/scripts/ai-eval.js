@@ -7,6 +7,7 @@
 //  e2e or CI; each run costs about a cent):
 //    npm run ai-eval                      every case, 3 runs each
 //    npm run ai-eval -- --only demo       one case, by id or tag
+//    npm run ai-eval -- --only bank       the 16 lab prompts (#202, docs/AI-TEST-SET.md)
 //    npm run ai-eval -- --runs 5 --json /tmp/eval.json
 //  Exits 1 when a demo-tagged case misses pass^N (every run passing).
 //  The model fallback (#130) is off, so the configured model is measured
@@ -21,6 +22,7 @@ const path = require('node:path');
 
 const Board = require('../circuit3d/js/board-model.js');
 const Sim   = require('../circuit3d/js/simulate.js');
+const Parts = require('../circuit3d/js/parts');
 const GEOMETRY = require('../circuit3d/js/board-geometry.js');
 
 const HEADS_UP = 'Heads up, this build has a problem:';
@@ -75,7 +77,7 @@ function checkBoard(board, checks, reply, fail, start, at) {
 
   if (checks.parts) {
     for (const [type, n] of Object.entries(checks.parts)) {
-      if (board.parts.filter(p => p.type === type).length !== n) fail('parts.' + type);
+      if (!matches(board.parts.filter(p => p.type === type).length, n)) fail('parts.' + type);
     }
   }
 
@@ -105,17 +107,162 @@ function checkBoard(board, checks, reply, fail, start, at) {
     }
   }
 
+  // A pin's volts vs ground (PartResult r.pins), for a node no part's
+  // reading gives: a precision rectifier's output is its diode's cathode.
+  for (const [label, pins] of Object.entries(checks.pins || {})) {
+    for (const [pin, want] of Object.entries(pins)) {
+      const pr = r && r.parts && r.parts[label];
+      if (!pr || !matches(pr.r.pins[pin], want)) fail(`pins.${label}.${pin}`);
+    }
+  }
+
   if (checks.status) {
     if (!r || r.status !== checks.status) fail('status');
     else if (r.shorted) fail('shorted');
   }
+  return r;
+}
+
+// ── Lab cases (#202, docs/AI-TEST-SET.md) ──────────────────────
+// A case with `lab: { wires }` is graded as a lab bench: every function
+// generator is set to 1 Hz before any reading, whatever the AI chose, and
+// the built board must pass the wiring checks below. Only the bank cases
+// set it, so every other case grades exactly as before and its baseline
+// stays comparable.
+
+// A hole's strip, the holes the breadboard itself joins: 'top_5' (a5–e5),
+// 'bot_5' (f5–j5) or a whole rail ('tp', 'tn', 'bn', 'bp'); null for
+// anything that isn't a hole.
+function stripOf(end) {
+  const m = /^(?:([a-j])(\d+)|(tp|tn|bn|bp)_(\d+))$/i.exec(String(end));
+  if (!m) return null;
+  if (m[3]) return m[3].toLowerCase();
+  return ('abcde'.includes(m[1].toLowerCase()) ? 'top_' : 'bot_') + Number(m[2]);
+}
+
+// An off-board pin wire end ("PS1.0", "MM1.red") as 'LABEL.<pin index>',
+// or null for a hole or a pin no part has.
+function terminalOf(end, board) {
+  const m = /^([A-Za-z]+\d+)\.(\w+)$/.exec(String(end));
+  if (!m) return null;
+  const part = board.parts.find(p => String(p.label).toLowerCase() === m[1].toLowerCase());
+  const def = part && Parts.get(part.type);
+  if (!def) return null;
+  const k = /^\d+$/.test(m[2]) ? Number(m[2]) : def.pins.indexOf(m[2]);
+  return k >= 0 && k < def.pins.length ? `${part.label}.${k}` : null;
+}
+
+// Off-board terminals a lab build may leave unwired: a one-rail build uses
+// only the bench supply's + and COM.
+const OPTIONAL_PINS = { bench_supply: ['neg', 'com2'] };
+// The TL072's second op-amp (IN2+, IN2−, OUT2), which may sit unused.
+const OPAMP2 = ['in2p', 'in2n', 'out2'];
+
+// The wiring checks on a built board → the names of those it fails:
+//   dangling   a wire end in a strip with nothing else in it
+//   duplicate  two wires join the same two points (a strip, or an
+//              off-board terminal)
+//   budget     more wires than lab.wires (the clean build's count) + 2
+//   idle       a part leg in a strip with nothing else in it, or an
+//              off-board terminal with no wire (bar OPTIONAL_PINS); a
+//              TL072's second op-amp may be idle, all three of its legs
+//   opamp      a TL072's V+ isn't on a supply's + terminal, or its V−
+//              isn't on a supply's − or COM (ground)
+// "No short" and "no warning" are the status and noHeadsUp checks.
+function wiringProblems(board, lab) {
+  const out = [];
+  const add = name => { if (!out.includes(name)) out.push(name); };
+
+  // Who sits in each strip: part legs and wire ends.
+  const strips = new Map();
+  const put = (strip, who) => {
+    if (!strip) return;
+    if (!strips.has(strip)) strips.set(strip, []);
+    strips.get(strip).push(who);
+  };
+  board.parts.forEach(p => (p.holes || []).forEach((h, k) => put(stripOf(h), { label: p.label, k })));
+  board.wires.forEach(w => [w.from, w.to].forEach(e => put(stripOf(e), { wire: w.id })));
+  const others = (strip, mine) => (strips.get(strip) || []).filter(who => !mine(who)).length;
+
+  for (const w of board.wires) {
+    for (const e of [w.from, w.to]) {
+      const s = stripOf(e);
+      if (s && !others(s, who => who.wire === w.id)) add('dangling');
+    }
+  }
+
+  const point = e => stripOf(e) || terminalOf(e, board) || String(e).toLowerCase();
+  const pairs = board.wires.map(w => [point(w.from), point(w.to)].sort().join(' ~ '));
+  if (new Set(pairs).size !== pairs.length) add('duplicate');
+
+  if (lab && Number.isFinite(lab.wires) && board.wires.length > lab.wires + 2) add('budget');
+
+  const wired = new Set(board.wires.flatMap(w => [terminalOf(w.from, board), terminalOf(w.to, board)]).filter(Boolean));
+  for (const p of board.parts) {
+    const def = Parts.get(p.type);
+    if (!def) continue;
+    if (p.holes) {
+      const idle = p.holes.map((h, k) => { const s = stripOf(h); return !s || !others(s, who => who.label === p.label && who.k === k); });
+      const op2 = p.type === 'tl072' ? OPAMP2.map(pin => def.pins.indexOf(pin)) : [];
+      if (op2.length && op2.every(k => idle[k])) op2.forEach(k => { idle[k] = false; });
+      if (idle.some(Boolean)) add('idle');
+    } else {
+      const optional = OPTIONAL_PINS[p.type] || [];
+      if (def.pins.some((pin, k) => !optional.includes(pin) && !wired.has(`${p.label}.${k}`))) add('idle');
+    }
+  }
+
+  if (board.parts.some(p => p.type === 'tl072')) {
+    let graph = null;
+    try { const { components, wires } = Board.toSim(board); graph = Sim.buildGraph(components, wires); } catch { /* the simulate check fails it */ }
+    if (graph) {
+      const nodes = (type, pins) => graph.filter(g => g.comp.type === type)
+        .flatMap(g => pins.map(pin => g.nodes[Parts.get(type).pins.indexOf(pin)]));
+      const plus  = new Set([...nodes('bench_supply', ['pos']), ...nodes('battery', ['0'])]);
+      const minus = new Set([...nodes('bench_supply', ['neg', 'com', 'com2']), ...nodes('battery', ['1'])]);
+      const pin = (g, name) => g.nodes[Parts.get('tl072').pins.indexOf(name)];
+      if (graph.some(g => g.comp.type === 'tl072' && !(plus.has(pin(g, 'vpos')) && minus.has(pin(g, 'vneg'))))) add('opamp');
+    }
+  }
+  return out;
+}
+
+// set_value actions putting every function generator on the board at 1 Hz.
+const oneHertz = board => board.parts.filter(p => p.type === 'function_generator')
+  .map(p => ({ tool: 'set_value', part: p.label, frequency: 1 }));
+
+// A case's `logic` ({ type, mA, none: [state…], one: [state…] }) over its
+// graded states, seen[name] = { board, r } → the names it fails: a `none`
+// state where any part of `type` carries mA or more, a `one` state where
+// not exactly one does, and 'distinct' when two `one` states light the
+// same part (#202 case 16: each pair of buttons lights a different LED).
+function logicProblems(logic, seen) {
+  const lit = name => {
+    const s = seen[name];
+    if (!s || !s.r || !s.r.parts) return null;
+    return s.board.parts.filter(p => p.type === logic.type)
+      .filter(p => { const pr = s.r.parts[p.label]; return pr && pr.m && pr.m.current >= logic.mA; })
+      .map(p => p.label);
+  };
+  const out = [];
+  for (const name of logic.none || []) { const on = lit(name); if (!on || on.length) out.push(name); }
+  const ones = [];
+  for (const name of logic.one || []) {
+    const on = lit(name);
+    if (!on || on.length !== 1) out.push(name);
+    else ones.push(on[0]);
+  }
+  if (new Set(ones).size !== ones.length) out.push('distinct');
+  return out;
 }
 
 // The case graded against one reply → { pass, failed: [check names] }.
 // The reply's actions build one board; the main checks see it plus the
 // case's `after`, each state sees it plus the state's own `after`, its
 // failures named '<state>.<check>'. A case or state with `t` (and
-// optionally `dt`) is solved at that moment of the clock.
+// optionally `dt`) is solved at that moment of the clock. A lab case adds
+// the wiring checks ('wiring.<name>') and its generators run at 1 Hz; a
+// case's `logic` is judged across its states ('logic.<state>').
 function grade(testCase, reply) {
   const failed = [];
   const failer = prefix => name => { const n = prefix + name; if (!failed.includes(n)) failed.push(n); };
@@ -124,18 +271,26 @@ function grade(testCase, reply) {
   const built = Board.apply(start, (reply && reply.actions) || []);
   if (built.errors.length) failer('')('apply');
 
+  let base = built.board;
+  if (testCase.lab) {
+    for (const name of wiringProblems(built.board, testCase.lab)) failer('')('wiring.' + name);
+    base = Board.apply(base, oneHertz(base)).board;
+  }
+
   const gradeState = (after, checks, fail, at) => {
-    let board = built.board;
+    let board = base;
     if (after && after.length) {
       const then = Board.apply(board, after);
       if (then.errors.length) fail('apply');
       board = then.board;
     }
-    checkBoard(board, checks || {}, reply, fail, start, at);
+    return { board, r: checkBoard(board, checks || {}, reply, fail, start, at) };
   };
 
   gradeState(testCase.after, testCase.checks, failer(''), testCase);
-  for (const st of testCase.states || []) gradeState(st.after, st.checks, failer(st.name + '.'), st);
+  const seen = {};
+  for (const st of testCase.states || []) seen[st.name] = gradeState(st.after, st.checks, failer(st.name + '.'), st);
+  if (testCase.logic) for (const name of logicProblems(testCase.logic, seen)) failer('')('logic.' + name);
 
   return { pass: failed.length === 0, failed };
 }
@@ -273,4 +428,5 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { grade, startBoard, describeError, outcome, summarize, parseArgs, emptyBoardMarkdown };
+module.exports = { grade, startBoard, describeError, outcome, summarize, parseArgs, emptyBoardMarkdown,
+                   wiringProblems, logicProblems, stripOf };

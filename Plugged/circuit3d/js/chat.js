@@ -28,12 +28,15 @@
   function resolveEndpoint(str, board) {
     const ref = Ids.parsePinRef(str);
     if (ref) {
-      // Named pins ("U1.OUT") aren't wired up yet: pins are indexed by number.
-      if (typeof ref.pin !== 'number') return null;
       const comp = ref.label
         ? Ids.findByLabel(board.components(), ref.label)
         : Ids.findComponent(board.components(), ref.type, ref.n);
-      return comp ? { comp, pin: ref.pin } : null;
+      if (!comp) return null;
+      // A pin by number ("PS1.2") or by its registry name ("MM1.red", as
+      // the meter's guide teaches), as Board.apply's pinIndex reads it.
+      const def = Parts && Parts.get(comp.type);
+      const pin = typeof ref.pin === 'number' ? ref.pin : def ? def.pins.indexOf(ref.pin) : -1;
+      return pin >= 0 && (!def || pin < def.pins.length) ? { comp, pin } : null;
     }
     const hole = holeOf(str, board);
     return hole ? { hole } : null;
@@ -282,8 +285,12 @@
   // reply. A plain answer stays as it is; an accepted build is the reply
   // plus one "Applied:" line naming each action that took effect (`failed`:
   // the ones that didn't, left out and counted); a declined one is only the
-  // declined line, so the AI never thinks it built what it didn't.
+  // declined line, so the AI never thinks it built what it didn't. An
+  // Accept taken back because steps failed (#199, `reverted`) is the
+  // reverted line naming those steps: she didn't decline it, and the AI
+  // needs to know what to change before it sends the build again.
   const DECLINED = '(The user declined this build; the board is unchanged.)';
+  const REVERTED = steps => `(The user accepted this build, but these steps didn't match the board, so nothing was changed: ${steps}.)`;
 
   function describeAction(a) {
     if (!a || typeof a.tool !== 'string') return '?';
@@ -298,10 +305,11 @@
     return a.tool;
   }
 
-  function modelHistoryText(reply, actions, accepted, failed = []) {
+  function modelHistoryText(reply, actions, accepted, failed = [], reverted = false) {
     const text = String(reply == null ? '' : reply);
     if (!Array.isArray(actions) || !actions.length) return text;
     if (!accepted) return DECLINED;
+    if (reverted) return REVERTED((failed || []).map(describeAction).join(', ') || 'unknown');
     const bad  = new Set(failed || []);
     const done = actions.filter(a => !bad.has(a));
     const n    = actions.length - done.length;
@@ -331,7 +339,7 @@
   // 60 s DeepSeek deadline, so the server's clear 504 normally arrives first.
   const ASK_TIMEOUT_MS = 75000;
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, predictSpots, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, photoContext, EDITS, ROTATION, ASK_TIMEOUT_MS };
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, predictSpots, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, describeAction, photoContext, EDITS, ROTATION, ASK_TIMEOUT_MS };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -441,9 +449,9 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
   let _pendingEntry   = null;   // the model's history entry for the preview: { entry, reply }
 
   // The pending preview's history entry, rewritten as accepted or declined.
-  function settleHistory(actions, accepted, failed) {
+  function settleHistory(actions, accepted, failed, reverted) {
     if (!_pendingEntry) return;
-    _pendingEntry.entry.text = Chat.modelHistoryText(_pendingEntry.reply, actions, accepted, failed);
+    _pendingEntry.entry.text = Chat.modelHistoryText(_pendingEntry.reply, actions, accepted, failed, reverted);
     _pendingEntry = null;
   }
 
@@ -587,10 +595,11 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     // the board (it changed since Edison read it) takes the whole fix back.
     if (failed) {
       App.history.revert();
-      settleHistory(actions, false);
+      settleHistory(actions, true, result.failedActions, true);
       const total = failed + applied;
       const what  = failed === total ? (total === 1 ? "Edison's change" : `Edison's ${total} changes`) : `${failed} of Edison's ${total} changes`;
-      sparkyAddMsg(`Nothing was changed: ${what} didn't match your board. Ask again.`, 'system');
+      const which = result.failedActions.slice(0, 3).map(Chat.describeAction).join(', ') + (failed > 3 ? ', …' : '');
+      sparkyAddMsg(`Nothing was changed: ${what} didn't match your board (${which}). Ask again.`, 'system');
       return;
     }
     settleHistory(actions, true, result.failedActions);

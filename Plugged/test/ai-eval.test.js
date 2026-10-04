@@ -224,7 +224,8 @@ test('cases: each has an id, a message and checks; ids unique; one demo case; ev
     assert.ok(typeof c.message === 'string' && c.message.trim(), `${c.id}: no message`);
     assert.ok(c.checks && Object.keys(c.checks).length, `${c.id}: no checks`);
     assert.strictEqual(c.checks.noHeadsUp, true, `${c.id}: every QA case says the reply has no "Heads up"`);
-    assert.ok(c.checks.expect || c.checks.expectAll, `${c.id}: checks no simulator reading`);
+    // A bank case (#202) may read a pin's volts or judge its states' LEDs together (logic).
+    assert.ok(c.checks.expect || c.checks.expectAll || c.checks.pins || c.logic, `${c.id}: checks no simulator reading`);
   }
   const ids = CASES.map(c => c.id);
   assert.strictEqual(new Set(ids).size, ids.length, `duplicate ids: ${ids}`);
