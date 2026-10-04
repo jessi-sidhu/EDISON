@@ -14,7 +14,8 @@
 //   counts as a provider that failed.
 // - readPhoto({ image, grid, sample }, { providers, deadlineMs, fetch, fixturesDir })
 //     providers   names or provider objects, tried in order; default
-//                 process.env.PHOTO_PROVIDERS || 'gemini,deepseek' (split on ',')
+//                 process.env.PHOTO_PROVIDERS || 'gemini' (split on ','; it
+//                 was 'gemini,deepseek' before #172)
 //     deadlineMs  one overall deadline; default Number(PHOTO_TIMEOUT_MS) || 45000
 //     fetch       handed to providers; default the global fetch
 //     fixturesDir default Plugged/test/fixtures/photo
@@ -32,6 +33,11 @@
 // - Env read per request (PHOTO_PROVIDERS, PHOTO_TIMEOUT_MS, PHOTO_RECORD,
 //   TRUST_PROXY), so these tests change them between requests.
 // - The route answers 422 NO_BOARD itself when reading.board.visible is false.
+//
+// - #172: Gemini's 503s are retried on Gemini 1–2 s apart (up to 4 calls, see
+//   photo-reader.test.js section 9), deepseek-flash follows only a Gemini
+//   400/401/403 when listed, and the [photo] line gains retries=N. A test
+//   that reaches those retries runs on a fake clock (drive()).
 //
 // How: the real HTTP server, requests through node:http (so a stubbed global
 // fetch only ever stands in for the AI). No network, no key. Each request
@@ -105,6 +111,7 @@ beforeEach(() => {
   delete process.env.PHOTO_RECORD;
 });
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   if (added.length) {
@@ -155,9 +162,6 @@ function assertError(res, status, code, reply) {
   if (code) assert.equal(res.body.code, code, JSON.stringify(res.body));
   else assert.equal('code' in res.body, false, `a ${status} has no code, got ${JSON.stringify(res.body)}`);
 }
-
-// Answers every request like an AI service that is down.
-const down = async () => ({ ok: false, status: 503, text: async () => 'unavailable', json: async () => ({ error: { code: 503 } }) });
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -212,15 +216,31 @@ test('a sample id is a key, not a path: one that climbs out of the fixtures fold
   assertError(res, 502, 'AI_FAILED', REPLY.AI_FAILED);
 });
 
-test('live mode (default gemini,deepseek), every provider fails: the fixture answers, else 502', async () => {
-  vi.stubGlobal('fetch', vi.fn(down));
-  const withFixture = await postPhoto(demoBody());
-  assert.equal(withFixture.status, 200, `status ${withFixture.status}: ${withFixture.raw.slice(0, 200)}`);
-  assert.equal(withFixture.body.provider, 'fixture');
-  assert.deepStrictEqual(withFixture.body.reading, MOCK_READING);
+// #172 rewrote this one: the default is Gemini alone now, and its 503s are
+// retried for seconds, so the image with no recording runs on the fake clock.
+test('live mode (default: Gemini alone, #172), Gemini down (503): the sample\'s recording answers with no AI call; an image with no recording → 502 AI_FAILED after Gemini\'s 4 calls, deepseek never asked, retries=3 in the log', async () => {
+  const restore = withAiKeys();
+  try {
+    const calls = stubAi({ gemini: 503, deepseek: 503 });
+    const withFixture = await postPhoto(demoBody());
+    assert.equal(withFixture.status, 200, `status ${withFixture.status}: ${withFixture.raw.slice(0, 200)}`);
+    assert.equal(withFixture.body.provider, 'fixture');
+    assert.deepStrictEqual(withFixture.body.reading, MOCK_READING);
+    assert.deepStrictEqual(calls, [], 'a sample with a recording never reaches the AI');
 
-  const noFixture = await postPhoto({ image: photo(2048, 'n').dataUrl, grid: GRID });
-  assertError(noFixture, 502, 'AI_FAILED', REPLY.AI_FAILED);
+    vi.useFakeTimers(CLOCK);
+    logs.length = 0;
+    const noFixture = await drive(postPhoto({ image: photo(2048, 'n').dataUrl, grid: GRID }, { ms: LONG }));
+    assertError(noFixture, 502, 'AI_FAILED', REPLY.AI_FAILED);
+    assert.equal(calls.filter(c => c.service === 'deepseek').length, 0,
+      `PHOTO_PROVIDERS unset is Gemini alone: deepseek was asked (calls: ${calls.map(c => c.service).join(', ')})`);
+    assert.deepStrictEqual(calls.map(c => c.service), ['gemini', 'gemini', 'gemini', 'gemini'],
+      `a Gemini that answers 503 every time is called 4 times, then AI_FAILED; calls: ${calls.map(c => c.service).join(', ')}`);
+    const line = logs.find(l => l.startsWith('[photo]')) || '(no [photo] line)';
+    assert.match(line, /\bretries=3\b/, `4 Gemini calls are 3 retries: ${line}`);
+  } finally {
+    restore();
+  }
 });
 
 // An image with no sample whose hash has a recording, in a temp fixtures folder.
@@ -298,7 +318,10 @@ function withAiKeys() {
   };
 }
 
-// A global fetch that answers `status` per service and keeps every call.
+// A global fetch that answers per service and keeps every call as
+// { service, model }. statusFor maps a service to a status (the body an
+// error), or is (service, n) => { status, body }, n the call's number for
+// that service. Plain response objects, so a fake clock can't stall them.
 function stubAi(statusFor) {
   const calls = [];
   vi.stubGlobal('fetch', vi.fn(async (url, opts = {}) => {
@@ -306,26 +329,55 @@ function stubAi(statusFor) {
     const service = u.includes('generativelanguage.googleapis.com') ? 'gemini' : u.includes('api.deepseek.com') ? 'deepseek' : u;
     let body = null;
     try { body = JSON.parse(opts.body); } catch { /* not JSON */ }
+    const n = calls.filter(c => c.service === service).length + 1;
     calls.push({ service, model: body && body.model });
-    return new Response(JSON.stringify({ error: { code: statusFor[service] } }), { status: statusFor[service] || 500 });
+    const out = typeof statusFor === 'function' ? statusFor(service, n)
+      : { status: statusFor[service] || 500, body: { error: { code: statusFor[service] } } };
+    const text = JSON.stringify(out.body);
+    return { ok: out.status >= 200 && out.status < 300, status: out.status, text: async () => text, json: async () => JSON.parse(text) };
   }));
   return calls;
 }
 
-test('live readers: Gemini 503 and deepseek-flash 503, no fixture → 502 AI_FAILED after trying both, in order', async () => {
+// ── The fake clock (#172) ───────────────────────────────────────────────────
+// Gemini's retries wait 1–2 s. A test that reaches them runs the server on a
+// fake clock: drive() moves it in 250 ms steps, letting the real socket I/O
+// through between steps, until the response is in. Its post() gets a guard
+// (LONG) the fake clock never reaches.
+const CLOCK = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] };
+const LONG  = 3600000;
+async function drive(pending, limitMs = 60000) {
+  let done = false, res, err;
+  pending.then(r => { done = true; res = r; }, e => { done = true; err = e; });
+  for (let t = 0; t < limitMs && !done; t += 250) {
+    await vi.advanceTimersByTimeAsync(250);
+    for (let i = 0; i < 30 && !done; i++) await new Promise(r => setImmediate(r));
+  }
+  const end = performance.now() + 1000;
+  while (!done && performance.now() < end) await new Promise(r => setImmediate(r));
+  if (err) throw err;
+  assert.ok(done, `no response after ${limitMs / 1000} s on the fake clock`);
+  return res;
+}
+
+// #172 rewrote this one: it was "Gemini 503 and deepseek-flash 503, the
+// default list → both tried". The default is Gemini alone now, a 503 is
+// retried on Gemini, and deepseek (when listed) follows a 400/401/403.
+test('live readers: PHOTO_PROVIDERS=gemini,deepseek, Gemini 401 and deepseek-flash 503, no fixture → 502 AI_FAILED after trying both, in order, each once', async () => {
   const restore = withAiKeys();
   try {
-    const calls = stubAi({ gemini: 503, deepseek: 503 });
+    process.env.PHOTO_PROVIDERS = 'gemini,deepseek';
+    const calls = stubAi({ gemini: 401, deepseek: 503 });
     const res = await postPhoto({ image: photo(2048, 'f').dataUrl, grid: GRID });
     assertError(res, 502, 'AI_FAILED', REPLY.AI_FAILED);
-    assert.deepStrictEqual(calls.map(c => c.service), ['gemini', 'deepseek'], `calls: ${JSON.stringify(calls)}`);
+    assert.deepStrictEqual(calls.map(c => c.service), ['gemini', 'deepseek'], `a Gemini 401 hands over to deepseek-flash; calls: ${JSON.stringify(calls)}`);
     assert.equal(calls[1].model, 'deepseek-flash');
   } finally {
     restore();
   }
 });
 
-test('live readers: Gemini 400 → 502 AI_FAILED without ever asking deepseek', async () => {
+test('live readers, default providers (Gemini alone): Gemini 400 → 502 AI_FAILED after one call, without ever asking deepseek', async () => {
   const restore = withAiKeys();
   try {
     const calls = stubAi({ gemini: 400, deepseek: 503 });
@@ -529,6 +581,37 @@ test('one [photo] log line per request, never the image', async () => {
 
   for (const l of okLogs.concat(failLogs)) {
     assert.ok(!l.includes('data:image') && !l.includes(payload), `a log line carries the image: ${l.slice(0, 160)}`);
+  }
+});
+
+const GEMINI_READS = { candidates: [{ content: { role: 'model', parts: [{ text: JSON.stringify({
+  rails: { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' },
+  items: [{ type: 'resistor', value: '470', conf: 0.8, box_2d: [300, 100, 400, 250] }] }) }] }, finishReason: 'STOP' }] };
+
+test('#172: the [photo] line counts Gemini\'s retries: a 503, then Gemini answers → 200 from gemini with retries=1; a recording → retries=0', async () => {
+  const restore = withAiKeys();
+  try {
+    const calls = stubAi((service, n) => (service === 'gemini' && n > 1 ? { status: 200, body: GEMINI_READS } : { status: 503, body: { error: { code: 503 } } }));
+    vi.useFakeTimers(CLOCK);
+    logs.length = 0;
+    const res = await drive(postPhoto({ image: photo(2048, 'y').dataUrl, grid: GRID }, { ms: LONG }));
+    const line = logs.find(l => l.startsWith('[photo]')) || '(no [photo] line)';
+    assert.match(line, /\bretries=1\b/, `one Gemini 503, then its answer: the [photo] line has no retries=1: ${line}`);
+    assert.equal(res.status, 200, `status ${res.status}: ${res.raw.slice(0, 200)}`);
+    assert.equal(res.body.provider, 'gemini', JSON.stringify(res.body).slice(0, 200));
+    assert.match(line, /provider=gemini/, line);
+    assert.deepStrictEqual(calls.map(c => c.service), ['gemini', 'gemini'], `calls: ${calls.map(c => c.service).join(', ')}`);
+    vi.useRealTimers();
+
+    process.env.PHOTO_PROVIDERS = 'fixture';
+    logs.length = 0;
+    const replay = await postPhoto(demoBody());
+    assert.equal(replay.status, 200, `status ${replay.status}: ${replay.raw.slice(0, 200)}`);
+    await new Promise(r => setTimeout(r, 20));   // a log written just after the reply
+    const fixtureLine = logs.find(l => l.startsWith('[photo]')) || '(no [photo] line)';
+    assert.match(fixtureLine, /\bretries=0\b/, `a recording makes no AI call: ${fixtureLine}`);
+  } finally {
+    restore();
   }
 });
 

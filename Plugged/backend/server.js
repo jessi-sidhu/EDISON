@@ -4,7 +4,7 @@
  *
  * Run from backend/:  node server.js
  *
- * POST /api/ask            { markdown, message, history }  →  { reply, actions[] }
+ * POST /api/ask            { markdown, message, history, board?, explain? }  →  { reply, actions[] }
  * POST /api/photo          { image, grid, sample? }        →  { reading, provider, model, ms, key }
  * POST /api/photo/leads    { key, items }                  →  { items, provider, model, ms }
  * GET  /api/health
@@ -1140,9 +1140,10 @@ const NEW_BUILD = /\b(build|create|start over|from scratch|again|new circuit|mak
 
 // Every provider's answer. A delete_all in reply to an edit request on a
 // built board (issue #85) is logged, not refused: the prompt says to edit in
-// place, so it shows how often the model still rebuilds.
-async function ask(markdown, userMsg, history, board) {
-  const out = await askAI(markdown, userMsg, history, board);
+// place, so it shows how often the model still rebuilds. `opts.explain`
+// (issue #169) asks for an answer only: no tools, no actions.
+async function ask(markdown, userMsg, history, board, opts = {}) {
+  const out = await askAI(markdown, userMsg, history, board, opts);
   const hasParts = !!(board && Array.isArray(board.parts) && board.parts.length);
   if (hasParts && out && (out.actions || []).some(a => a && a.tool === 'delete_all') && !NEW_BUILD.test(String(userMsg || ''))) {
     console.warn(`[edit] delete_all in reply to an edit request: ${JSON.stringify(String(userMsg || ''))}`);
@@ -1449,12 +1450,13 @@ const isPhotoGrid    = g => !!g && typeof g === 'object' && (g.cols === 30 || g.
 
 // The one [photo] line per request. Never the image or an upstream body;
 // a sample that isn't a plain id is shown as '?'.
-function logPhoto({ sample, out, error, started, bytes }) {
+function logPhoto({ sample, out, error, started, bytes, retries }) {
   const id = sample === undefined || sample === null ? '-' : isSafeId(sample) ? sample : '?';
   const r  = out && out.reading;
   console.log(`[photo] sample=${id} provider=${out ? out.provider : '-'} model=${out ? out.model : '-'} ` +
     `${((Date.now() - started) / 1000).toFixed(1)}s parts=${r ? r.parts.length : 0} wires=${r ? r.wires.length : 0} ` +
-    `fallback=${out && out.fallback ? 'yes' : 'no'} ${Math.round(bytes / 1024)}KB${error ? ` error=${error}` : ''}`);
+    `fallback=${out && out.fallback ? 'yes' : 'no'} retries=${(out ? out.retries : retries) || 0} ` +
+    `${Math.round(bytes / 1024)}KB${error ? ` error=${error}` : ''}`);
 }
 
 async function handlePhoto(req, res) {
@@ -1469,7 +1471,7 @@ async function handlePhoto(req, res) {
   let input;
   try { input = JSON.parse(body || '{}'); } catch { input = {}; }
   const { image, grid, sample } = input && typeof input === 'object' ? input : {};
-  const fail = (code, out) => { logPhoto({ sample, out, error: code, started, bytes }); return photoError(res, code); };
+  const fail = (code, out, retries) => { logPhoto({ sample, out, error: code, started, bytes, retries }); return photoError(res, code); };
   if (!isPhotoDataUrl(image)) return fail('BAD_IMAGE');
   if (!isPhotoGrid(grid))     return fail('BAD_GRID');
 
@@ -1477,7 +1479,7 @@ async function handlePhoto(req, res) {
   try {
     out = await readPhoto({ image, grid, sample });
   } catch (e) {
-    return fail(e.code === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILED');
+    return fail(e.code === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILED', null, e.retries);
   }
   if (out.reading.board.visible === false) return fail('NO_BOARD', out);
   logPhoto({ sample, out, started, bytes });
@@ -1506,7 +1508,8 @@ function logLeads({ key, count, out, error, started, bytes }) {
   const id = key === undefined || key === null ? '-' : isSafeId(key) ? key : '?';
   const n  = code => (out ? out.items.filter(x => x.error === code).length : 0);
   console.log(`[photo-leads] key=${id} items=${count} ok=${out ? out.items.filter(x => !x.error).length : 0} ` +
-    `timeout=${n('AI_TIMEOUT')} failed=${n('AI_FAILED')} resent=${out ? out.resent || 0 : 0} provider=${out ? out.provider : '-'} ` +
+    `timeout=${n('AI_TIMEOUT')} failed=${n('AI_FAILED')} resent=${out ? out.resent || 0 : 0} retries=${out ? out.retries || 0 : 0} ` +
+    `provider=${out ? out.provider : '-'} ` +
     `${((Date.now() - started) / 1000).toFixed(1)}s ${(bytes / 1048576).toFixed(1)}MB${error ? ` error=${error}` : ''}`);
 }
 
@@ -1558,8 +1561,8 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req, res, MAX_BODY_BYTES, { reply: 'That request is too large.', actions: [] });
     if (body === null) return;
     try {
-      const { markdown = '', message = '', history = [], board } = JSON.parse(body || '{}');
-      const result = await ask(markdown, message, history, isBoard(board) ? board : undefined);
+      const { markdown = '', message = '', history = [], board, explain } = JSON.parse(body || '{}');
+      const result = await ask(markdown, message, history, isBoard(board) ? board : undefined, { explain: explain === true });
       const { reply, actions } = result;
       console.log(`[ask] "${message.slice(0,60)}" → ${actions.length} action(s)${result.fallbackModel ? ` (fallback ${result.fallbackModel})` : ''}`);
       return sendJSON(res, 200, { reply, actions });

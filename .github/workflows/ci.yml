@@ -1,10 +1,12 @@
-# Runs the app's checks on every PR and on pushes to main and dev.
-# The app lives in Plugged/, so every step runs there.
+# The app's checks. The app lives in Plugged/, so every step runs there.
+# OFF since 2026-10-02 (#165): the repo is private, the free Actions minutes
+# ran out, and the gate is the local checks /ship and /promote run. Manual
+# runs only. To turn it back on, put back the triggers it had:
+#   on: { pull_request: , push: { branches: [main, dev] } }
+# with Actions minutes available (a public repo, or an Actions budget).
 name: CI
 on:
-  pull_request:
-  push:
-    branches: [main, dev]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}

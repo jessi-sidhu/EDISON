@@ -300,12 +300,14 @@
   // Build it on the confirm screen: { actions, flags, labels, skipped }.
   // The board, the simulation, then Edison answers her question (#143).
   function built(result) {
-    const question = $('sparky-input').value.trim() || DEFAULT_Q;
+    const typed    = $('sparky-input').value.trim();
+    const question = typed || DEFAULT_Q;
     close();
     SparkyChat.applyBuild(result.actions);                 // may clear the board, and the flags with it
     window.PhotoFlags = new Set(result.flags.map(f => result.labels[f.id]).filter(Boolean));
     App.runSimulation();
-    sparkyAsk(question, { context: SparkyChat.photoContext(result) });   // clears the input
+    // The default question wants an answer, not an edit (#169); her own may want one.
+    sparkyAsk(question, { context: SparkyChat.photoContext(result), explain: !typed });   // clears the input
   }
 
   // The flagged parts' labels go with the board they were read for.

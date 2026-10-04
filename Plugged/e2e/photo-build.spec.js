@@ -171,6 +171,49 @@ test('the demo beat: her typed question, 📷 sample, Build it → the board, on
   expect(errors).toEqual([]);
 });
 
+// ── Explain mode (issue #169) ──────────────────────────────────────────────
+// Build it with nothing typed asks the default question as an explanation
+// only: the /api/ask body carries `explain: true`, and the server then offers
+// the model no tools (test/ask-explain.test.js). A question she typed herself
+// ("fix it") may want an edit, so it goes as today, without `explain`; so does
+// every normal chat send, before and after an explain ask.
+
+test('Build it with nothing typed sends explain: true; a typed "fix it" Build it and normal chat sends carry no explain', async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors = watchErrors(page);
+  const asks = await stub(page, MOCK_READING);
+  await page.goto('/circuit3d/index.html');
+  await editorReady(page);
+  const noExplain = (body, what) => expect([undefined, false], `${what}: explain is ${JSON.stringify(body.explain)}`).toContain(body.explain);
+
+  // Her own question first: as today.
+  await page.locator('#sparky-input').fill('fix it');
+  await buildIt(page);
+  await expect.poll(() => asks.length, 'one /api/ask after the first Build it').toBe(1);
+  expect(asks[0].message.startsWith('fix it\n\n'), asks[0].message).toBe(true);
+  noExplain(asks[0], 'Build it with "fix it" typed');
+
+  // A normal chat send.
+  await page.locator('#sparky-input').fill('thanks');
+  await page.locator('#sparky-input').press('Enter');
+  await expect.poll(() => asks.length).toBe(2);
+  noExplain(asks[1], 'a chat send');
+
+  // Nothing typed: the default question, as an explanation.
+  await expect(page.locator('#sparky-input')).toHaveValue('');
+  await buildIt(page);
+  await expect.poll(() => asks.length, 'one /api/ask after the second Build it').toBe(3);
+  expect(asks[2].message.startsWith(DEFAULT_Q + '\n\n'), asks[2].message).toBe(true);
+  expect(asks[2].explain, 'Build it with nothing typed sends explain: true').toBe(true);
+
+  // The next chat send is a normal one again.
+  await page.locator('#sparky-input').fill('how do I flip it?');
+  await page.locator('#sparky-input').press('Enter');
+  await expect.poll(() => asks.length).toBe(4);
+  noExplain(asks[3], 'a chat send after the explain ask');
+  expect(errors).toEqual([]);
+});
+
 // ── Her saved circuit, a flagged LED, no question ─────────────────────────
 
 test('with a saved circuit open, no question typed and LED1\'s colour unread: the build starts a new Untitled circuit and leaves the saved one untouched; LED1\'s backwards row has the photo badge; Edison gets "What\'s wrong with my circuit?"; Clear All clears the flags', async ({ page }) => {

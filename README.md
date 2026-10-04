@@ -32,14 +32,14 @@
 ```
 GitHub issue ──/start-task──▶ local branch ──build + verify──▶ /ship (checks) ──▶ push to dev
                                                                                           │
-                main (tested, demo-ready) ◀── /promote (CI green + demo walk) ◀───────────┘
+                main (tested, demo-ready) ◀── /promote (local checks + demo walk) ◀───────┘
 ```
 
 - **Aarmen decides.** Aarmen writes the code and makes every call, circuit physics included. Thandi's checks on real parts are advice, not a sign-off.
 - **Every piece of work is a GitHub issue.** Write one with `/new-task`. Pick one with `/start-task`, or run `/start-task 12` for a specific issue.
 - **Your Claude follows the issue.** It touches only the files the issue lists and builds against `docs/API-CONTRACT.md`. If something is unclear, it stops and asks.
 - **Finish with `/ship`.** It runs the checks, reviews the diff, and pushes straight to `dev`. No PR and no waiting.
-- **Moving to `main` is a quick test.** `/promote`: CI must be green on `dev`, then it walks the demo path in a browser and merges a `dev → main` PR. Do it at the end of each build day, and at sprint checkpoints.
+- **Moving to `main` is a quick test.** `/promote` runs the local checks (lint, unit, full browser suite) on `dev`, then walks the demo path in a browser and merges a `dev → main` PR. Do it at the end of each build day, and at sprint checkpoints.
 - **Full QA is for checkpoints.** `/qa-pass` runs the real prompts and circuits in `docs/QA.md` about once a day and before submitting, and files what breaks as `bug` issues.
 - **`main` is always demo-ready.** `/demo-check` walks the demo story on it.
 
@@ -61,4 +61,4 @@ The full rules are in [AGENTS.md](AGENTS.md). The plan and design docs are in [d
 | MCP servers | `context7` (current library docs) and `playwright` (browser testing) |
 | Agents | `.claude/agents/`: scout, test-writer, builder, reviewer (run by `/start-task`), qa-tester (run by `/qa-pass`) |
 | Hooks | Block `.env` files for every agent; keep test-writer and builder in their lanes; no finishing while `Plugged/` unit tests fail; format on edit; at session start, show your branch, its sync status against `dev`, and your open issues |
-| `.github/` | Issue and PR templates, CODEOWNERS for shared files, and CI (lint, unit and browser tests in `Plugged/`) |
+| `.github/` | Issue and PR templates, CODEOWNERS for shared files, and CI (lint, unit and browser tests in `Plugged/`; off since #165, manual runs only) |

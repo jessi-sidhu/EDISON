@@ -27,6 +27,19 @@
 //   the global setTimeout/clearTimeout (vi.useFakeTimers drives those; it
 //   can't drive AbortSignal.timeout). Every call gets an AbortSignal, and
 //   aborting it makes the fake fetch reject, as a real fetch does.
+// - Retries and the cap in flight (#172, section 8): an item's call that
+//   fails at once (503, 429, other 5xx, network error, empty reply, invalid
+//   JSON) is retried, the same request, 1–2 s later instead of waiting for
+//   the 12 s resend; a silent stall still gets one resend at PHOTO_HEDGE_MS,
+//   measured from when that call went out; at most 3 calls per item; a
+//   400/401/403 is never retried. At most PHOTO_LEADS_CONCURRENCY (new env,
+//   default 16) first calls and retries are in flight across all items; the
+//   rest queue and start in item order as those calls end. A stall resend is
+//   never queued and never counts toward that cap: it goes out at
+//   PHOTO_HEDGE_MS even when the cap is full (the live check had 9 of 13
+//   crops time out when resends queued behind waiting items). An item still
+//   queued or unanswered at the cutoff is AI_TIMEOUT. The route's
+//   [photo-leads] line gains retries=N.
 // - Points: Gemini's [y, x] is 0–1000 over the whole crop image, so crop
 //   pixel (u, v) = (x/1000·width, y/1000·height), and the flattened pixel is
 //   (win.x + (u − padLeft)/scale, win.y + (v − padTop)/scale), each rounded
@@ -149,10 +162,16 @@ const sentText  = body => ((body && body.contents) || []).flatMap(m => (m && m.p
 // error). Each Gemini call is kept as { id, n, url, method, headers, body,
 // part, signal }: id is the item whose crop it carries, n its call number
 // for that item. Any other URL is kept in `other` and fails.
+// #172: a call sent while another call for the same item is still in flight
+// is a stall resend (call.resend true); maxCapped is the most of the others
+// (first calls and retries) in flight at once, the calls that
+// PHOTO_LEADS_CONCURRENCY caps. (A retry sent while a resend is still in
+// flight would also read as a resend; the cap tests have none.)
 function fakeGemini(items, answerFor) {
   const idOf = new Map(items.map(it => [b64(it.image), it.id]));
   const calls = [], other = [];
-  let inFlight = 0, maxInFlight = 0;
+  const busy = new Map();   // item id → its calls in flight
+  let inFlight = 0, maxInFlight = 0, capped = 0, maxCapped = 0;
   const fetch = (url, opts = {}) => {
     const u = String(url);
     if (!u.startsWith(GEMINI_BASE)) {
@@ -164,9 +183,11 @@ function fakeGemini(items, answerFor) {
     const part = imagePart(body);
     const id   = part ? idOf.get((part.inline_data || part.inlineData).data) : undefined;
     const call = { id, n: calls.filter(c => c.id === id).length + 1, url: u, method: opts.method,
-      headers: new Headers(opts.headers), body, part, signal: opts.signal };
+      headers: new Headers(opts.headers), body, part, signal: opts.signal, resend: (busy.get(id) || 0) > 0 };
     calls.push(call);
+    busy.set(id, (busy.get(id) || 0) + 1);
     maxInFlight = Math.max(maxInFlight, ++inFlight);
+    if (!call.resend) maxCapped = Math.max(maxCapped, ++capped);
     return new Promise((resolve, reject) => {
       const signal = opts.signal;
       const abort = () => reject(signal.reason || new DOMException('This operation was aborted', 'AbortError'));
@@ -175,9 +196,14 @@ function fakeGemini(items, answerFor) {
       let out;
       try { out = answerFor(call); } catch (e) { return reject(e); }
       if (out !== HANG) Promise.resolve(out).then(resolve, reject);
-    }).finally(() => { inFlight--; });
+    }).finally(() => {
+      inFlight--;
+      busy.set(id, busy.get(id) - 1);
+      if (!call.resend) capped--;
+    });
   };
-  return { fetch, calls, other, of: id => calls.filter(c => c.id === id), get maxInFlight() { return maxInFlight; } };
+  return { fetch, calls, other, of: id => calls.filter(c => c.id === id),
+    get maxInFlight() { return maxInFlight; }, get maxCapped() { return maxCapped; } };
 }
 
 // ── Running readLeads on the fake clock ─────────────────────────────────────
@@ -237,7 +263,7 @@ const readSaved = (dir, key) => JSON.parse(fs.readFileSync(path.join(dir, `${key
 // ── Environment ─────────────────────────────────────────────────────────────
 
 const ENV_KEYS = ['GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'PHOTO_GEMINI_MODEL', 'PHOTO_RECORD', 'PHOTO_PROVIDERS',
-  'PHOTO_HEDGE_MS', 'PHOTO_LEADS_TIMEOUT_MS'];
+  'PHOTO_HEDGE_MS', 'PHOTO_LEADS_TIMEOUT_MS', 'PHOTO_LEADS_CONCURRENCY'];
 let savedEnv, logs, port;
 
 beforeAll(() => new Promise(r => {
@@ -252,7 +278,7 @@ beforeEach(() => {
   savedEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]));
   process.env.GEMINI_API_KEY = GEMINI_KEY;
   process.env.DEEPSEEK_API_KEY = DEEPSEEK_KEY;
-  for (const k of ['PHOTO_GEMINI_MODEL', 'PHOTO_RECORD', 'PHOTO_PROVIDERS', 'PHOTO_HEDGE_MS', 'PHOTO_LEADS_TIMEOUT_MS']) delete process.env[k];
+  for (const k of ['PHOTO_GEMINI_MODEL', 'PHOTO_RECORD', 'PHOTO_PROVIDERS', 'PHOTO_HEDGE_MS', 'PHOTO_LEADS_TIMEOUT_MS', 'PHOTO_LEADS_CONCURRENCY']) delete process.env[k];
   logs = [];
   for (const m of ['log', 'info', 'warn', 'error', 'debug']) {
     vi.spyOn(console, m).mockImplementation((...args) => { logs.push(args.map(a => (typeof a === 'string' ? a : util.inspect(a))).join(' ')); });
@@ -491,12 +517,15 @@ test('a reply that fails (503, a network error, not JSON, cut off) → that item
     { id: 'X1', error: 'AI_FAILED' },
     { id: 'W1', error: 'AI_FAILED' },
   ]);
-  for (const it of items) assert.ok(fake.of(it.id).length <= 2, `${it.id}: ${fake.of(it.id).length} calls, at most 2`);
+  // #172: retries count too, so at most 3 (was 2: the first call and the 12 s resend).
+  for (const it of items) assert.ok(fake.of(it.id).length <= 3, `${it.id}: ${fake.of(it.id).length} calls, at most 3`);
   assert.deepStrictEqual(fake.other, [], 'only Gemini is asked for leads, never deepseek');
 });
 
-test('a 400, 401 or 403 from Gemini is never resent: that item is AI_FAILED after exactly 1 call, past the 12 s resend and up to the cutoff (a 503, for contrast, is resent)', async () => {
-  for (const [code, calls] of [[400, 1], [401, 1], [403, 1], [503, 2]]) {
+// #172 changed the 503 row from 2 calls (resent at 12 s) to 3 (retried 1–2 s
+// after each failure, up to 3 calls).
+test('a 400, 401 or 403 from Gemini is never resent: that item is AI_FAILED after exactly 1 call, past the 12 s resend and up to the cutoff (a 503, for contrast, is retried up to 3 calls)', async () => {
+  for (const [code, calls] of [[400, 1], [401, 1], [403, 1], [503, 3]]) {
     const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 })];
     // W1 hangs, so readLeads stays open until the cutoff and R1's resend timer has every chance to fire.
     const fake = fakeGemini(items, c => (c.id === 'R1' ? status(code) : HANG));
@@ -896,7 +925,220 @@ test('route: one [photo-leads] log line per request, with the key and counts, ne
   }
 });
 
-test('.env.example lists PHOTO_HEDGE_MS and PHOTO_LEADS_TIMEOUT_MS', () => {
+test('.env.example lists PHOTO_HEDGE_MS, PHOTO_LEADS_TIMEOUT_MS and PHOTO_LEADS_CONCURRENCY (#172)', () => {
   const text = fs.readFileSync(path.join(__dirname, '../../.env.example'), 'utf8');
-  for (const name of ['PHOTO_HEDGE_MS', 'PHOTO_LEADS_TIMEOUT_MS']) assert.match(text, new RegExp(`^${name}=`, 'm'), `.env.example has no ${name}=`);
+  for (const name of ['PHOTO_HEDGE_MS', 'PHOTO_LEADS_TIMEOUT_MS', 'PHOTO_LEADS_CONCURRENCY']) assert.match(text, new RegExp(`^${name}=`, 'm'), `.env.example has no ${name}=`);
+});
+
+// ── 8. Retries and the cap in flight (#172) ─────────────────────────────────
+// 24 crops in flight drew 503s and some 429s from Gemini on 2026-10-02, and
+// an early failure sat idle until the 12 s resend. Now it is retried 1–2 s
+// later, and at most PHOTO_LEADS_CONCURRENCY (16) first calls and retries
+// are out at once. The live check then had 9 of 13 crops time out with no
+// 503 at all: the calls were slow, and with a cap of 10 their stall resends
+// queued behind waiting items and never went out. So a resend is never
+// queued and never counts toward the cap.
+
+const ids  = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => `R${from + i}`);
+const LONG = 3600000;   // a post() guard the fake clock never reaches
+
+test('#172 bug: an item whose first call fails at once (503, 500, 429, a network error, an empty reply, invalid JSON) is retried 1–2 s later, not at the 12 s resend, and its retry answers', async () => {
+  const FAILS = [
+    ['a 503', () => status(503)],
+    ['a 500', () => status(500)],
+    ['a 429', () => status(429)],
+    ['a network error', () => { throw new TypeError('fetch failed'); }],
+    ['an empty reply', () => geminiSays('')],
+    ['invalid JSON', () => geminiSays('I can not see any leads in this crop.')],
+  ];
+  for (const [what, bad] of FAILS) {
+    const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 })];
+    const fake = fakeGemini(items, c => (c.id !== 'R1' ? answer(P1) : c.n === 1 ? bad() : answer(P2)));
+    const s = start({ key: 'no-saved-leads', items }, fake);
+    await until(() => fake.calls.length === 2, `${what}: R1's and W1's first calls`);
+    await advance(999);
+    assert.equal(fake.of('R1').length, 1, `${what}: R1 was retried sooner than 1 s after the failure`);
+    await advance(1001);
+    assert.equal(fake.of('R1').length, 2, `${what}: R1's failure was not retried within 2 s (${fake.of('R1').length} call so far; an early failure no longer waits for the 12 s resend)`);
+    assert.deepStrictEqual(fake.of('R1')[1].body, fake.of('R1')[0].body, `${what}: the retry is the same request`);
+    const out = await finish(s);
+    assert.deepStrictEqual(byId(out, 'R1'), { id: 'R1', found: true, leads: R1_P2, conf: 0.8 }, `${what}: the retry's answer`);
+    assert.ok(out.ms <= 2500, `${what}: readLeads took ${out.ms} ms; R1's retry answered by 2 s`);
+    assert.equal(fake.of('W1').length, 1, `${what}: W1 answered at once`);
+    vi.useRealTimers();
+  }
+});
+
+// #172 follow-up: the default cap went from 10 to 16.
+test('#172 bug: with 24 items, only the first PHOTO_LEADS_CONCURRENCY (default 16) calls go out, and each queued item starts, in item order, the moment a call ends; never more than 16 in flight', async () => {
+  const items = ids(1, 24).map(id => item(id));
+  // Ri answers 5 s + i × 100 ms after its call went out: R1 at 5.1 s, R2 at 5.2 s, …
+  const fake = fakeGemini(items, c => after(5000 + 100 * Number(c.id.slice(1)), answer(P1)));
+  const s = start({ key: 'no-saved-leads', items }, fake);
+  const sent = () => fake.calls.map(c => c.id);
+  await until(() => fake.calls.length >= 16, () => `only ${fake.calls.length} calls went out at the start; the default PHOTO_LEADS_CONCURRENCY is 16`);
+  await flush();
+  assert.deepStrictEqual(sent(), ids(1, 16), `at the start only R1–R16 go out, in item order; ${fake.calls.length} calls went out`);
+  await advance(5099);
+  assert.deepStrictEqual(sent(), ids(1, 16), 'no call has ended before 5.1 s, so no queued item goes out');
+  await advance(1);
+  assert.deepStrictEqual(sent(), ids(1, 17), 'R1 answered at 5.1 s, and R17, next in item order, went out at once');
+  await advance(700);
+  assert.deepStrictEqual(sent(), ids(1, 24), 'by 5.8 s R2–R8 answered one at a time, and R18–R24 went out in item order');
+  const out = await finish(s);
+  assert.equal(fake.maxInFlight, 16, `${fake.maxInFlight} calls were in flight at once; at most PHOTO_LEADS_CONCURRENCY (16), and the cap is used`);
+  assert.deepStrictEqual(out.items.map(x => x.id), ids(1, 24), 'one entry per item, in request order');
+  assert.ok(out.items.every(x => x.found === true), `unanswered: ${JSON.stringify(out.items.filter(x => x.found !== true))}`);
+  for (const it of items) assert.equal(fake.of(it.id).length, 1, `${it.id}: answered within 12 s of its call going out, so no resend (its 12 s run from when its call went out)`);
+});
+
+// #172 follow-up: was "never more than the cap in flight, resends included".
+// Now a stall resend goes out on time even when the cap is full, while the
+// queued items keep waiting for a first-call slot.
+test('#172 bug: with 24 items whose calls all hang, the first PHOTO_LEADS_CONCURRENCY calls (default 16, or 3 when set) go out; at 12 s each gets its stall resend at once although the cap is full, while the queued items still wait; at the 25 s cutoff every item is AI_TIMEOUT, in order, with every call aborted', async () => {
+  for (const [what, env, cap] of [['default', undefined, 16], ['PHOTO_LEADS_CONCURRENCY=3', '3', 3]]) {
+    if (env === undefined) delete process.env.PHOTO_LEADS_CONCURRENCY;
+    else process.env.PHOTO_LEADS_CONCURRENCY = env;
+    const items = ids(1, 24).map(id => item(id));
+    const fake = fakeGemini(items, () => HANG);
+    const s = start({ key: 'no-saved-leads', items }, fake);
+    const sent = () => fake.calls.map(c => c.id);
+    await until(() => fake.calls.length >= cap, () => `${what}: only ${fake.calls.length} calls went out at the start, expected ${cap}`);
+    await flush();
+    assert.deepStrictEqual(sent(), ids(1, cap), `${what}: at the start only R1–R${cap} go out, in item order; ${fake.calls.length} calls went out`);
+    await advance(HEDGE_MS - 1);
+    assert.deepStrictEqual(sent(), ids(1, cap), `${what}: nothing else went out before 12 s`);
+    await advance(1);
+    assert.deepStrictEqual(sent(), [...ids(1, cap), ...ids(1, cap)],
+      `${what}: at 12 s R1–R${cap} had no answer and each got its stall resend at once, although the cap was full; R${cap + 1}–R24 still wait for a first-call slot. Sent: ${sent().join(' ')}`);
+    for (const id of ids(1, cap)) assert.deepStrictEqual(fake.of(id)[1].body, fake.of(id)[0].body, `${what}: ${id}'s resend is not identical`);
+    assert.equal(fake.maxCapped, cap, `${what}: ${fake.maxCapped} first calls and retries were in flight at once; the cap is ${cap}, resends aside`);
+    await advance(TIMEOUT_MS - HEDGE_MS - 1);
+    assert.equal(s.done, false, `${what}: readLeads ended before the cutoff`);
+    assert.equal(fake.calls.length, 2 * cap, `${what}: only the ${cap} first calls and their ${cap} resends go out before the cutoff; sent: ${sent().join(' ')}`);
+    await advance(1);
+    assert.ok(s.done, `${what}: readLeads had not answered at the ${TIMEOUT_MS / 1000} s cutoff`);
+    assert.deepStrictEqual(result(s).items, items.map(it => ({ id: it.id, error: 'AI_TIMEOUT' })), `${what}: every item unanswered or still queued at the cutoff is AI_TIMEOUT, in request order`);
+    for (const c of fake.calls) assert.ok(c.signal && c.signal.aborted, `${what}: ${c.id}'s call ${c.n} was not aborted at the cutoff`);
+    vi.useRealTimers();
+  }
+});
+
+// A resend that went out on time but still took a slot would hold back the
+// queued items: here R3 must start when R2's first call ends, with R1's first
+// call and resend both still in flight.
+test('#172 bug: a stall resend never counts toward PHOTO_LEADS_CONCURRENCY: when a first call ends, the next queued item starts at once even with resends in flight', async () => {
+  process.env.PHOTO_LEADS_CONCURRENCY = '2';
+  const items = ['R1', 'R2', 'R3'].map(id => item(id));
+  // R1 never answers. R2's first call answers at 13 s, after its 12 s resend
+  // (which hangs) went out. R3 answers at once.
+  const fake = fakeGemini(items, c => (c.id === 'R1' ? HANG : c.id === 'R3' ? answer(P1) : c.n === 1 ? after(13000, answer(P1)) : HANG));
+  const s = start({ key: 'no-saved-leads', items }, fake);
+  const sent = () => fake.calls.map(c => c.id);
+  await until(() => fake.calls.length >= 2, 'R1\'s and R2\'s first calls');
+  await flush();
+  assert.deepStrictEqual(sent(), ['R1', 'R2'], 'with the cap at 2, R3 waits');
+  await advance(HEDGE_MS);
+  assert.deepStrictEqual(sent(), ['R1', 'R2', 'R1', 'R2'],
+    `at 12 s R1 and R2 each got their stall resend at once, although the cap was full, and R3 still waits; sent: ${sent().join(' ')}`);
+  await advance(1000);
+  assert.deepStrictEqual(sent(), ['R1', 'R2', 'R1', 'R2', 'R3'],
+    `at 13 s R2 answered, freeing its first-call slot, so R3 went out at once, although R1's first call and resend are still in flight; sent: ${sent().join(' ')}`);
+  assert.ok(fake.of('R2')[1].signal && fake.of('R2')[1].signal.aborted, 'R2\'s resend lost the race and was not aborted');
+  const out = await finish(s);
+  assert.deepStrictEqual(out.items.map(x => x.error || (x.found ? 'found' : 'not found')), ['AI_TIMEOUT', 'found', 'found'],
+    `R1 hung to the cutoff; R2 and R3 answered: ${JSON.stringify(out.items)}`);
+  assert.equal(fake.maxCapped, 2, `${fake.maxCapped} first calls were in flight at once; the cap is 2, resends aside`);
+});
+
+test('#172: at most 3 calls per item, retries and the stall resend together: an item that fails every time is AI_FAILED after exactly 3 calls; with stalls in the mix, never more than 3', async () => {
+  const always = [
+    ['503 every time', () => status(503)],
+    ['429 every time', () => status(429)],
+    ['a network error every time', () => { throw new TypeError('fetch failed'); }],
+  ];
+  for (const [what, bad] of always) {
+    const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 })];
+    const fake = fakeGemini(items, c => (c.id === 'R1' ? bad() : answer(P1)));
+    const s = start({ key: 'no-saved-leads', items }, fake);
+    await until(() => fake.calls.length === 2, `${what}: R1's and W1's first calls`);
+    for (let t = 0; t < 10000; t += 500) await advance(500);
+    assert.equal(fake.of('R1').length, 3, `${what}: R1 had ${fake.of('R1').length} call(s) in 10 s; each failure is retried 1–2 s later, up to 3 calls`);
+    assert.ok(s.done, `${what}: R1's 3rd call failed, so it is AI_FAILED and readLeads answers`);
+    assert.deepStrictEqual(byId(result(s), 'R1'), { id: 'R1', error: 'AI_FAILED' }, what);
+    await advance(TIMEOUT_MS);
+    assert.equal(fake.of('R1').length, 3, `${what}: R1 had ${fake.of('R1').length} calls; at most 3`);
+    vi.useRealTimers();
+  }
+
+  const mixed = [
+    ['the first call hangs, every other one is a 503', c => (c.n === 1 ? HANG : status(503))],
+    ['every call answers a 503 after 13 s', () => after(13000, status(503))],
+    ['every call hangs', () => HANG],
+  ];
+  for (const [what, r1] of mixed) {
+    const items = [item('R1', { window: WIN_R1 }), item('W1', { window: WIN_W1 })];
+    const fake = fakeGemini(items, c => (c.id === 'R1' ? r1(c) : answer(P1)));
+    const out = await readAll({ key: 'no-saved-leads', items }, fake);
+    assert.ok(fake.of('R1').length <= 3, `${what}: R1 had ${fake.of('R1').length} calls; at most 3`);
+    assert.ok(byId(out, 'R1').error, `${what}: R1 never answered: ${JSON.stringify(byId(out, 'R1'))}`);
+    vi.useRealTimers();
+  }
+});
+
+// Runs the fake clock in 250 ms steps until the request answers, letting the
+// real socket I/O through between steps.
+async function drive(pending, limitMs = 60000) {
+  let done = false, res, err;
+  pending.then(r => { done = true; res = r; }, e => { done = true; err = e; });
+  for (let t = 0; t < limitMs && !done; t += 250) await advance(250);
+  await until(() => done, `no response after ${limitMs / 1000} s on the fake clock`);
+  if (err) throw err;
+  return res;
+}
+
+test('#172: route: the [photo-leads] line counts retries: R1\'s first call a 503 and its retry answering → retries=1; a round with no failure → retries=0', async () => {
+  const cases = [
+    ['R1 retried once', c => (c.id === 'R1' && c.n === 1 ? status(503) : answer(P1)), 1],
+    ['no failure', () => answer(P1), 0],
+  ];
+  for (const [what, answerFor, retries] of cases) {
+    const body = validBody(`leads-retry-${retries}`);
+    const fake = fakeGemini(body.items, answerFor);
+    vi.stubGlobal('fetch', fake.fetch);
+    vi.useFakeTimers(FAKE);
+    logs.length = 0;
+    const res = await drive(postLeads(body, { ms: LONG }));
+    const line = logs.find(l => l.startsWith('[photo-leads]')) || '(no [photo-leads] line)';
+    assert.match(line, new RegExp(`\\bretries=${retries}\\b`), `${what}: the [photo-leads] line has no retries=${retries}: ${line}`);
+    assert.equal(res.status, 200, `${what}: status ${res.status}: ${res.raw.slice(0, 200)}`);
+    assert.ok(res.body.items.every(x => x.found === true), `${what}: ${JSON.stringify(res.body.items)}`);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
+});
+
+// Review fix: a first call that loses to its resend ends by being aborted (a
+// rejected promise). Its slot must still be freed, or the queued items wait
+// for the cutoff.
+test('#172: PHOTO_LEADS_CONCURRENCY=1: R1\'s first call stalls, its resend wins at 12 s and the first call is aborted; that frees the slot, so R2\'s first call goes out right then (not at the cutoff), and both items are answered', async () => {
+  process.env.PHOTO_LEADS_CONCURRENCY = '1';
+  const items = [item('R1', { window: WIN_R1 }), item('R2', { window: WIN_R1 })];
+  const fake = fakeGemini(items, c => (c.id === 'R1' ? (c.n === 1 ? HANG : answer(P2)) : answer(P1)));
+  const s = start({ key: 'no-saved-leads', items }, fake);
+  const sent = () => fake.calls.map(c => c.id);
+  await until(() => fake.calls.length >= 1, 'R1\'s first call');
+  await flush();
+  assert.deepStrictEqual(sent(), ['R1'], 'with the cap at 1, R2 waits');
+  await advance(HEDGE_MS - 1);
+  assert.deepStrictEqual(sent(), ['R1'], 'nothing else went out before 12 s');
+  await advance(1);
+  assert.ok(fake.of('R1')[0].signal && fake.of('R1')[0].signal.aborted, 'R1\'s first call lost to its resend and was not aborted');
+  assert.deepStrictEqual(sent(), ['R1', 'R1', 'R2'],
+    `at 12 s R1's resend answered and its aborted first call freed the slot, so R2's first call went out at once; sent: ${sent().join(' ')}`);
+  assert.ok(s.done, `readLeads had not answered at 12 s, though R2 answered at once: ${JSON.stringify(s.value || s.error || 'still running')}`);
+  const out = result(s);
+  assert.deepStrictEqual(out.items, [{ id: 'R1', found: true, leads: R1_P2, conf: 0.8 }, { id: 'R2', found: true, leads: R1_P1, conf: 0.8 }],
+    'R1 answered by its resend, R2 by its first call');
+  assert.ok(out.ms < TIMEOUT_MS, `readLeads took ${out.ms} ms`);
 });

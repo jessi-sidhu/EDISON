@@ -5,7 +5,7 @@
 - **Project skills:**
   - `/start-task`: begin an issue.
   - `/ship`: finish it. Runs the checks, then pushes straight to `dev`.
-  - `/promote`: quick test of `dev` (CI green plus a walk of the demo path), then move it to `main`.
+  - `/promote`: quick test of `dev` (the local checks plus a walk of the demo path; CI is off, #165), then move it to `main`.
   - `/new-task`: write an issue.
   - `/adapt-to-tracks`: re-plan when tracks drop.
   - `/demo-check`: walk the demo on `main` in a browser.

@@ -2,17 +2,25 @@
 //  photo-leads.js — where each lead enters the board, for /api/photo/leads
 //
 //  readLeads({ key, items }, opts) asks Gemini once per labelled crop (the
-//  page cuts them, photo-crops.js), all at once, and resolves
-//  { items, provider, model, ms, resent }: one entry per item, in order,
-//  { id, found, leads: [{ pin, pt, role }], conf } or
+//  page cuts them, photo-crops.js) and resolves
+//  { items, provider, model, ms, resent, retries }: one entry per item, in
+//  order, { id, found, leads: [{ pin, pt, role }], conf } or
 //  { id, error: 'AI_TIMEOUT' | 'AI_FAILED' }. It never rejects. `resent`
-//  (items that got a second call) is for the route's log only.
+//  (items that got a stall resend) and `retries` (calls sent again after a
+//  failure) are for the route's log only.
 //
-//  An item with no good answer after PHOTO_HEDGE_MS (default 12 s) gets a
-//  second identical call; the first good answer wins and the other call is
-//  aborted. At PHOTO_LEADS_TIMEOUT_MS (default 25 s) every call is aborted
-//  and the unanswered items are AI_TIMEOUT. Gemini only: deepseek can't
-//  point. Timers are the global setTimeout, so fake timers drive them.
+//  Each item is a raceGemini (photo-reader.js, #172): a call that fails at
+//  once is retried 1–2 s later; one with no answer after PHOTO_HEDGE_MS
+//  (default 12 s, from when that call went out) gets one identical call
+//  alongside; at most 3 calls an item; a 400/401/403 is never retried. At
+//  most PHOTO_LEADS_CONCURRENCY (default 16) first calls and retries are in
+//  flight across the items; the rest wait their turn, first calls in item
+//  order. A stall resend is exempt: it goes out on time, never queued and
+//  never taking a slot (resends queued behind waiting items left 9 of 13
+//  crops unanswered live). At PHOTO_LEADS_TIMEOUT_MS (default 25 s) every
+//  call is aborted and the items unanswered or still waiting are AI_TIMEOUT.
+//  Gemini only: deepseek can't point. Timers are the global setTimeout, so
+//  fake timers drive them.
 //
 //  Saved leads (test/fixtures/photo/leads/<key>.json = { key, model, items },
 //  points already in flattened pixels):
@@ -25,18 +33,21 @@
 
 const fs   = require('fs');
 const path = require('path');
-const { GEMINI_BASE, photoGeminiModel, photoProviders, geminiImagePart, geminiText, postJSON,
+const { GEMINI_BASE, photoGeminiModel, photoProviders, photoHedgeMs, geminiImagePart, geminiText, postJSON, raceGemini,
         loadFixture, parseLooseJSON, isSafeId, failed, num, obj, list } = require('./photo-reader');
 const { PHOTO_CROP_PROMPT, PHOTO_CROP_SCHEMA } = require('./photo-prompt');
 
-const LEADS_DIR  = path.join(__dirname, '..', 'test', 'fixtures', 'photo', 'leads');
-const IMAGE_HASH = /^[0-9a-f]{64}$/;
-const ROLES      = ['anode', 'cathode', 'none', 'unknown'];
+const LEADS_DIR      = path.join(__dirname, '..', 'test', 'fixtures', 'photo', 'leads');
+const IMAGE_HASH     = /^[0-9a-f]{64}$/;
+const ROLES          = ['anode', 'cathode', 'none', 'unknown'];
+const CROP_MAX_CALLS = 3;
 
 // Read per request, so a test (or a restart-free tweak) can change them.
-const msFrom   = (v, fallback) => (Number(v) > 0 ? Number(v) : fallback);
-const hedgeMs  = () => msFrom(process.env.PHOTO_HEDGE_MS, 12000);
-const cutoffMs = () => msFrom(process.env.PHOTO_LEADS_TIMEOUT_MS, 25000);
+const cutoffMs    = () => (Number(process.env.PHOTO_LEADS_TIMEOUT_MS) > 0 ? Number(process.env.PHOTO_LEADS_TIMEOUT_MS) : 25000);
+const concurrency = () => {
+  const n = Math.floor(Number(process.env.PHOTO_LEADS_CONCURRENCY));
+  return n >= 1 ? n : 16;
+};
 
 const round1 = v => Math.round(v * 10) / 10 || 0;   // || 0: never -0
 const isPt   = p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite);
@@ -78,50 +89,39 @@ function savedEntry(file, id) {
     leads: e.leads.map(obj).map(l => ({ pin: String(l.pin), pt: isPt(l.pt) ? [l.pt[0], l.pt[1]] : null, role: ROLES.includes(l.role) ? l.role : 'unknown' })) };
 }
 
-// One item's race: a call now, an identical one at the resend if there's
-// still no good answer, the first good answer wins. A bad request or key
-// (fatal) isn't resent. stop() ends it as AI_TIMEOUT. Every way out aborts
-// the calls still running.
-function raceItem(item, call, resendMs) {
-  const controllers = [];
-  let settled = false, pending = 0, resolve, resend;
-  const run = { resent: false, why: '', result: new Promise(r => { resolve = r; }) };
-  const finish = entry => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(resend);
-    for (const c of controllers) c.abort();
-    resolve(entry);
+// At most `cap` first calls and retries in flight; the rest wait their
+// turn, first come first served, so the items' first calls go out in item
+// order. A stall resend goes out at once, outside the cap. slot(run, kind):
+// run() sends a call and returns its promise, or null when its item has ended.
+function limiter(cap) {
+  let busy = 0;
+  const queue = [];
+  const pump = () => {
+    while (busy < cap && queue.length) {
+      const p = queue.shift()();
+      if (!p) continue;
+      busy++;
+      p.then(free, free);
+    }
   };
-  const send = () => {
-    const ctrl = new AbortController();
-    controllers.push(ctrl);
-    pending++;
-    call(ctrl.signal).then(finish, e => {
-      pending--;
-      if (settled) return;
-      run.why = String(e && e.message);
-      if ((e && e.fatal) || (pending === 0 && controllers.length === 2)) finish({ id: item.id, error: 'AI_FAILED' });
-    });
+  const free = () => { busy--; pump(); };
+  return (run, kind) => {
+    if (kind === 'resend') return run();
+    queue.push(run);
+    pump();
   };
-  resend = setTimeout(() => {
-    if (settled || controllers.length >= 2) return;
-    run.resent = true;
-    send();
-  }, resendMs);
-  send();
-  run.stop = () => finish({ id: item.id, error: 'AI_TIMEOUT' });
-  return run;
 }
 
-// Every item live, at once. Resolves { entries, resent, ok }.
+// Every item live, at most concurrency() first calls and retries at once. Resolves
+// { entries, resent, retries, ok }.
 async function askGemini(items, model, fetch) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.warn('photo-leads: GEMINI_API_KEY is not set');
-    return { entries: items.map(it => ({ id: it.id, error: 'AI_FAILED' })), resent: 0, ok: 0 };
+    return { entries: items.map(it => ({ id: it.id, error: 'AI_FAILED' })), resent: 0, retries: 0, ok: 0 };
   }
   const who = `gemini ${model}`, url = `${GEMINI_BASE}${model}:generateContent`;
+  const slot = limiter(concurrency()), hedgeMs = photoHedgeMs(), deadlineAt = Date.now() + cutoffMs();
   const runs = items.map(item => {
     const body = {
       contents: [{ role: 'user', parts: [{ text: PHOTO_CROP_PROMPT(item) }, geminiImagePart(item.image)] }],
@@ -131,15 +131,18 @@ async function askGemini(items, model, fetch) {
       const data = await postJSON({ fetch }, signal, who, url, { 'x-goog-api-key': apiKey }, body);
       return toEntry(item, parseLooseJSON(geminiText(data, who)));
     };
-    return raceItem(item, call, hedgeMs());
+    return raceGemini(call, { maxCalls: CROP_MAX_CALLS, hedgeMs, deadlineAt, slot });
   });
-  const cutoff  = setTimeout(() => runs.forEach(r => r.stop()), cutoffMs());
-  const entries = await Promise.all(runs.map(r => r.result));
+  const late    = Object.assign(new Error('past the crop round\'s cutoff'), { code: 'AI_TIMEOUT' });
+  const cutoff  = setTimeout(() => runs.forEach(r => r.stop(late)), cutoffMs());
+  const entries = await Promise.all(runs.map((r, i) => r.result.catch(e =>
+    ({ id: items[i].id, error: e && e.code === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILED' }))));
   clearTimeout(cutoff);
 
-  const whys = [...new Set(runs.filter((r, i) => entries[i].error && r.why).map(r => r.why))];
+  const whys = [...new Set(runs.filter((r, i) => entries[i].error && r.stats.why).map(r => r.stats.why))];
   if (whys.length) console.warn(`photo-leads: ${entries.filter(e => e.error).length} item(s) unanswered: ${whys.join('; ')}`);
-  return { entries, resent: runs.filter(r => r.resent).length, ok: entries.filter(e => !e.error).length };
+  return { entries, resent: runs.filter(r => r.stats.resent).length, retries: runs.reduce((n, r) => n + r.stats.retries, 0),
+           ok: entries.filter(e => !e.error).length };
 }
 
 function record(dir, key, model, items) {
@@ -162,7 +165,7 @@ async function readLeads(body, opts = {}) {
   const names       = photoProviders();
   const replayOnly  = names.length === 1 && names[0] === 'fixture';
   const recording   = process.env.PHOTO_RECORD === '1';
-  const done = (out, provider, model, resent = 0) => ({ items: out, provider, model, ms: Date.now() - started, resent });
+  const done = (out, provider, model, resent = 0, retries = 0) => ({ items: out, provider, model, ms: Date.now() - started, resent, retries });
 
   if (replayOnly || (file && !IMAGE_HASH.test(key) && !recording)) {
     return done(items.map(it => savedEntry(file, it.id) || { id: it.id, error: 'AI_FAILED' }), 'fixture', file ? file.model : null);
@@ -177,7 +180,8 @@ async function readLeads(body, opts = {}) {
     return saved || e;
   });
   if (recording && live.ok && isSafeId(key)) record(fixturesDir, key, model, out.filter(e => !e.error));
-  return live.ok === 0 && fromFile ? done(out, 'fixture', file.model, live.resent) : done(out, 'gemini', model, live.resent);
+  return live.ok === 0 && fromFile ? done(out, 'fixture', file.model, live.resent, live.retries)
+    : done(out, 'gemini', model, live.resent, live.retries);
 }
 
 module.exports = { readLeads };

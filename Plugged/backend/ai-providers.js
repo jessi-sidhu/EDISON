@@ -195,13 +195,21 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
   let decls = ctx.toolsFor ? ctx.toolsFor(markdown || '', userMsg || '')
     : ((ctx.CIRCUIT_TOOLS && ctx.CIRCUIT_TOOLS[0] && ctx.CIRCUIT_TOOLS[0].function_declarations) || []);
   const system = ctx.promptFor ? ctx.promptFor(decls) : ctx.SYSTEM_PROMPT;
-  console.log(`[ask] tools: ${decls.map(d => d.name).join(', ')}`);
+  console.log(ctx.explain ? '[ask] explain: no tools' : `[ask] tools: ${decls.map(d => d.name).join(', ')}`);
 
   const messages = [{ role: 'system', content: system }];
   for (const h of history || []) {
     if (h && h.text) messages.push({ role: h.role === 'model' ? 'assistant' : 'user', content: h.text });
   }
-  messages.push({ role: 'user', content: `BOARD STATE:\n${boardState}\n\nQUESTION: ${msg}` });
+  messages.push({ role: 'user', content: `BOARD STATE:\n${boardState}\n\nQUESTION: ${msg}${ctx.explain ? `\n\n${EXPLAIN_NOTE}` : ''}` });
+
+  // Explain mode (issue #169): one request with no tools offered, so the
+  // answer is text only. A tool call the model makes anyway is ignored.
+  if (ctx.explain) {
+    const m = await deepSeekTurn(messages, null, ctx);
+    const names = ((ctx.CIRCUIT_TOOLS && ctx.CIRCUIT_TOOLS[0] && ctx.CIRCUIT_TOOLS[0].function_declarations) || []).map(d => d.name);
+    return { reply: stripToolMarkup(m.content, names) || EXPLAIN_FALLBACK, actions: [] };
+  }
 
   // DeepSeek calls a few tools per turn and waits for their results before
   // calling more, so keep answering until it stops calling tools. The tools
@@ -277,6 +285,26 @@ const MAX_REPAIRS = 2;
 const REPAIR_HEADING = 'Your build has problems. Rebuild it with these fixed (delete_all first, then the whole corrected circuit):';
 // The heading for an edit (no delete_all so far): fix in place (issue #85).
 const EDIT_REPAIR_HEADING = 'Your build has problems. Fix only these, keeping everything else:';
+// An explain ask whose answer has no text (issue #169).
+const EXPLAIN_FALLBACK = "I couldn't explain that just now.";
+// Added to an explain ask's user message (not the system prompt, #169): with
+// no tools offered, deepseek-flash still wrote edits as text and named
+// problems the simulator didn't find.
+const EXPLAIN_NOTE = 'Answer only from the Simulation section above: name each problem, its part and holes, and how to fix it by hand on the real board. '
+  + 'Its list of problems is complete: if it lists any, that is everything wrong, so suggest no other wiring changes, extra jumpers or moves; '
+  + 'if it lists none, say the simulator found nothing wrong and what to check by hand. '
+  + 'Claim nothing the Simulation section does not say. You cannot change the board in this answer, so write no tool calls.';
+
+// An explain reply's text with any tool calls the model wrote as text taken
+// out (#169): DeepSeek's DSML blocks (to their end, or the reply's) and tags
+// named after a tool, like <delete_wire id="W3" />.
+const DSML_BLOCK = /<[｜|]+\s*DSML\s*[｜|]+\s*\w*calls>[\s\S]*?(?:<\/[｜|]+\s*DSML\s*[｜|]+\s*\w*calls>|$)/g;
+function stripToolMarkup(text, toolNames) {
+  let out = String(text || '').replace(DSML_BLOCK, '');
+  const names = (toolNames || []).filter(n => /^\w+$/.test(n));
+  if (names.length) out = out.replace(new RegExp(`<\\/?(?:${names.join('|')})\\b[^>]*>`, 'g'), '');
+  return out.replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+}
 
 // checkBuild's problems, or none if it throws: a broken check never costs a round.
 function safeCheck(checkBuild, actions, board, opts) {
@@ -338,10 +366,9 @@ async function deepSeekRequest(messages, tools, ctx, signal) {
     body: JSON.stringify({
       model: ctx.model || DEEPSEEK_MODEL,
       messages,
-      tools,
-      tool_choice: 'auto',
+      ...(tools ? { tools, tool_choice: 'auto' } : {}),   // none in explain mode (#169): both keys left out
       thinking: { type: 'disabled' },
-      temperature: 0.3,
+      temperature: ctx.explain ? 0 : 0.3,   // an explain answer (#169) as steady as it can be
       max_tokens: 2048,
     }),
   });
@@ -426,8 +453,10 @@ function makeAsk(askGemini, ctx) {
   const provider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
 
   // `board` (issue #84) is the browser's board, optional: the DeepSeek and
-  // Gemini paths check an edit against it.
-  return async function ask(markdown, userMsg, history, board) {
+  // Gemini paths check an edit against it. `opts.explain` (issue #169): an
+  // answer only, so DeepSeek is offered no tools and nothing is queued. The
+  // other providers ignore it.
+  return async function ask(markdown, userMsg, history, board, opts = {}) {
     if (provider === 'fixture') {
       return askFixture(markdown, userMsg, history);
     }
@@ -442,9 +471,11 @@ function makeAsk(askGemini, ctx) {
     if (provider === 'claude') {
       result = await askClaude(markdown, userMsg, history, ctx);
     } else if (provider === 'deepseek') {
-      // Same clean-up and circuit checks the Gemini path applies itself.
-      const finish = ctx.finish || (r => r);
-      const raw = await askDeepSeek(markdown, userMsg, history, ctx, board);
+      // Same clean-up and circuit checks the Gemini path applies itself; an
+      // explain answer has no actions to clean up or check.
+      const explain = !!(opts && opts.explain);
+      const finish = explain ? (r => ({ reply: r.reply, actions: [] })) : (ctx.finish || (r => r));
+      const raw = await askDeepSeek(markdown, userMsg, history, explain ? { ...ctx, explain } : ctx, board);
       result = finish({ ...raw, board, fullCheck: isFixRequest(userMsg) });
       // Which model answered, for the server log only (not enumerable, so not sent).
       if (raw.fallbackModel) Object.defineProperty(result, 'fallbackModel', { value: raw.fallbackModel, enumerable: false });

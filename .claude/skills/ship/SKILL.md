@@ -13,7 +13,7 @@ description: Finish the current task - run checks, review, commit, rebase onto t
    - On `main`: stop. Move the work onto `dev` first.
 2. **Check.** This is the gate. From `Plugged/`:
    - Run `npm run check` (lint) and `npm test`.
-   - Also run the **full** `npm run e2e` if any file under `circuit3d/`, `*.html`, `firebase-config.js` or `e2e/` changed. Never swap it for a subset of specs, even if the builder ran some or CI is fast: features clash through shared UI, and only the full suite sees it.
+   - Also run the **full** `npm run e2e` if any file under `circuit3d/`, `*.html`, `firebase-config.js` or `e2e/` changed. Never swap it for a subset of specs, even if the builder ran some: features clash through shared UI, and only the full suite sees it.
    - Fix any failures this change caused. Never push red.
    - **AI prompt changed?** If `Plugged/test/fixtures/prompts/` changed (the golden prompt files), this change alters what the AI is sent. Before pushing, run the real-AI demo check from `Plugged/`: `npm run ai-eval -- --only demo` (3 runs). Each must pass (3/3). When prompt text changed, also run the full `npm run ai-eval` and compare it with the last baseline. Report the results. Never update the golden files just to make the test pass.
 3. **Review.**
@@ -37,4 +37,4 @@ description: Finish the current task - run checks, review, commit, rebase onto t
      - Never switch branches in the main checkout. It stays on `dev`.
    - Worked directly on `dev` in the main checkout (the fallback): run `git pull`. There's no branch or worktree to remove.
    - Always run `gh issue close <n> --comment "Shipped to dev in <sha>"`. `Closes #<n>` only closes it when the commit reaches `main`, and other sessions' claim checks look for this comment.
-7. **Report.** Give the commit on `dev`, and remind the user that CI runs on it now (`gh run list --branch dev --limit 1`). It reaches `main` at the next `/promote`.
+7. **Report.** Give the commit on `dev`. CI is off (#165), so step 2's local checks were the gate. It reaches `main` at the next `/promote`.

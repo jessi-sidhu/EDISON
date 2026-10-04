@@ -354,7 +354,8 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     return pm ? { world: pm.userData.world.clone(), holeRef: null, pinMesh: pm } : null;
   }
 
-  async function askSparky(markdown, userMsg, history, board) {
+  // explain (issue #169): an answer only, so the server offers the AI no tools.
+  async function askSparky(markdown, userMsg, history, board, explain) {
     // A stalled AI ends in a clear message, not a minutes-long spinner (#129).
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Chat.ASK_TIMEOUT_MS);
@@ -363,7 +364,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
       res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ markdown, message: userMsg, history, board }),
+        body: JSON.stringify({ markdown, message: userMsg, history, board, ...(explain ? { explain: true } : {}) }),
         signal: controller.signal,
       });
       try { data = await res.json(); } catch (e) { if (controller.signal.aborted) throw e; /* else a non-JSON error page */ }
@@ -606,7 +607,8 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
 
   // { context }: a line added to the message sent (and kept in the history),
   // never shown in her bubble (the photo build's, issue #143).
-  async function sparkyAsk(overrideMsg, { context } = {}) {
+  // { explain }: this one ask wants an answer, not an edit (issue #169).
+  async function sparkyAsk(overrideMsg, { context, explain } = {}) {
     const input = document.getElementById('sparky-input');
     const msg   = (overrideMsg !== undefined) ? overrideMsg : input.value.trim();
     if (!msg) return;
@@ -624,7 +626,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     try {
       const markdown = App.exportMarkdown ? App.exportMarkdown() : '_Board not ready._';
       const boardNow = App.exportBoard ? App.exportBoard() : undefined;   // the board model, wire ids included (#84)
-      const data = await askSparky(markdown, sent, chatHistory.slice(-20), boardNow);
+      const data = await askSparky(markdown, sent, chatHistory.slice(-20), boardNow, explain === true);
       typingEl.remove();
       sparkyAddMsg(data.reply || '(no reply)', 'ai');
 

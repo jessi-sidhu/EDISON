@@ -2,15 +2,17 @@
 //  photo-reader.js — reads a flattened board photo for /api/photo
 //
 //  readPhoto({ image, grid, sample }, opts) tries each provider in
-//  PHOTO_PROVIDERS (default gemini,deepseek) under one overall
-//  deadline, PHOTO_TIMEOUT_MS (default 45 s), and resolves
-//  { reading, provider, model, key }. It rejects with code AI_FAILED or
-//  AI_TIMEOUT.
+//  PHOTO_PROVIDERS (default gemini) under one overall deadline,
+//  PHOTO_TIMEOUT_MS (default 45 s), and resolves
+//  { reading, provider, model, key, retries }. It rejects with code
+//  AI_FAILED or AI_TIMEOUT, carrying retries too (for the [photo] line).
 //
-//  A provider is { name, read(input, ctx) }: ctx has { signal, fetch }
-//  and read resolves { reading, model }; throwing means it failed, and
-//  the next one is tried, unless the error is .fatal (a 400/401/403: a
-//  bad request or key, which the next provider can't fix). Every reading
+//  A provider is { name, read(input, ctx) }: ctx has { signal, fetch,
+//  deadlineAt, tally } and read resolves { reading, model }; throwing
+//  means it failed, and the next one is tried, unless the error is .spent
+//  (Gemini already retried its own failures and used up its calls, #172).
+//  So with PHOTO_PROVIDERS=gemini,deepseek, deepseek follows only a Gemini
+//  400/401/403 (.fatal), never a timeout or Gemini's 503s. Every reading
 //  goes through validateReading().
 //
 //  Fixtures (test/fixtures/photo/<key>.json, key = the sample id, else
@@ -18,17 +20,18 @@
 //    PHOTO_PROVIDERS=fixture   replays only.
 //    a sample with a fixture   answered from it straight away, no
 //                              provider call (fallback false) (#157).
-//    live mode, an image       its fixture answers only after every
-//                              provider failed, a fatal error, or the
-//                              deadline passed. So does a sample with
-//                              no fixture: it goes live.
+//    live mode, an image       its fixture answers only after the
+//                              providers failed (Gemini's spent calls
+//                              included) or the deadline passed. So does
+//                              a sample with no fixture: it goes live.
 //    PHOTO_RECORD=1            sends a sample live too, and saves each
 //                              live Reading.
 //
 //  The live readers (#139) ask for a box per part and wire (photo-prompt.js)
 //  and start each one's 2 legs at the ends of its box, hole '?', for the
-//  page to snap. gemini: PHOTO_GEMINI_MODEL, 25 s per attempt. deepseek:
-//  deepseek-flash only, never deepseek-v4-pro: it has no vision.
+//  page to snap. gemini: PHOTO_GEMINI_MODEL, the whole deadline, up to 4
+//  calls under raceGemini's retry rule (#172). deepseek: deepseek-flash
+//  only, never deepseek-v4-pro: it has no vision.
 // ─────────────────────────────────────────────────────────────
 
 const crypto = require('crypto');
@@ -40,8 +43,9 @@ const { PHOTO_PROMPT, PHOTO_SCHEMA } = require('./photo-prompt');
 const FIXTURES_DIR = path.join(__dirname, '..', 'test', 'fixtures', 'photo');
 
 // Read per request, so a test (or a restart-free tweak) can change them.
-const photoProviders = () => (process.env.PHOTO_PROVIDERS || 'gemini,deepseek').split(',').map(s => s.trim()).filter(Boolean);
+const photoProviders = () => (process.env.PHOTO_PROVIDERS || 'gemini').split(',').map(s => s.trim()).filter(Boolean);
 const photoTimeoutMs = () => Number(process.env.PHOTO_TIMEOUT_MS) || 45000;
+const photoHedgeMs   = () => (Number(process.env.PHOTO_HEDGE_MS) > 0 ? Number(process.env.PHOTO_HEDGE_MS) : 12000);
 
 const failed = msg => Object.assign(new Error(msg), { code: 'AI_FAILED' });
 
@@ -163,23 +167,132 @@ function boxesToReading(answer, grid) {
   };
 }
 
-// POSTs JSON; a non-2xx throws, fatal on 400/401/403 (a bad request or key).
-// No error quotes the upstream body: they end up in the logs.
+// A 429 body's google.rpc.RetryInfo retryDelay ("3.5s") in ms, else 0.
+function retryDelayMs(text) {
+  try {
+    const info = list(obj(obj(JSON.parse(text)).error).details).find(d => /RetryInfo$/.test(str(obj(d)['@type'])));
+    const m = /^(\d+(?:\.\d+)?)s$/.exec(str(obj(info).retryDelay));
+    return m ? Number(m[1]) * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// POSTs JSON; a non-2xx throws, fatal on 400/401/403 (a bad request or key),
+// with a 429's retryDelay as retryAfterMs. No error quotes the upstream
+// body: they end up in the logs.
 async function postJSON(ctx, signal, who, url, headers, body) {
   const res = await ctx.fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
   if (!res.ok) {
     const e = failed(`${who} ${res.status}`);
     if ([400, 401, 403].includes(res.status)) e.fatal = true;
+    if (res.status === 429) {
+      let text = '';
+      try { text = await res.text(); } catch { /* no body: the usual wait */ }
+      e.retryAfterMs = retryDelayMs(text);
+    }
     throw e;
   }
   const text = await res.text();
   try { return JSON.parse(text); } catch { throw failed(`${who}: the reply is not JSON`); }
 }
 
+// ── Gemini's retry rule (#172), for both photo rounds ────────
+// Gemini answers in ~1 s, but stalls 9–16 s at times and answers 503 under
+// load (measured 2026-10-02). So one request is a short race of identical
+// calls, call(signal) sending it once (it resolves the answer or throws):
+//   - a call that fails at once (5xx, 429, network error, an empty or
+//     invalid reply) is sent again 1–2 s later; a 429 whose body has a
+//     retryDelay waits that long instead, when it is shorter than the time
+//     left (deadlineAt);
+//   - a call with no answer after hedgeMs gets one identical call alongside
+//     (once a race); the first good answer wins and the others are aborted;
+//   - a 400/401/403 (.fatal) is never sent again;
+//   - at most maxCalls calls in all.
+// opts.signal aborts the race (the deadline); opts.slot(run, kind) runs run()
+// once a call may go out (the crop round's cap; kind is 'first', 'retry' or
+// 'resend') and run returns the call's promise, or null when the race ended
+// while it waited. stats ({ calls,
+// retries, resent, why }) is kept up to date, opts.stats when given.
+// Returns { result, stop(reason), stats }. result rejects with the last
+// error (.fatal, or .spent when every call failed) or the abort's reason.
+const BOX_MAX_CALLS = 4;
+
+function raceGemini(call, opts = {}) {
+  const max    = opts.maxCalls || 1;
+  const hedge  = opts.hedgeMs > 0 ? opts.hedgeMs : photoHedgeMs();
+  const parent = opts.signal;
+  const slot   = opts.slot || (run => run());   // (run, kind)
+  const stats  = Object.assign(opts.stats || {}, { calls: 0, retries: 0, resent: false, why: '' });
+  const sent   = [];   // { ctrl, live, hedge }
+  let settled = false, waiting = false, hedged = false, retry = null, resolve, reject;
+  const result = new Promise((res, rej) => { resolve = res; reject = rej; });
+  const live   = () => sent.filter(c => c.live).length;
+
+  const onAbort = () => end(reject, parent.reason);
+  function end(settle, value) {
+    if (settled) return;
+    settled = true;
+    clearTimeout(retry);
+    for (const c of sent) { clearTimeout(c.hedge); c.ctrl.abort(); }
+    if (parent) parent.removeEventListener('abort', onAbort);
+    settle(value);
+  }
+
+  // One more call, once slot lets it go, unless the race is over by then.
+  // waiting holds off any other retry or resend meanwhile.
+  function send(kind) {
+    waiting = true;
+    slot(() => {
+      waiting = false;
+      if (settled) return null;
+      const c = { ctrl: new AbortController(), live: true };
+      sent.push(c);
+      stats.calls++;
+      if (kind === 'retry') stats.retries++;
+      if (kind === 'resend') stats.resent = true;
+      c.hedge = setTimeout(() => stalled(c), hedge);
+      const p = call(c.ctrl.signal);
+      p.then(v => { c.live = false; clearTimeout(c.hedge); end(resolve, v); },
+             e => { c.live = false; clearTimeout(c.hedge); failedCall(c, e); });
+      return p;
+    }, kind);
+  }
+
+  function stalled(c) {
+    if (settled || hedged || waiting || !c.live || live() > 1 || sent.length >= max) return;
+    hedged = true;
+    send('resend');
+  }
+
+  function failedCall(c, e) {
+    if (settled) return;
+    stats.why = String(e && e.message);
+    if (e && e.fatal) return end(reject, e);
+    if (waiting) return;                                       // a call is already on its way
+    const last = sent[sent.length - 1];
+    if (last !== c && last.live) return;                       // the newer call may still answer
+    if (sent.length < max) {
+      const left  = opts.deadlineAt ? opts.deadlineAt - Date.now() : Infinity;
+      const asked = (e && e.retryAfterMs) || 0;
+      waiting = true;
+      retry = setTimeout(() => send('retry'), asked > 0 && asked < left ? asked : 1000 + Math.random() * 1000);
+      return;
+    }
+    if (!live()) end(reject, Object.assign(e instanceof Error ? e : failed(String(e)), { spent: true }));
+  }
+
+  if (parent && parent.aborted) end(reject, parent.reason);
+  else {
+    if (parent) parent.addEventListener('abort', onAbort, { once: true });
+    send('first');
+  }
+  return { result, stop: reason => end(reject, reason), stats };
+}
+
 // ── gemini ───────────────────────────────────────────────────
-const GEMINI_BASE       = 'https://generativelanguage.googleapis.com/v1beta/models/';
-const GEMINI_ATTEMPT_MS = 25000;
-const photoGeminiModel  = () => process.env.PHOTO_GEMINI_MODEL || 'gemini-robotics-er-2-preview';
+const GEMINI_BASE      = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const photoGeminiModel = () => process.env.PHOTO_GEMINI_MODEL || 'gemini-robotics-er-2-preview';
 
 // A data URL as a Gemini image part, read at ULTRA_HIGH.
 function geminiImagePart(dataUrl) {
@@ -203,14 +316,17 @@ const geminiProvider = {
   read: async (input, ctx) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw failed('GEMINI_API_KEY is not set');
-    const model = photoGeminiModel();
+    const model = photoGeminiModel(), who = `gemini ${model}`;
     const body  = {
       contents: [{ role: 'user', parts: [{ text: PHOTO_PROMPT }, geminiImagePart(input.image)] }],
       generationConfig: { responseMimeType: 'application/json', responseSchema: PHOTO_SCHEMA, temperature: 1, maxOutputTokens: 32768 },
     };
-    const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(GEMINI_ATTEMPT_MS)].filter(Boolean));
-    const data = await postJSON(ctx, signal, `gemini ${model}`, `${GEMINI_BASE}${model}:generateContent`, { 'x-goog-api-key': apiKey }, body);
-    return { reading: boxesToReading(parseLooseJSON(geminiText(data, `gemini ${model}`)), input.grid), model };
+    const once = async signal => {
+      const data = await postJSON(ctx, signal, who, `${GEMINI_BASE}${model}:generateContent`, { 'x-goog-api-key': apiKey }, body);
+      return { reading: boxesToReading(parseLooseJSON(geminiText(data, who)), input.grid), model };
+    };
+    // No per-call cap: Gemini gets the whole deadline (#172).
+    return raceGemini(once, { maxCalls: BOX_MAX_CALLS, signal: ctx.signal, deadlineAt: ctx.deadlineAt, stats: ctx.tally }).result;
   },
 };
 
@@ -311,21 +427,26 @@ function record(dir, key, input, out) {
   }
 }
 
-// Resolves { reading, provider, model, fallback, notes, key }; fallback is
-// true when the answer didn't come from the first provider listed, and key
-// is the fixture key (null when the sample isn't a plain id).
+// Resolves { reading, provider, model, fallback, notes, key, retries };
+// fallback is true when the answer didn't come from the first provider
+// listed, key is the fixture key (null when the sample isn't a plain id),
+// and retries counts Gemini's calls sent again after a failure (an error
+// carries it too).
 async function readPhoto(input, opts = {}) {
   const names       = opts.providers || photoProviders();
   const fixturesDir = opts.fixturesDir || FIXTURES_DIR;
   const key         = fixtureKey(input);
   const replayOnly  = names.length === 1 && (names[0] === 'fixture' || names[0] === fixtureProvider);
-  const ctxBase     = { fetch: opts.fetch || globalThis.fetch, fixturesDir, key };
+  const deadlineMs  = opts.deadlineMs || photoTimeoutMs();
+  const tally       = { retries: 0 };
+  const ctxBase     = { fetch: opts.fetch || globalThis.fetch, fixturesDir, key, tally, deadlineAt: Date.now() + deadlineMs };
+  const counted     = e => Object.assign(e, { retries: tally.retries });
 
   const fromFixture = fallback => {
     const file = loadFixture(fixturesDir, key);
     if (!file) return null;
     const { reading, notes } = validateReading(file.reading);
-    return { reading, provider: 'fixture', model: file.model, fallback, notes, key };
+    return { reading, provider: 'fixture', model: file.model, fallback, notes, key, retries: tally.retries };
   };
 
   // Use sample photo (the demo's photo beat, and the button on every photo
@@ -338,40 +459,44 @@ async function readPhoto(input, opts = {}) {
 
   let out;
   try {
-    out = await withDeadline(opts.deadlineMs || photoTimeoutMs(), async signal => {
+    out = await withDeadline(deadlineMs, async signal => {
       for (let i = 0; i < names.length; i++) {
         const p = typeof names[i] === 'string' ? PROVIDERS[names[i]] : names[i];
         if (!p || typeof p.read !== 'function') continue;   // unknown name: a failed provider
         try {
           const got = await p.read(input, { ...ctxBase, signal });
           const { reading, notes } = validateReading(got && got.reading);
-          return { reading, provider: p.name, model: got.model, fallback: i > 0, notes, key };
+          return { reading, provider: p.name, model: got.model, fallback: i > 0, notes, key, retries: tally.retries };
         } catch (e) {
           console.warn(`photo: ${p.name} failed: ${e.message}`);
-          if (signal.aborted || e.fatal) throw e;
+          if (signal.aborted) throw e;
+          // Gemini spent its calls on 503s and the like: the next provider
+          // only burns the time left (#172). A 400/401/403 hands over.
+          if (e.spent) break;
         }
       }
       return null;
     });
   } catch (e) {
-    // Past the deadline, or after a bad request or key, a live read still
-    // falls back to a recording, for the stage.
-    const fixed = (e.code === 'AI_TIMEOUT' || e.fatal) && !replayOnly && fromFixture(true);
+    // Past the deadline a live read still falls back to a recording, for the stage.
+    const fixed = e.code === 'AI_TIMEOUT' && !replayOnly && fromFixture(true);
     if (fixed) return fixed;
-    throw e;
+    throw counted(e);
   }
 
   if (out) {
     if (process.env.PHOTO_RECORD === '1' && out.provider !== 'fixture' && key) record(fixturesDir, key, input, out);
     return out;
   }
+  // Every provider failed, a bad request or key included: a recording still answers.
   const fixed = !replayOnly && fromFixture(true);
   if (fixed) return fixed;
-  throw failed('every photo provider failed');
+  throw counted(failed('every photo provider failed'));
 }
 
 module.exports = {
   readPhoto, validateReading, parseLooseJSON, PROVIDERS, isSafeId,
-  // Shared with photo-leads.js (#159).
-  GEMINI_BASE, photoGeminiModel, photoProviders, geminiImagePart, geminiText, postJSON, loadFixture, failed, num, obj, list,
+  // Shared with photo-leads.js (#159, #172).
+  GEMINI_BASE, photoGeminiModel, photoProviders, photoHedgeMs, geminiImagePart, geminiText, postJSON, raceGemini,
+  loadFixture, failed, num, obj, list,
 };

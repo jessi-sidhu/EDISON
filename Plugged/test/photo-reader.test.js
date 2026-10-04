@@ -22,9 +22,27 @@
 // - Conversion: each part's 2 leads and each wire's 2 ends sit at the two
 //   ends of the box's long side (in pixels), hole '?', with 'leads' in the
 //   item's unsure. box = the pixel box [x0, y0, x1, y1]; confidence = conf.
-// - Fallback to the next provider on 5xx, 429, a network error, a timeout,
-//   an empty reply, or invalid JSON. Never on 400/401/403: readPhoto rejects
-//   AI_FAILED and the next provider is never asked.
+// - Providers and retries (#172, section 9; this replaced #139's "fall back
+//   to deepseek on 5xx, 429, a timeout…" and "never after a 400/401/403"):
+//   - PHOTO_PROVIDERS defaults to 'gemini' alone. deepseek-flash runs only
+//     when listed (PHOTO_PROVIDERS=gemini,deepseek), and then only after
+//     Gemini fails at once with a 400/401/403, never after a timeout.
+//   - Gemini gets the whole PHOTO_TIMEOUT_MS (default 45000): no per-call cap.
+//   - Inside the box round, a 503, 429, other 5xx, network error, empty reply
+//     or invalid JSON is retried, the same request, 1–2 s later (a 429 whose
+//     body has a google.rpc.RetryInfo retryDelay waits that long instead,
+//     when shorter than the time left).
+//   - A call with no answer after PHOTO_HEDGE_MS (default 12000, read by
+//     photo-reader.js too now) gets one identical call alongside; the first
+//     good answer wins and the other call's AbortSignal is aborted.
+//   - A 400/401/403 is never retried. At most 4 Gemini calls per round. When
+//     every call has failed the round is AI_FAILED; at the deadline,
+//     AI_TIMEOUT, with every call aborted.
+//   - The route's [photo] line gains retries=N (photo-route.test.js).
+//   The retry tests run on vi.useFakeTimers (setTimeout, clearTimeout,
+//   setInterval, clearInterval, Date from fake ms 0). Node's AbortSignal.timeout
+//   is out of the fake clock's reach, so startRead() puts it on the same
+//   clock: any per-call time limit then shows up in fake time.
 //
 // Every test runs with DEEPSEEK_MODEL and DEEPSEEK_FALLBACK_MODEL set to
 // deepseek-v4-pro, the /api/ask settings that must never reach photos (that
@@ -57,7 +75,7 @@ const UPDATE = process.env.UPDATE_GOLDEN === '1';
 // ── Environment ─────────────────────────────────────────────────────────────
 
 const ENV_KEYS = ['GEMINI_API_KEY', 'DEEPSEEK_API_KEY', 'PHOTO_GEMINI_MODEL', 'PHOTO_RECORD', 'PHOTO_PROVIDERS',
-  'PHOTO_TIMEOUT_MS', 'DEEPSEEK_MODEL', 'DEEPSEEK_FALLBACK_MODEL'];
+  'PHOTO_TIMEOUT_MS', 'PHOTO_HEDGE_MS', 'DEEPSEEK_MODEL', 'DEEPSEEK_FALLBACK_MODEL'];
 let savedEnv, emptyDir;
 beforeAll(() => { emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'photo-reader-')); });
 afterAll(() => fs.rmSync(emptyDir, { recursive: true, force: true }));
@@ -69,10 +87,12 @@ beforeEach(() => {
   delete process.env.PHOTO_RECORD;
   delete process.env.PHOTO_PROVIDERS;
   delete process.env.PHOTO_TIMEOUT_MS;
+  delete process.env.PHOTO_HEDGE_MS;
   Object.assign(process.env, ASK_ENV);
   for (const m of ['log', 'info', 'warn', 'error']) vi.spyOn(console, m).mockImplementation(() => {});
 });
 afterEach(() => {
+  vi.useRealTimers();
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -104,6 +124,76 @@ function fakeFetch(handlers) {
   };
   return { fetch, calls };
 }
+
+// ── The same, on a fake clock (#172) ────────────────────────────────────────
+
+const FAKE    = { toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'], now: 0 };
+const HANG    = Symbol('never answers; only an abort ends it');
+const flush   = async () => { for (let i = 0; i < 30; i++) await new Promise(r => setImmediate(r)); };
+const advance = async ms => { await vi.advanceTimersByTimeAsync(ms); await flush(); };
+const later   = (ms, res) => new Promise(r => setTimeout(() => r(res), ms));   // on the fake clock
+
+// A fetch Response stand-in (a plain object, so fake timers can't stall it).
+function reply(code, body) {
+  const t = typeof body === 'string' ? body : JSON.stringify(body);
+  return { ok: code >= 200 && code < 300, status: code, statusText: '', headers: new Headers({ 'content-type': 'application/json' }),
+    text: async () => t, json: async () => JSON.parse(t) };
+}
+const geminiOK   = answer => reply(200, { candidates: [{ content: { role: 'model', parts: [{ text: text(answer) }] }, finishReason: 'STOP' }] });
+const deepseekOK = answer => reply(200, { choices: [{ index: 0, message: { role: 'assistant', content: text(answer) }, finish_reason: 'stop' }] });
+const fails      = n => reply(n, { error: { code: n, message: `upstream ${n}` } });
+
+// handlers: { gemini(call), deepseek(call) } → a reply, a promise of one,
+// HANG, or throws (a network error). Every call is kept, per service, as
+// { n, at, url, headers, body, signal }: n its number for that service, at
+// the fake ms it went out. Aborting a call's signal rejects it, as a real
+// fetch does.
+function clockFetch(handlers) {
+  const calls = { gemini: [], deepseek: [] };
+  const fetch = (url, opts = {}) => {
+    const u = String(url);
+    const service = u.startsWith('https://generativelanguage.googleapis.com/') ? 'gemini'
+      : u.startsWith('https://api.deepseek.com/') ? 'deepseek' : null;
+    if (!service) return Promise.reject(new Error(`the photo reader called an unexpected URL: ${u}`));
+    const call = { n: calls[service].length + 1, at: Date.now(), url: u, headers: new Headers(opts.headers), body: JSON.parse(opts.body), signal: opts.signal };
+    calls[service].push(call);
+    return new Promise((resolve, reject) => {
+      const signal = opts.signal;
+      const abort = () => reject(signal.reason || new DOMException('This operation was aborted', 'AbortError'));
+      if (signal && signal.aborted) return abort();
+      if (signal) signal.addEventListener('abort', abort, { once: true });
+      if (!handlers[service]) return reject(new Error(`no fake ${service} answer in this test`));
+      let out;
+      try { out = handlers[service](call); } catch (e) { return reject(e); }
+      if (out !== HANG) Promise.resolve(out).then(resolve, reject);
+    });
+  };
+  return { fetch, calls };
+}
+
+// Starts readPhoto on the fake clock, at fake ms 0. s.done, s.value, s.error
+// and s.at (the fake ms it settled) follow it. opts go to readPhoto: leave
+// out providers and deadlineMs to get the defaults, as the route does.
+function startRead(fake, opts = {}) {
+  if (!vi.isFakeTimers()) vi.useFakeTimers(FAKE);
+  if (!vi.isMockFunction(AbortSignal.timeout)) {
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
+      const c = new AbortController();
+      setTimeout(() => c.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), ms);
+      return c.signal;
+    });
+  }
+  const s = { done: false };
+  s.promise = Reader.readPhoto({ image: IMG, grid: GRID }, { fetch: fake.fetch, fixturesDir: emptyDir, ...opts });
+  s.promise.then(v => Object.assign(s, { done: true, value: v, at: Date.now() }),
+                 e => Object.assign(s, { done: true, error: e, at: Date.now() }));
+  return s;
+}
+const state = s => (!s.done ? 'still running'
+  : s.error ? `rejected ${s.error.code || s.error.message} at ${s.at} ms`
+  : `answered by ${s.value.provider} (${s.value.model}) at ${s.at} ms`);
+const tally = fake => `gemini ×${fake.calls.gemini.length}, deepseek ×${fake.calls.deepseek.length}`;
+const kinds = out => out.reading.parts.map(p => p.type);
 
 function provider(name) {
   const p = Reader.PROVIDERS[name];
@@ -277,13 +367,19 @@ test('gemini answering a bare list in a fence still gives a Reading with its par
 });
 
 // ── 5. Fallback to deepseek-flash ───────────────────────────────────────────
+// Since #172 deepseek-flash runs only when listed, and only after Gemini
+// fails at once with a 400/401/403 (a 503 and the rest are retried on Gemini,
+// section 9). So these tests reach deepseek through a Gemini 401.
 
-test('gemini 503 → deepseek-flash answers: image_url data URL, json_object, an example in the prompt; never deepseek-v4-pro', async () => {
+test('gemini 401 → deepseek-flash answers (when listed): image_url data URL, json_object, an example in the prompt; never deepseek-v4-pro', async () => {
   const items = [{ type: 'led', value: null, conf: 0.6, box_2d: [100, 500, 500, 520] }];
-  const fake = fakeFetch({ gemini: () => status(503), deepseek: () => deepseekSays({ rails: RAILS, items }) });
-  const out = await read(['gemini', 'deepseek'], fake);
+  const fake = fakeFetch({ gemini: () => status(401), deepseek: () => deepseekSays({ rails: RAILS, items }) });
+  let out;
+  try { out = await read(['gemini', 'deepseek'], fake); } catch (e) {
+    assert.fail(`readPhoto rejected (${e.code}: ${e.message}) after a Gemini 401 instead of asking deepseek-flash (deepseek called ${fake.calls.deepseek.length} times)`);
+  }
 
-  assert.equal(fake.calls.gemini.length, 1);
+  assert.equal(fake.calls.gemini.length, 1, 'a Gemini 401 is never retried');
   assert.equal(fake.calls.deepseek.length, 1, `deepseek was called ${fake.calls.deepseek.length} times`);
   const c = fake.calls.deepseek[0];
   assert.match(c.url, /^https:\/\/api\.deepseek\.com\/(v1\/)?chat\/completions$/);
@@ -306,48 +402,21 @@ test('gemini 503 → deepseek-flash answers: image_url data URL, json_object, an
   assertEnds(out.reading.parts[0].leads, [[1040.4, 71], [1040.4, 355]], 'deepseek LED (same conversion as Gemini)');
 });
 
-test('gemini falls back to deepseek-flash on 500, 503, 429, a network error, a timeout, an empty reply, invalid or cut-off JSON', async () => {
-  const items = [{ type: 'resistor', value: '470', conf: 0.8, box_2d: [300, 100, 400, 250] }];
-  const timeout = () => { throw new DOMException('The operation was aborted due to timeout', 'TimeoutError'); };
-  const cases = [
-    ['500', () => status(500)],
-    ['503', () => status(503)],
-    ['429', () => status(429)],
-    ['a network error', () => { throw new TypeError('fetch failed'); }],
-    ['a timeout', timeout],
-    ['no candidates', () => json(200, { candidates: [] })],
-    ['an empty text', () => geminiSays('')],
-    ['invalid JSON', () => geminiSays('I am not sure what I am looking at.')],
-    ['JSON cut off at the token limit', () => json(200, { candidates: [{ content: { parts: [{ text: '{"items":[{"type":"led","box_2d":[1' }] }, finishReason: 'MAX_TOKENS' }] })],
-  ];
-  for (const [what, gemini] of cases) {
-    const fake = fakeFetch({ gemini, deepseek: () => deepseekSays({ rails: RAILS, items }) });
-    let out;
-    try { out = await read(['gemini', 'deepseek'], fake); } catch (e) { assert.fail(`${what}: readPhoto rejected (${e.code || e.message}) instead of asking deepseek-flash`); }
-    assert.equal(fake.calls.deepseek.length, 1, `${what}: deepseek called ${fake.calls.deepseek.length} times`);
-    assert.equal(fake.calls.deepseek[0].body.model, 'deepseek-flash', what);
-    assert.equal(out.provider, 'deepseek', what);
-    assert.deepStrictEqual(out.reading.parts.map(p => p.value), [470], what);
-  }
-});
-
-test('gemini 400, 401 or 403 is a bad request or key: no fallback, deepseek is never asked, AI_FAILED', async () => {
-  for (const code of [400, 401, 403]) {
-    const fake = fakeFetch({ gemini: () => status(code), deepseek: () => deepseekSays({ rails: RAILS, items: [] }) });
-    await assert.rejects(read(['gemini', 'deepseek'], fake), e => e.code === 'AI_FAILED', `gemini ${code}: should reject AI_FAILED`);
-    assert.equal(fake.calls.gemini.length, 1, `gemini ${code}: gemini called ${fake.calls.gemini.length} times`);
-    assert.equal(fake.calls.deepseek.length, 0, `gemini ${code}: a bad request or key must not fall back, but deepseek was called`);
-  }
-});
+// (#139's "falls back to deepseek-flash on 500, 503, 429, a network error, a
+// timeout, an empty reply, invalid JSON" and "400/401/403: deepseek is never
+// asked" tests were replaced by section 9: those failures are now retried on
+// Gemini, a timeout never reaches deepseek, and a 400/401/403 is what
+// hands over to deepseek when it is listed.)
 
 test('both failing → AI_FAILED, and deepseek is tried once, on deepseek-flash only (no deepseek-v4-pro retry)', async () => {
-  const fake = fakeFetch({ gemini: () => status(503), deepseek: () => status(503) });
+  const fake = fakeFetch({ gemini: () => status(401), deepseek: () => status(503) });
   await assert.rejects(read(['gemini', 'deepseek'], fake), e => e.code === 'AI_FAILED');
-  assert.equal(fake.calls.gemini.length, 1);
-  assert.deepStrictEqual(fake.calls.deepseek.map(c => c.body.model), ['deepseek-flash']);
+  assert.equal(fake.calls.gemini.length, 1, 'a Gemini 401 is never retried');
+  assert.deepStrictEqual(fake.calls.deepseek.map(c => c.body.model), ['deepseek-flash'],
+    `after a Gemini 401, deepseek-flash once; deepseek got ${JSON.stringify(fake.calls.deepseek.map(c => c.body.model))}`);
 });
 
-test('stage safety: a fatal Gemini 400 or 401 still falls back to a recorded fixture for the key, without asking deepseek', async () => {
+test('stage safety: a Gemini 400 or 401 still falls back to a recorded fixture for the key: at once with Gemini alone, after deepseek-flash fails too when it is listed', async () => {
   const sha = crypto.createHash('sha256').update(Buffer.from(B64, 'base64')).digest('hex');
   const reading = {
     board: { visible: true, cols: 63, rails: { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' }, split: false },
@@ -359,16 +428,23 @@ test('stage safety: a fatal Gemini 400 or 401 still falls back to a recorded fix
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'photo-reader-fixture-'));
   try {
     fs.writeFileSync(path.join(dir, `${sha}.json`), JSON.stringify({ sample: null, sha256: sha, reading, provider: 'gemini', model: 'gemini-recorded' }));
+    const cases = [
+      ['Gemini alone', ['gemini'], 0],
+      ['gemini,deepseek, deepseek-flash 503', ['gemini', 'deepseek'], 1],
+    ];
     for (const code of [400, 401]) {
-      const fake = fakeFetch({ gemini: () => status(code), deepseek: () => deepseekSays({ rails: RAILS, items: [] }) });
-      provider('gemini');
-      const out = await Reader.readPhoto({ image: IMG, grid: GRID }, { providers: ['gemini', 'deepseek'], fetch: fake.fetch, fixturesDir: dir });
-      assert.equal(out.provider, 'fixture', `gemini ${code}`);
-      assert.equal(out.fallback, true, `gemini ${code}`);
-      assert.equal(out.key, sha, `gemini ${code}: key`);
-      assert.deepStrictEqual(out.reading, reading, `gemini ${code}: the fixture's Reading`);
-      assert.equal(fake.calls.gemini.length, 1, `gemini ${code}`);
-      assert.equal(fake.calls.deepseek.length, 0, `gemini ${code}: a bad request or key must not fall back to deepseek`);
+      for (const [list, names, deepseekCalls] of cases) {
+        const what = `gemini ${code}, ${list}`;
+        const fake = fakeFetch({ gemini: () => status(code), deepseek: () => status(503) });
+        provider('gemini');
+        const out = await Reader.readPhoto({ image: IMG, grid: GRID }, { providers: names, fetch: fake.fetch, fixturesDir: dir });
+        assert.equal(out.provider, 'fixture', what);
+        assert.equal(out.fallback, true, what);
+        assert.equal(out.key, sha, `${what}: key`);
+        assert.deepStrictEqual(out.reading, reading, `${what}: the fixture's Reading`);
+        assert.equal(fake.calls.gemini.length, 1, `${what}: a bad request or key is never retried`);
+        assert.equal(fake.calls.deepseek.length, deepseekCalls, `${what}: deepseek called ${fake.calls.deepseek.length} times`);
+      }
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -382,17 +458,24 @@ test('log hygiene: no logged line carries an API key, the image, or the models\'
   }
   // Short markers: Node's JSON.parse error quotes only ~10 characters around
   // the bad token, so a longer one would be cut and slip past the check.
-  const MARKERS = ['ZQXPRIV1', 'ZQXHTML', 'ZQXDEEP3'];
-  const html = () => new Response('<html>ZQXHTML</html>', { status: 200, headers: { 'content-type': 'text/html' } });
+  const MARKERS = ['ZQXPRIV1', 'ZQXHTML', 'ZQXDEEP3', 'ZQX5034'];
+  const html = () => ({ ...reply(200, '<html>ZQXHTML</html>'), headers: new Headers({ 'content-type': 'text/html' }) });
+  // #172: Gemini's failures are retried on the fake clock until the round
+  // gives up; deepseek's replies are reached through a Gemini 401.
   const cases = [
-    ['gemini invalid JSON, deepseek invalid JSON', () => geminiSays('{"items":[ ZQXPRIV1 ]}'), () => deepseekSays('{"items":[ ZQXDEEP3 ]}')],
-    ['gemini 200 with an HTML body, deepseek 503', html, () => status(503)],
-    ['gemini 503, deepseek 200 with an HTML body', () => status(503), html],
+    ['gemini invalid JSON every time', () => geminiOK('{"items":[ ZQXPRIV1 ]}'), null],
+    ['gemini 200 with an HTML body every time', html, null],
+    ['gemini 503 with a detail every time', () => reply(503, 'ZQX5034 upstream detail'), null],
+    ['gemini 401, deepseek invalid JSON', () => fails(401), () => deepseekOK('{"items":[ ZQXDEEP3 ]}')],
+    ['gemini 401, deepseek 200 with an HTML body', () => fails(401), html],
   ];
   for (const [what, gemini, deepseek] of cases) {
-    const fake = fakeFetch({ gemini, deepseek });
-    await assert.rejects(read(['gemini', 'deepseek'], fake), e => e.code === 'AI_FAILED', what);
-    assert.equal(fake.calls.deepseek.length, 1, `${what}: deepseek was not asked`);
+    const fake = clockFetch({ gemini, ...(deepseek ? { deepseek } : {}) });
+    const s = startRead(fake, { providers: deepseek ? ['gemini', 'deepseek'] : ['gemini'] });
+    for (let t = 0; t < 46000 && !s.done; t += 1000) await advance(1000);
+    assert.ok(s.error && ['AI_FAILED', 'AI_TIMEOUT'].includes(s.error.code), `${what}: ${state(s)}`);
+    if (deepseek) assert.equal(fake.calls.deepseek.length, 1, `${what}: deepseek was not asked (${tally(fake)})`);
+    vi.useRealTimers();
   }
   for (const line of logs) {
     for (const secret of [GEMINI_KEY, DEEPSEEK_KEY, B64.slice(0, 40), ...MARKERS]) {
@@ -515,7 +598,7 @@ test('#157 bug: a sample with a recording is answered from it straight away in l
     await withFixtures({ [id]: { sample: id, sha256: null, reading: SAVED, provider: 'gemini', model: 'gemini-recorded-1' } }, async dir => {
       const fake = fakeFetch({ gemini, deepseek: () => deepseekSays(ONE_LED) });
       const started = Date.now();
-      // No providers option: the default list, gemini,deepseek, as the route reads it.
+      // No providers option: the default list (gemini alone since #172), as the route reads it.
       const out = await Reader.readPhoto({ image: IMG, grid: GRID, sample: id }, { fetch: fake.fetch, fixturesDir: dir, deadlineMs: 1000 });
       const ms = Date.now() - started;
       assert.equal(out.provider, 'fixture', `${what}: answered by ${out.provider} (${out.model}), not the sample's recording`);
@@ -581,13 +664,240 @@ test('pin (#157): an image with no sample (absent, undefined, null or \'\') whos
       assert.equal(live.provider, 'gemini', `${what}: a working Gemini answers before the image's recording`);
       assert.equal(live.key, IMG_SHA, `${what}: key`);
 
-      const down = fakeFetch({ gemini: () => status(503), deepseek: () => status(503) });
+      // A Gemini 401 hands over to deepseek at once (#172: a 503 would be retried on Gemini for seconds).
+      const down = fakeFetch({ gemini: () => status(401), deepseek: () => status(503) });
       const last = await Reader.readPhoto({ image: IMG, grid: GRID, ...extra }, { providers: ['gemini', 'deepseek'], fetch: down.fetch, fixturesDir: dir });
-      assert.deepStrictEqual([down.calls.gemini.length, down.calls.deepseek.length], [1, 1], `${what}: both providers are tried before the recording`);
+      assert.deepStrictEqual([down.calls.gemini.length, down.calls.deepseek.length], [1, 1],
+        `${what}: both providers are tried before the recording; got gemini ×${down.calls.gemini.length}, deepseek ×${down.calls.deepseek.length}`);
       assert.equal(last.provider, 'fixture', what);
       assert.equal(last.fallback, true, `${what}: the image's recording is a fallback`);
       assert.equal(last.model, 'gemini-recorded-1', what);
       assert.deepStrictEqual(last.reading, SAVED, what);
     }
   });
+});
+
+// ── 9. Gemini survives a slow or overloaded moment (#172) ───────────────────
+// A real lab-board photo failed on dev: Gemini stalled past the 25 s per-call
+// cap, deepseek-flash got the last 20 s and failed too, and the request ended
+// AI_TIMEOUT at 45 s. Measured that day: Gemini answers in ~1 s but stalls
+// 9–16 s at times and returns 503s under load. So the box round is Gemini's
+// alone, with the whole 45 s, retrying overload fast and resending a stall.
+
+const RESISTOR = { rails: RAILS, items: [{ type: 'resistor', value: '470', conf: 0.8, box_2d: [300, 100, 400, 250] }] };
+
+test('#172 bug: a Gemini that never answers ends AI_TIMEOUT at the 45 s deadline with every call aborted, and deepseek is never asked: PHOTO_PROVIDERS unset (Gemini alone) or gemini,deepseek (never after a timeout)', async () => {
+  for (const [what, list] of [['PHOTO_PROVIDERS unset', undefined], ['PHOTO_PROVIDERS=gemini,deepseek', 'gemini,deepseek']]) {
+    if (list === undefined) delete process.env.PHOTO_PROVIDERS;
+    else process.env.PHOTO_PROVIDERS = list;
+    const fake = clockFetch({ gemini: () => HANG, deepseek: () => deepseekOK(ONE_LED) });
+    const s = startRead(fake);   // no providers, no deadlineMs: the defaults, as the route calls it
+    await flush();
+    await advance(44999);
+    assert.equal(fake.calls.deepseek.length, 0,
+      `${what}: a Gemini timeout fell through to deepseek (${tally(fake)}; ${state(s)}); deepseek follows only a 400/401/403`);
+    assert.equal(s.done, false, `${what}: readPhoto ended before the 45 s deadline: ${state(s)}`);
+    await advance(1);
+    assert.ok(s.done && s.error && s.error.code === 'AI_TIMEOUT', `${what}: at 45 s the request ends AI_TIMEOUT: ${state(s)}`);
+    assert.ok(fake.calls.gemini.length <= 4, `${what}: ${tally(fake)}, at most 4 Gemini calls in a round`);
+    for (const c of fake.calls.gemini) assert.ok(c.signal && c.signal.aborted, `${what}: Gemini call ${c.n} (sent at ${c.at} ms) was not aborted at the deadline`);
+    vi.useRealTimers();
+  }
+});
+
+test('#172 bug: no 25 s cap per Gemini call: a Gemini that answers 30 s after each call is the answer (default providers and deadline), and deepseek is never asked', async () => {
+  const fake = clockFetch({ gemini: () => later(30000, geminiOK(ONE_LED)), deepseek: () => deepseekOK(RESISTOR) });
+  const s = startRead(fake);
+  await flush();
+  await advance(29999);
+  assert.equal(s.done, false, `readPhoto ended before Gemini's answer at 30 s: ${state(s)} (${tally(fake)})`);
+  await advance(1);
+  assert.ok(s.done && s.value, `Gemini answered at 30 s, inside the 45 s: ${state(s)}`);
+  assert.equal(s.value.provider, 'gemini', state(s));
+  assert.equal(s.value.model, DEFAULT_MODEL);
+  assert.deepStrictEqual(kinds(s.value), ['led'], 'Gemini\'s answer');
+  assert.equal(fake.calls.deepseek.length, 0, tally(fake));
+});
+
+test('#172 bug: a 503, 500, 502, 429, network error, empty reply or invalid JSON is retried on Gemini 1–2 s later, the same request, and its answer wins; deepseek is never asked, even when listed', async () => {
+  const RETRYABLE = [
+    ['a 503', () => fails(503)],
+    ['a 500', () => fails(500)],
+    ['a 502', () => fails(502)],
+    ['a 429 with no retry delay', () => fails(429)],
+    ['a network error', () => { throw new TypeError('fetch failed'); }],
+    ['no candidates', () => reply(200, { candidates: [] })],
+    ['an empty text', () => geminiOK('')],
+    ['invalid JSON', () => geminiOK('I am not sure what I am looking at.')],
+  ];
+  for (const [what, bad] of RETRYABLE) {
+    const fake = clockFetch({ gemini: c => (c.n === 1 ? bad() : geminiOK(ONE_LED)), deepseek: () => deepseekOK(RESISTOR) });
+    const s = startRead(fake, { providers: ['gemini', 'deepseek'] });
+    await flush();
+    await advance(999);
+    assert.equal(fake.calls.gemini.length, 1, `${what}: retried sooner than 1 s after the failure`);
+    await advance(1001);
+    assert.equal(fake.calls.gemini.length, 2, `${what}: Gemini was not retried within 2 s of the failure (${tally(fake)}; ${state(s)})`);
+    const [first, retry] = fake.calls.gemini;
+    assert.ok(retry.at >= 1000 && retry.at <= 2000, `${what}: the retry went out at ${retry.at} ms, not 1–2 s after the failure`);
+    assert.equal(retry.url, first.url, what);
+    assert.deepStrictEqual(retry.body, first.body, `${what}: the retry is the same request`);
+    assert.ok(s.done && s.value, `${what}: the retry's answer ends the round: ${state(s)}`);
+    assert.equal(s.value.provider, 'gemini', `${what}: ${state(s)}`);
+    assert.equal(s.value.fallback, false, `${what}: Gemini, the first provider listed, answered`);
+    assert.deepStrictEqual(kinds(s.value), ['led'], `${what}: the retry's answer`);
+    assert.equal(fake.calls.deepseek.length, 0, `${what}: deepseek was asked (${tally(fake)}); it follows only a 400/401/403`);
+    vi.useRealTimers();
+  }
+});
+
+// The usual wait is 1–2 s, so the retryDelay here is outside it (3.5 s), or
+// the test couldn't tell the two apart.
+test('#172: a 429 whose body carries a google.rpc.RetryInfo retryDelay ("3.5s") is retried after that delay, not the usual 1–2 s', async () => {
+  const quota = reply(429, { error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'Resource has been exhausted (e.g. check quota).',
+    details: [{ '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '3.5s' }] } });
+  const fake = clockFetch({ gemini: c => (c.n === 1 ? quota : geminiOK(ONE_LED)) });
+  const s = startRead(fake, { providers: ['gemini'] });
+  await flush();
+  await advance(3499);
+  assert.equal(fake.calls.gemini.length, 1, `retried at ${fake.calls.gemini.length > 1 ? fake.calls.gemini[1].at : '?'} ms, before the 3.5 s Gemini asked for`);
+  await advance(251);
+  assert.equal(fake.calls.gemini.length, 2, `not retried by 3.75 s, after Gemini's retryDelay of 3.5 s (${state(s)})`);
+  assert.ok(s.done && s.value && s.value.provider === 'gemini', state(s));
+});
+
+test('#172 bug: a Gemini call with no answer after PHOTO_HEDGE_MS (default 12 s) gets one identical call alongside; the first good answer wins and the other call is aborted', async () => {
+  const cases = [
+    ['the second call answers at once', n => (n === 1 ? HANG : geminiOK(RESISTOR)), ['resistor'], 1],
+    ['the first call answers at 13 s, after the second went out', n => (n === 1 ? later(13000, geminiOK(ONE_LED)) : HANG), ['led'], 2],
+  ];
+  for (const [what, gemini, want, loser] of cases) {
+    const fake = clockFetch({ gemini: c => gemini(c.n) });
+    const s = startRead(fake, { providers: ['gemini'] });
+    await flush();
+    await advance(11999);
+    assert.equal(fake.calls.gemini.length, 1, `${what}: a second call went out before 12 s`);
+    await advance(1);
+    assert.equal(fake.calls.gemini.length, 2, `${what}: the call had no answer at 12 s and no second call went out (${state(s)})`);
+    const [a, b] = fake.calls.gemini;
+    assert.equal(b.url, a.url, what);
+    assert.equal(b.headers.get('x-goog-api-key'), a.headers.get('x-goog-api-key'), what);
+    assert.deepStrictEqual(b.body, a.body, `${what}: the second call is identical`);
+    await advance(1000);
+    assert.ok(s.done && s.value, `${what}: ${state(s)}`);
+    assert.deepStrictEqual(kinds(s.value), want, `${what}: the first good answer wins`);
+    const lost = fake.calls.gemini[loser - 1];
+    assert.ok(lost.signal && lost.signal.aborted, `${what}: call ${loser} lost the race and was not aborted`);
+    await advance(46000);
+    assert.equal(fake.calls.gemini.length, 2, `${what}: ${tally(fake)}; one stall gets one extra call`);
+    vi.useRealTimers();
+  }
+
+  process.env.PHOTO_HEDGE_MS = '3000';
+  const fake = clockFetch({ gemini: c => (c.n === 1 ? HANG : geminiOK(ONE_LED)) });
+  const s = startRead(fake, { providers: ['gemini'] });
+  await flush();
+  await advance(2999);
+  assert.equal(fake.calls.gemini.length, 1, 'PHOTO_HEDGE_MS=3000: a second call went out before 3 s');
+  await advance(1);
+  assert.equal(fake.calls.gemini.length, 2, `PHOTO_HEDGE_MS=3000: no second call at 3 s (${state(s)})`);
+  assert.ok(s.done && s.value && s.value.provider === 'gemini', state(s));
+});
+
+test('#172: a Gemini 400, 401 or 403 is never retried: Gemini alone → AI_FAILED at once after 1 call; with PHOTO_PROVIDERS=gemini,deepseek, deepseek-flash is asked next and answers', async () => {
+  for (const code of [400, 401, 403]) {
+    delete process.env.PHOTO_PROVIDERS;
+    const only = clockFetch({ gemini: () => fails(code) });
+    const s1 = startRead(only, { providers: ['gemini'] });
+    await flush();
+    assert.ok(s1.done && s1.error && s1.error.code === 'AI_FAILED', `${code}, Gemini alone: a bad request or key ends the round at once: ${state(s1)}`);
+    await advance(46000);
+    assert.equal(only.calls.gemini.length, 1, `${code}, Gemini alone: Gemini was called ${only.calls.gemini.length} times; a 400/401/403 is never retried`);
+    vi.useRealTimers();
+
+    process.env.PHOTO_PROVIDERS = 'gemini,deepseek';
+    const both = clockFetch({ gemini: () => fails(code), deepseek: () => deepseekOK(ONE_LED) });
+    const s2 = startRead(both);   // the list from PHOTO_PROVIDERS, as the route reads it
+    await flush();
+    assert.equal(both.calls.deepseek.length, 1, `${code} with PHOTO_PROVIDERS=gemini,deepseek: deepseek-flash was not asked after it (${tally(both)}; ${state(s2)})`);
+    assert.equal(both.calls.deepseek[0].body.model, 'deepseek-flash');
+    assert.ok(s2.done && s2.value, `${code}: ${state(s2)}`);
+    assert.equal(s2.value.provider, 'deepseek', `${code}: ${state(s2)}`);
+    assert.equal(s2.value.fallback, true, `${code}: deepseek is not the first provider listed`);
+    assert.deepStrictEqual(kinds(s2.value), ['led'], `${code}: deepseek-flash's answer`);
+    await advance(46000);
+    assert.equal(both.calls.gemini.length, 1, `${code} with gemini,deepseek: Gemini was called ${both.calls.gemini.length} times; a 400/401/403 is never retried`);
+    vi.useRealTimers();
+  }
+});
+
+test('#172: at most 4 Gemini calls in a box round: a Gemini that fails every time is called exactly 4 times, then AI_FAILED long before the deadline; with stalls in the mix, never more than 4', async () => {
+  const always = [
+    ['503 every time', () => fails(503)],
+    ['a network error every time', () => { throw new TypeError('fetch failed'); }],
+    ['invalid JSON every time', () => geminiOK('There is no breadboard I can see.')],
+  ];
+  for (const [what, gemini] of always) {
+    const fake = clockFetch({ gemini });
+    const s = startRead(fake, { providers: ['gemini'] });
+    await flush();
+    for (let t = 0; t < 10000; t += 500) await advance(500);
+    assert.equal(fake.calls.gemini.length, 4, `${what}: Gemini was called ${fake.calls.gemini.length} times in 10 s; each failure is retried after 1–2 s, up to 4 calls (${state(s)})`);
+    assert.ok(s.done && s.error && s.error.code === 'AI_FAILED', `${what}: after the 4th call failed the round has nothing left to try: ${state(s)}`);
+    await advance(40000);
+    assert.equal(fake.calls.gemini.length, 4, `${what}: ${tally(fake)}`);
+    vi.useRealTimers();
+  }
+
+  const mixed = [
+    ['every call hangs', () => HANG],
+    ['the first call hangs, every other one is a 503', c => (c.n === 1 ? HANG : fails(503))],
+    ['every call answers a 503 after 13 s', () => later(13000, fails(503))],
+  ];
+  for (const [what, gemini] of mixed) {
+    const fake = clockFetch({ gemini });
+    const s = startRead(fake, { providers: ['gemini'] });
+    await flush();
+    for (let t = 0; t < 46000; t += 500) await advance(500);
+    assert.ok(s.done, `${what}: the round did not end by the 45 s deadline`);
+    assert.ok(fake.calls.gemini.length <= 4, `${what}: Gemini was called ${fake.calls.gemini.length} times (at ${fake.calls.gemini.map(c => c.at).join(', ')} ms); at most 4 in a round`);
+    vi.useRealTimers();
+  }
+});
+
+// Review fix: when Gemini spends its 4 calls on 503s (or network errors),
+// deepseek-flash, though listed, is not asked: it would only burn the time
+// left (#172: deepseek follows a 400/401/403 alone). An image whose hash has
+// a recording still gets that recording.
+test('#172: PHOTO_PROVIDERS=gemini,deepseek, a Gemini that answers 503 (or a network error) every time → exactly 4 Gemini calls, no deepseek, AI_FAILED well before 45 s; with a recording for the image, the recording answers and deepseek is still never asked', async () => {
+  const rows = [
+    ['503 every time', () => fails(503)],
+    ['a network error every time', () => { throw new TypeError('fetch failed'); }],
+  ];
+  for (const [what, gemini] of rows) {
+    for (const recorded of [false, true]) {
+      const label = `${what}, ${recorded ? 'a recording for the image hash' : 'no recording'}`;
+      await withFixtures(recorded ? { [IMG_SHA]: { sample: null, sha256: IMG_SHA, reading: SAVED, provider: 'gemini', model: 'gemini-recorded-1' } } : {}, async dir => {
+        process.env.PHOTO_PROVIDERS = 'gemini,deepseek';
+        const fake = clockFetch({ gemini, deepseek: () => deepseekOK(ONE_LED) });
+        const s = startRead(fake, { fixturesDir: dir });   // no sample: the image's hash is its key
+        await flush();
+        for (let t = 0; t < 10000 && !s.done; t += 500) await advance(500);
+        assert.equal(fake.calls.deepseek.length, 0, `${label}: deepseek was asked after Gemini spent its calls (${tally(fake)}; ${state(s)}); it follows only a 400/401/403`);
+        assert.equal(fake.calls.gemini.length, 4, `${label}: ${tally(fake)}; each failure is retried 1–2 s later, up to 4 calls`);
+        assert.ok(s.done, `${label}: the round had not ended 10 s in, long after its 4th call failed: ${state(s)}`);
+        if (recorded) {
+          assert.ok(s.value, `${label}: the image's recording should answer: ${state(s)}`);
+          assert.equal(s.value.provider, 'fixture', `${label}: ${state(s)}`);
+          assert.equal(s.value.fallback, true, `${label}: the recording is a fallback`);
+          assert.deepStrictEqual(s.value.reading, SAVED, `${label}: the recorded Reading`);
+        } else {
+          assert.ok(s.error && s.error.code === 'AI_FAILED', `${label}: ${state(s)}`);
+        }
+        await advance(40000);
+        assert.deepStrictEqual([fake.calls.gemini.length, fake.calls.deepseek.length], [4, 0], `${label}: nothing else went out by the deadline (${tally(fake)})`);
+        vi.useRealTimers();
+      });
+    }
+  }
 });

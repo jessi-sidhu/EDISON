@@ -21,9 +21,9 @@ If you are an agent: your job is the issue in front of you, nothing more. When t
 - **`dev`** is the workspace.
   - Work on a local branch off `dev`, in its own worktree at `.worktrees/<n>` (`/start-task` makes both). The main checkout stays on `dev`.
   - `/ship` runs the checks, rebases onto the latest `dev`, and pushes straight to `dev`. No PR, and no waiting on a person.
-  - CI runs on every push to `dev`. If it goes red, whoever broke it fixes it first.
+  - CI is off (#165: no Actions minutes left on a private repo). `/ship`'s local checks are the gate, so never push without them. If `dev` breaks, whoever broke it fixes it first.
 - **`main`** is tested and demo-ready.
-  - `/promote`: CI green on `dev`, then a quick walk of the demo path in a browser, then a `dev → main` PR merged by whoever runs it.
+  - `/promote`: the local checks (lint, unit, full browser suite) on `dev`, then a quick walk of the demo path in a browser, then a `dev → main` PR merged by whoever runs it.
   - Promote at natural points: the end of each build day, sprint checkpoints, and before judging.
   - Nothing reaches `main` any other way.
 - **`/qa-pass`** is the full QA script with real AI prompts. It's for checkpoints (about once a day, and before submitting), not every promotion. It files `bug` issues.
@@ -76,7 +76,7 @@ The app is `Plugged/`. Its commands, code rules and gotchas are in `Plugged/AGEN
 
 ## Merging
 - **Into `dev`:** `/ship` pushes once lint, unit tests and (for UI changes) browser tests pass.
-- **Into `main`:** only `/promote`. It merges its own PR once `dev` is green and the demo path works.
+- **Into `main`:** only `/promote`. It merges its own PR once the local checks pass on `dev` and the demo path works.
 
 ## Gotchas
 <!-- Add one line each time an agent makes the same mistake twice. Say what to do instead. -->
