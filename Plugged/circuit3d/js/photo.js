@@ -13,7 +13,9 @@
 //    A chosen photo whose SHA-256 is in a sample's `match` (#17): the same
 //         corner step (the sample's own file if it won't decode, a HEIC),
 //         then Looks right builds that sample's board as its tile does, and
-//         window.PhotoCanned = its canned answers for chat.js (no /api/photo)
+//         window.PhotoCanned = its canned answers for chat.js (no /api/photo).
+//         With a recorded `reading` (#20), READING then the confirm screen on
+//         it (flattened with her grid, no crop round); Build it → the board
 //    📷 → Use sample photo (or the error card's) → the sample picker
 //         (#photo-samples, #182): a tile per offered window.PhotoSamples
 //         entry (all but offered: false, #200), its photo, title and credit
@@ -21,7 +23,9 @@
 //         it, nothing sent. One offered sample: no picker, straight to it.
 //         A sample with a `board` (#15): its photo as it is, under
 //         "Reading your board…" for SAMPLE_READ_MS, then that board straight
-//         to Build it's path below (no /api/photo, no confirm screen)
+//         to Build it's path below (no /api/photo, no confirm screen).
+//         With a `board` and a `reading` (#22): the corner step on its photo,
+//         then Looks right as for a rehearsed upload of it (above)
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
 //    → the Reading opens the confirm screen (PhotoConfirm.open) at once, on
 //      the same flattened image, with the box round's placeholders (#173),
@@ -58,7 +62,7 @@
   const PHOTO_PAGE_TIMEOUT_MS = 60000;   // above the server's 45 s PHOTO_TIMEOUT_MS
   const PHOTO_LEADS_PAGE_TIMEOUT_MS = 45000;   // the server's 40 s PHOTO_LEADS_TIMEOUT_MS plus the upload
   const MAX_SIDE  = 3000;                // the original is resized to this before flattening
-  const SAMPLE_READ_MS = 1000;           // a board sample's photo under READING, then its board (#15)
+  const SAMPLE_READ_MS = 7000;           // a board sample's photo under READING, then its board (#15; 7 s since #19)
   const READING   = 'Reading your board…';
   const DEFAULT_Q = "What's wrong with my circuit?";       // Build it with nothing typed
   // docs/API-CONTRACT.md → "POST /api/photo" → Errors
@@ -151,7 +155,13 @@
     if (!im && match) im = await loadImage(window.PhotoSamples[match].file).catch(() => null);   // a HEIC: its sample's own photo
     if (my !== job) return;
     if (!im) return showStatus(BAD_IMAGE, true);
-    rehearsed = match;
+    tapCorners(im, match);
+  }
+
+  // The corner step on a loaded photo. sample: the rehearsed sample whose
+  // board Looks right builds (#17, #22), or null for /api/photo.
+  function tapCorners(im, sample) {
+    rehearsed = sample;
     img = im;
     taps = [];
     corners.hidden = false;
@@ -429,27 +439,40 @@
     picker.hidden = false;
   }
 
+  // A sample with a `board` and a recorded `reading` (#22): the corner step on
+  // its photo, then Looks right as for a rehearsed upload of it.
   async function sendSample(id) {
     const my = nextJob();
     open();
-    showStatus(READING, false);
-    const s  = window.PhotoSamples[id];
+    const s   = window.PhotoSamples[id];
+    const tap = Boolean(s.board && s.reading);
+    if (!tap) showStatus(READING, false);
     const im = await loadImage(s.file).catch(() => null);
     if (my !== job) return;
     if (!im) return showStatus(AI_FAILED, true);
+    if (tap) { colsEl.value = String(s.cols); return tapCorners(im, id); }
     if (s.board) return buildBoard(my, im, id);
     Capture.grid = PhotoGrid.homography(s.taps, s.cols);
     send(im, Capture.grid, id);
   }
 
   // A hard-coded board (#15): its photo as it is under READING for
-  // SAMPLE_READ_MS, then the board exactly. No /api/photo, no confirm screen;
-  // Escape or Cancel meanwhile (a new job) builds nothing.
-  async function buildBoard(my, im, id) {
+  // SAMPLE_READ_MS, then the board exactly. No /api/photo; Escape or Cancel
+  // meanwhile (a new job) builds nothing. A rehearsed upload (her grid) of a
+  // sample with a recorded `reading` (#20) opens that on the confirm screen
+  // first, flattened as send() does, no crop round; its Build it builds the board.
+  async function buildBoard(my, im, id, grid) {
+    const s = window.PhotoSamples[id];
+    const board = () => built({ actions: s.board, flags: [], labels: {}, skipped: [], sample: id });
     showPhoto(im);
     await new Promise(r => setTimeout(r, SAMPLE_READ_MS));
     if (my !== job) return;
-    built({ actions: window.PhotoSamples[id].board, flags: [], labels: {}, skipped: [], sample: id });
+    if (!(grid && s.reading)) return board();
+    const flat = flatten(downsize(im, grid), grid);
+    corners.hidden = true;
+    showStatus('', false);
+    credit.textContent = s.credit || '';
+    PhotoConfirm.open(structuredClone(s.reading), flat, grid, board);
   }
 
   // The corner step's canvas alone, showing the photo: no prompt, no
@@ -483,7 +506,7 @@
     if (!Capture.grid) return;
     if (!rehearsed) return send(img, Capture.grid, null);
     showStatus(READING, false);                            // a rehearsed photo (#17): its sample's board, as its tile builds it
-    buildBoard(nextJob(), img, rehearsed);
+    buildBoard(nextJob(), img, rehearsed, Capture.grid);   // her grid: a recorded reading's confirm screen (#20)
   });
   colsEl.addEventListener('change', () => { if (img) update(); });
   $('photo-cancel').addEventListener('click', close);

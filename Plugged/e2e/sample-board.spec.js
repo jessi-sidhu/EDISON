@@ -1,5 +1,5 @@
 // 📷 a sample with a hard-coded board (issue #15): the LEDs-and-buttons tile
-// shows its photo with "Reading your board…" for about a second, then builds
+// shows its photo with "Reading your board…" for about 7 seconds, then builds
 // the sample's own `board` exactly, with no confirm screen, no /api/photo
 // and no AI reading. /api/ask is stubbed (the build asks Edison), so nothing
 // reaches an AI. Guest only; Google sign-in stays a manual QA case.
@@ -15,17 +15,23 @@
 //     is, not flattened (a visible <img> of its file, or a canvas drawn with
 //     it at the photo's own aspect ratio), and #photo-status reads "Reading
 //     your board…". The board stays as it was; no confirm screen.
-//   - SAMPLE_READ_MS (1000) later, photo.js's built({ actions: s.board,
+//   - SAMPLE_READ_MS (7000, #19) later, photo.js's built({ actions: s.board,
 //     flags: [], labels: {}, skipped: [] }): the overlay closes,
 //     SparkyChat.applyBuild puts the board on (one note, one undo step), the
 //     simulation runs, and Edison is asked "What's wrong with my circuit?"
 //     (nothing typed). Nothing is posted to /api/photo.
-//   - Escape (or Cancel) during that second closes the overlay and builds
+//   - Escape (or Cancel) during those 7 seconds closes the overlay and builds
 //     nothing (photo.js's job guard).
-//   - The ensc-lab tile (#16), Aarmen's ENSC 220 bench photo, builds its
-//     board the same way: U1 (a TL072), PS1, FG1 and R1–R3. Its wire ends on
-//     PS1 and FG1 may be written by pin name or index (PS1.pos or PS1.0);
-//     the page exports indices, so the board is compared by pin name.
+//   - The ensc-lab tile (#16), Aarmen's ENSC 220 bench photo, has a board and
+//     a recorded `reading` (#22), so it runs as a rehearsed upload of its
+//     photo: the corner step on it (#photo-corners, the prompt asking for a1,
+//     aN, jN, j1 in turn), Looks right → "Reading your board…" for
+//     SAMPLE_READ_MS → the confirm screen (#photo-confirm) with a
+//     #photo-parts row [data-id] per reading part and wire, the board still
+//     empty → Build it (#photo-build) builds its board: U1 (a TL072), PS1,
+//     FG1 and R1–R3. Its wire ends on PS1 and FG1 may be written by pin name
+//     or index (PS1.pos or PS1.0); the page exports indices, so the board is
+//     compared by pin name.
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
@@ -36,12 +42,15 @@ const ID        = 'leds-buttons';
 const LAB       = 'ensc-lab';                             // issue #16
 const READING   = 'Reading your board…';                // photo.js READING
 const DEFAULT_Q = "What's wrong with my circuit?";
-const READ_MS   = 1000;                                   // photo.js SAMPLE_READ_MS
+const READ_MS   = 7000;                                   // photo.js SAMPLE_READ_MS (#19)
 const BUILT_NOTE = n => `Built ${n} parts from your photo. Undo (Ctrl+Z) brings back the empty board.`;
 // Photo 2's own size: the sample file is a byte copy of it (test/sample-boards.test.js).
 // A photo of her own, for the corner step after a board sample.
 const CHOSEN = path.join(__dirname, 'fixtures', 'photo.jpg');
 const PHOTO = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'photo', 'web', 'photos.json'), 'utf8')).p2_leds_buttons;
+// samples/ensc-lab.jpg's size, and its corner holes in its own pixels (#22).
+const LAB_PHOTO   = { width: 1030, height: 500 };
+const LAB_CORNERS = [['a1', [887, 227]], ['a63', [103, 210]], ['j63', [98, 347]], ['j1', [887, 367]]];
 
 function watchErrors(page) {
   const errors = [];
@@ -97,7 +106,7 @@ const boardNow = page => page.evaluate(() => App.exportBoard()).then(shape);
 // ── The picker ─────────────────────────────────────────────────────────────
 
 test('Use sample photo shows a picker of 4 tiles, demo-board, ensc-lab, leds-buttons and thandi-blinker, each with its photo, title and credit; Escape while leds-buttons reads builds nothing', async ({ page }) => {
-  test.setTimeout(60_000);   // software WebGL
+  test.setTimeout(60_000 + READ_MS);   // software WebGL, and the read
   const errors = watchErrors(page);
   const api = await watchApi(page);
   await openEditor(page);
@@ -115,13 +124,13 @@ test('Use sample photo shows a picker of 4 tiles, demo-board, ensc-lab, leds-but
       { message: `the ${id} tile's photo is its file, loaded` }).toEqual({ path: `/circuit3d/${samples[id].file}`, loaded: true });
   }
 
-  // Escape during the reading second: nothing is built, Edison isn't asked.
+  // Escape during the reading: nothing is built, Edison isn't asked.
   await tile(page, ID).click();
   await expect(page.locator('#photo-status'), 'the tile shows the reading status').toHaveText(READING);
-  await expect(page.locator('#photo-corners'), 'its photo is up: the reading second has begun').toBeVisible();
+  await expect(page.locator('#photo-corners'), 'its photo is up: the reading has begun').toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('#photo-modal'), 'Escape closes the overlay').toBeHidden();
-  await page.waitForTimeout(READ_MS * 2);                // well past the reading second
+  await page.waitForTimeout(READ_MS + 3000);             // well past the reading
   expect(await boardNow(page), 'Escape while reading builds nothing').toEqual({ parts: [], wires: [] });
   expect(api.asks, 'and asks Edison nothing').toEqual([]);
   expect(api.photo, 'a board sample never posts to /api/photo').toEqual([]);
@@ -131,7 +140,7 @@ test('Use sample photo shows a picker of 4 tiles, demo-board, ensc-lab, leds-but
 // ── Photo, then board ──────────────────────────────────────────────────────
 
 test('the leds-buttons tile shows its photo with "Reading your board…", then builds its board (3 LEDs, 3 buttons, R1 and the battery) with no /api/photo and no console error; Edison is asked; one Ctrl+Z empties the board; a photo chosen next gets its corner step back', async ({ page }) => {
-  test.setTimeout(90_000);   // software WebGL
+  test.setTimeout(90_000 + READ_MS);   // software WebGL, and the read
   const errors = watchErrors(page);
   const api = await watchApi(page);
   await openEditor(page);
@@ -147,7 +156,7 @@ test('the leds-buttons tile shows its photo with "Reading your board…", then b
   // What the overlay shows, every 25 ms from the tile's click: the status, the
   // photo it shows (if any), whether the confirm screen is up, and how many
   // parts are on the board.
-  await page.evaluate(({ id, file }) => {
+  await page.evaluate(({ id, file, max }) => {
     const seen = window.__seen = [];
     let clicked = null;
     document.addEventListener('click', e => { if (e.target.closest && e.target.closest(`[data-sample="${id}"]`)) clicked = performance.now(); }, true);
@@ -177,14 +186,14 @@ test('the leds-buttons tile shows its photo with "Reading your board…", then b
                     status: document.getElementById('photo-status').textContent, photo: photo(),
                     confirm: !document.getElementById('photo-confirm').hidden, parts: App.state.components.length });
       }
-      if (seen.length < 400) setTimeout(tick, 25);
+      if (seen.length < max) setTimeout(tick, 25);
     };
     tick();
-  }, { id: ID, file: `/circuit3d/${sample.file}` });
+  }, { id: ID, file: `/circuit3d/${sample.file}`, max: Math.ceil((READ_MS + 9000) / 25) });   // the read and 9 s more
 
   await tile(page, ID).click();
   await expect(page.locator('#photo-status'), 'the tile shows the reading status').toHaveText(READING);
-  await expect(page.locator('#photo-modal'), 'then the overlay closes for the board').toBeHidden({ timeout: 15_000 });
+  await expect(page.locator('#photo-modal'), 'then the overlay closes for the board').toBeHidden({ timeout: READ_MS + 15_000 });
   await expect.poll(() => boardNow(page), { message: 'the page builds the sample\'s board exactly' }).toEqual(shape(want));
 
   // Photo, then board: the photo with the status while the board is still empty.
@@ -201,7 +210,7 @@ test('the leds-buttons tile shows its photo with "Reading your board…", then b
   // under the status well into it. (The build itself can hold the page for
   // seconds on software WebGL, so when the parts show up proves nothing.)
   expect(seen.some(s => s.parts > 0), `the board was built: ${summary}`).toBe(true);
-  expect(reading[reading.length - 1].t, `the status and the empty board last about ${READ_MS} ms: ${summary}`).toBeGreaterThanOrEqual(READ_MS / 2);
+  expect(reading[reading.length - 1].t, `the status and the empty board last about ${READ_MS} ms: ${summary}`).toBeGreaterThanOrEqual(READ_MS - 2000);
 
   // The 3D board: the sample's parts, each drawn in the scene.
   const types = await page.evaluate(() => App.state.components.map(c => c.type).sort());
@@ -236,21 +245,45 @@ test('the leds-buttons tile shows its photo with "Reading your board…", then b
 
 // ── ensc-lab (#16) ─────────────────────────────────────────────────────────
 
-test('the ensc-lab tile builds its board (U1 the TL072, PS1, FG1 and R1–R3, each in the 3D scene) with no /api/photo and no console error; Edison is asked', async ({ page }) => {
-  test.setTimeout(90_000);   // software WebGL
+test('the ensc-lab tile opens the corner step on its photo; 4 taps, Looks right, "Reading your board…", then the confirm screen with its recorded reading; Build it builds its board (U1 the TL072, PS1, FG1 and R1–R3, each in the 3D scene) with no /api/photo and no console error; Edison is asked', async ({ page }) => {
+  test.setTimeout(90_000 + READ_MS);   // software WebGL, and the read
   const errors = watchErrors(page);
   const api = await watchApi(page);
   await openEditor(page);
   const sample = (await samplesOf(page))[LAB];
   expect(sample && Array.isArray(sample.board), `PhotoSamples['${LAB}'] has a board`).toBe(true);
+  expect(sample.reading && Array.isArray(sample.reading.parts), `PhotoSamples['${LAB}'] has a recorded reading (#22)`).toBe(true);
   const { board: want, errors: wrong } = Board.apply(Board.empty(), sample.board);
   expect(wrong, 'the sample\'s board applies in Node').toEqual([]);
   const placed = sample.board.filter(a => typeof a.tool === 'string' && a.tool.startsWith('place_')).length;
 
+  // The tile: the corner step on its photo, as for a chosen photo.
   await openPicker(page);
   await tile(page, LAB).click();
-  await expect(page.locator('#photo-status'), 'the tile shows the reading status').toHaveText(READING);
-  await expect(page.locator('#photo-modal'), 'then the overlay closes for the board').toBeHidden({ timeout: 15_000 });
+  await expect(page.locator('#photo-corners'), 'the tile opens the corner step on its photo').toBeVisible();
+  await expect(page.locator('#photo-prompt'), 'with its prompt, not the photo alone').toBeVisible();
+  await expect(page.locator('#photo-prompt'), 'it asks for a1 first').toContainText(/\ba1\b/);
+  await expect(page.locator('#photo-ok'), 'Looks right shows, waiting for 4 taps').toBeVisible();
+  await expect(page.locator('#photo-ok')).toBeDisabled();
+  for (const [name, [px, py]] of LAB_CORNERS) {
+    await expect(page.locator('#photo-prompt'), `the page asks for ${name}`).toContainText(new RegExp(`\\b${name}\\b`));
+    const box = await page.locator('#photo-canvas').boundingBox();
+    await page.mouse.click(box.x + px * box.width / LAB_PHOTO.width, box.y + py * box.height / LAB_PHOTO.height);
+  }
+
+  // Looks right: the reading, then the confirm screen with the recorded reading; nothing built yet.
+  await page.locator('#photo-ok').click();
+  await expect(page.locator('#photo-status'), 'Looks right shows the reading status').toHaveText(READING);
+  await expect(page.locator('#photo-confirm'), 'then the confirm screen opens').toBeVisible({ timeout: READ_MS + 15_000 });
+  const ids = [...sample.reading.parts, ...sample.reading.wires].map(x => x.id).sort();
+  expect(await page.locator('#photo-parts li[data-id]').evaluateAll(lis => lis.map(li => li.dataset.id).filter(id => !id.startsWith('power:')).sort()),
+    'a labelled row for each part and wire of the recorded reading').toEqual(ids);
+  expect(await boardNow(page), 'the confirm screen builds nothing yet').toEqual({ parts: [], wires: [] });
+  expect(api.asks, 'and asks Edison nothing yet').toEqual([]);
+
+  // Build it: the sample's board, not the reading.
+  await page.locator('#photo-build').click();
+  await expect(page.locator('#photo-modal'), 'Build it closes the overlay').toBeHidden({ timeout: 15_000 });
   await expect.poll(() => boardNow(page), { message: 'the page builds the sample\'s board exactly' }).toEqual(shape(want));
 
   const parts = await page.evaluate(() => App.exportBoard().parts.map(p => [p.label, p.type]).sort((x, y) => x[0].localeCompare(y[0])));

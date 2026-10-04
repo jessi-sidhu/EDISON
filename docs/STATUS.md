@@ -6,10 +6,10 @@
 
 ## Morning of 2026-10-04: read this first (all on `dev` at eb44795; `main` NOT promoted yet)
 Overnight, all shipped to `dev`:
-- **#15** `leds-buttons` and **#16** `ensc-lab` (Aarmen's ENSC 220 bench): hard-coded photo samples. A sample shows its photo with "Reading your board…" for 1 s, then builds a fixed board, with no AI.
+- **#15** `leds-buttons` and **#16** `ensc-lab` (Aarmen's ENSC 220 bench): hard-coded photo samples. A sample shows its photo with "Reading your board…" for 7 s (#19), then builds a fixed board, with no AI.
 - **#17 Thandi's upload (the demo's photo beat):**
   - Upload `~/Downloads/thandi-board-1.jpg` (or `-2` / `-3`; the originals are IMG_2011–2013 in Messages), then tap the 4 corners and press Looks right.
-  - It builds the board **as photographed**: U1 turned around and 2 columns off, and pin 4 (V−) not wired.
+  - "Reading your board…" shows for 7 s (#19). Then the confirm screen shows Gemini's real reading of the photo, recorded once: labelled dots and lines on every part and wire (#20). Build it builds the board **as photographed**: U1 turned around and 2 columns off, and pin 4 (V−) not wired.
   - Edison's first answer names both mistakes. Type **"fix it"**: the canned fix moves U1 to e32 facing left and adds a29 → tn_29. Accept, and the LED blinks.
   - The photo is recognised by its file's SHA-256, so it has to be **that exact file**, picked on localhost. A phone re-save or an http LAN address goes to Gemini instead.
   - The fix triggers on "fix", "correct", "repair" or "solve". It's also a sample tile, as a fallback.
