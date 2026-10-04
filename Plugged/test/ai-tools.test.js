@@ -172,7 +172,11 @@ test('the prompt puts a second battery on the bottom rails (bp_N/bn_N) with its 
 // battery pin can be a wire end by label", "EVERY circuit needs a battery with
 // TWO wires:" and the HOLE NAMES "This label form is only for battery pins."),
 // so they are no longer here; test/bench-supply-ai.test.js checks their
-// replacements.
+// replacements. #85 replaced "When asked to build, fix, or create a circuit:
+// call delete_all FIRST" with the edit-in-place rules, and reworded the
+// parallel recipe's "Add a second LED in parallel" and "Steps 1-8" lines so
+// an existing circuit only gets the new LED; test/edit-in-place.test.js
+// checks those.
 const VERBATIM = [
   `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
   "BREADBOARD LAYOUT:",
@@ -196,7 +200,6 @@ const VERBATIM = [
   "- Rail: \"tp_5\" (positive col 5), \"tn_5\" (GND col 5)",
   "- Other parts: use the body holes they sit in, e.g. \"b3\", never \"<label>.<k>\".",
   "BUILDING BEHAVIOR:",
-  "- When asked to build, fix, or create a circuit: call delete_all FIRST, then rebuild from scratch.",
   "- After building, write 2-3 sentences explaining what you built and how it works.",
   "- When you explain a build with more than one LED, say which topology you built: series, parallel, or separate branches.",
   "CRITICAL WIRING RULES:",
@@ -221,10 +224,8 @@ const VERBATIM = [
   "SERIES vs PARALLEL:",
   "- Parallel: the parts share BOTH nodes. Every LED's anode sits in the same column as the other anodes, and every cathode in the same column as the other cathodes, each in a free row. One resistor can feed them all.",
   "- Series: a chain with one current path. LED1's cathode column is LED2's anode column. Each red LED drops about 2 V, so two in series are dimmer, or need a lower resistor on a low-voltage battery.",
-  "- \"Add a second LED in parallel\" means the parallel recipe below: the new LED goes across the same two columns, NOT a second resistor and its own rail wires.",
   "- Separate branches (each LED with its own resistor and rail wires) ONLY when the user asks for independent LEDs or one resistor each.",
   "RECIPE FOR 2 LEDs IN PARALLEL (one shared resistor, starting at column C):",
-  "  Steps 1-8 of the one-LED recipe, then:",
   "  9. place_led: holeA=d{C+6} (cathode), holeB=d{C+4} (anode)   ← same two columns as LED1, free row d",
   "  Total calls: 9.",
   "RECIPE FOR 2 LEDs IN SERIES (one resistor, starting at column C):",
@@ -258,8 +259,9 @@ test('the hand-written sections are still in the prompt, word for word', () => {
 // circuit." gets a narrow exception, kept in BUILDING BEHAVIOR next to it:
 // to change one part's value or control ("make the resistor 1k", "make LED1
 // green", "press the button") use set_value / set_control on its label, with
-// no delete_all; to remove one part use delete_part. Anything that changes
-// wiring or adds parts still clears and rebuilds.
+// no delete_all; to remove one part use delete_part. #85 replaced the
+// "clear and rebuild" rule with edit in place; test/edit-in-place.test.js
+// owns those rules.
 
 // The BUILDING BEHAVIOR section's lines, up to the next blank line.
 function buildingBehavior() {
@@ -269,13 +271,6 @@ function buildingBehavior() {
   const end = lines.findIndex((l, i) => i > at && l.trim() === '');
   return lines.slice(at + 1, end < 0 ? undefined : end);
 }
-
-test('BUILDING BEHAVIOR still says "Always clear and rebuild" for changes to wiring or parts', () => {
-  const line = buildingBehavior().find(l => l.includes('Always clear and rebuild'));
-  assert.ok(line, `no "Always clear and rebuild" line in BUILDING BEHAVIOR: ${JSON.stringify(buildingBehavior())}`);
-  assert.match(line, /\bwir(e|es|ing)\b/i, `the rebuild rule should name wiring changes: "${line}"`);
-  assert.match(line, /\badd(s|ing)?\b[^.]*\bparts?\b/i, `the rebuild rule should name adding parts: "${line}"`);
-});
 
 test('BUILDING BEHAVIOR tells the AI to change one part with set_value / set_control, e.g. "make the resistor 1k", with no delete_all', () => {
   const lines = buildingBehavior();

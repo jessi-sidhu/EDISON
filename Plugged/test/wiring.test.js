@@ -45,8 +45,9 @@ test('the Clear All confirmation says it can be undone, because it can', () => {
 });
 
 // Issue #60: an AI build's delete_all empties the board of the circuit being
-// worked on. Only the Clear All button starts a new circuit (id and name), so
-// accepting an AI build doesn't file a second saved record.
+// worked on, so accepting an AI build doesn't file a second saved record.
+// Since #86 the Clear All button keeps the circuit too; new circuits come from
+// the dashboard (the no-option App.clearAll() is what loading uses).
 test("the AI's delete_all clears the board but keeps the circuit's id and name", () => {
   assert.match(read('circuit3d/js/chat.js'), /clearAll:\s*\(\) => App\.clearAll\(\{ keepCircuit: true \}\)/);
   assert.match(read('circuit3d/js/app.js'), /App\.clearAll = function \(\{ keepCircuit = false \} = \{\}\)/);

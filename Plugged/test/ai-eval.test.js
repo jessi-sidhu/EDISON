@@ -46,7 +46,7 @@ const { recipeActions } = require('./fixtures/recipe-steps.js');
 const Eval  = require('../scripts/ai-eval.js');
 const CASES = require('../scripts/ai-eval-cases.js');
 
-const HEADS_UP = '\n\nHeads up, this build has a problem:\n- Hole c6 holds 2 leads.\n\nAsk me to fix it and I will rebuild the circuit.';
+const HEADS_UP = '\n\nHeads up, this build has a problem:\n- Hole c6 holds 2 leads.\n\nAsk me to fix it.';
 const FALLBACK = 'Sparky could not reach the AI service. Please try again in a moment.';
 const DEMO_MESSAGE = 'Build a single LED circuit with a current-limiting resistor.';
 

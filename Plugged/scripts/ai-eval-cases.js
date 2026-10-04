@@ -1,8 +1,15 @@
 // ─────────────────────────────────────────────────────────────
 //  ai-eval-cases.js — the docs/QA.md AI-xx cases scripts/ai-eval.js can
-//  grade in Node (issue #82). Each starts from a fresh board, sends
-//  `message`, applies the reply's actions, then `after` (a press or a click
-//  the QA row does), simulates, and checks:
+//  grade in Node (issue #82). Each starts from a fresh board, or its
+//  `board` and `markdown` (the edit cases, captured from the app with
+//  scripts/capture-board.js), sends `message`, applies the reply's actions,
+//  then `after` (a press or a click the QA row does), simulates, and checks:
+//    keep        { parts: { LABEL: [holes…] }, wires: ['W1', …] }: each part
+//                still has exactly those holes, each wire id the ends it
+//                started with (an edit, not a rebuild; issue #85)
+//    noDeleteAll the reply's actions have no delete_all (a rebuild in the
+//                recipe's own order lands every id back where it was, so
+//                keep alone can't catch it)
 //    noHeadsUp   the reply has no "Heads up, this build has a problem:"
 //    parts       { type: count } on the board
 //    expect      { LABEL: { field: value | [lo, hi] } }, field of the part's
@@ -16,11 +23,22 @@
 //  each against one). What code can't see (the preview, hover and scroll,
 //  3D glow, reply wording, console errors) stays with /qa-pass.
 //
-//  Left out: AI-03 (asks about a hand build), AI-04 and AI-07 (follow-ups
-//  to an earlier reply), AI-05 (a question with no build).
+//  Left out: AI-03 (asks about a hand build), AI-05 (a question with no
+//  build). AI-04 and AI-07 are the EDIT- cases, from a captured board.
 // ─────────────────────────────────────────────────────────────
 
+const fs   = require('node:fs');
+const path = require('node:path');
+
 const LED_OK = { on: true, current: [10, 20] };
+
+// A board captured by scripts/capture-board.js: { board, markdown }.
+const captured = name => JSON.parse(fs.readFileSync(path.join(__dirname, 'ai-eval-boards', `${name}.json`), 'utf8'));
+const ONE_LED   = captured('one-led');
+const BACKWARDS = captured('backwards-led');
+// The one-LED build's resistor and wire ids, kept by every edit.
+const KEEP_R1 = { R1: ['b2', 'b6'] };
+const WIRES = ['W1', 'W2', 'W3', 'W4'];
 
 module.exports = [
   {
@@ -175,5 +193,29 @@ module.exports = [
     checks: { noHeadsUp: true, parts: { bench_supply: 1, led: 2, resistor: 2 },
               expect: { PS1: { posOver: false, negOver: false } },
               expectAll: { led: { on: true, current: [9.5, 10.5] } }, status: 'ok' },
+  },
+  {
+    // AI-04: LED1 (c6/c8, backwards) turned round in place: 470 Ω at 9 V is
+    // ~14.9 mA. R1 and W1–W4 stay. Any delete_all rebuild fails noDeleteAll;
+    // one in another order also moves the wire ids (keep).
+    id: 'EDIT-fix', tags: ['edit'],
+    message: 'Fix it.', board: BACKWARDS.board, markdown: BACKWARDS.markdown,
+    checks: { noHeadsUp: true, noDeleteAll: true, keep: { parts: KEEP_R1, wires: WIRES }, parts: { resistor: 1, led: 1 },
+              expect: { LED1: { on: true, current: [14.8, 15.0] } }, status: 'ok' },
+  },
+  {
+    // AI-07: one new LED across LED1's columns, sharing R1: ~7.4 mA each.
+    // A second resistor and rail wires (~14.9 mA each) is not parallel.
+    id: 'EDIT-add-led', tags: ['edit'],
+    message: 'Add a second LED in parallel.', board: ONE_LED.board, markdown: ONE_LED.markdown,
+    checks: { noHeadsUp: true, noDeleteAll: true, keep: { parts: { ...KEEP_R1, LED1: ['c8', 'c6'] }, wires: WIRES },
+              parts: { resistor: 1, led: 2 }, expectAll: { led: { on: true, current: [7.2, 7.6] } }, status: 'ok' },
+  },
+  {
+    // Only a set_value: 1 kΩ at 9 V is ~7.0 mA (470 Ω gave ~14.9 mA).
+    id: 'EDIT-resistor-1k', tags: ['edit'],
+    message: 'Make the resistor 1k.', board: ONE_LED.board, markdown: ONE_LED.markdown,
+    checks: { noHeadsUp: true, noDeleteAll: true, keep: { parts: { ...KEEP_R1, LED1: ['c8', 'c6'] }, wires: WIRES },
+              parts: { resistor: 1, led: 1 }, expect: { LED1: { on: true, current: [6.8, 7.2] } }, status: 'ok' },
   },
 ];

@@ -1,0 +1,61 @@
+{
+  "board": {
+    "parts": [
+      {
+        "type": "battery",
+        "label": "BAT1",
+        "values": {
+          "voltage": 9
+        }
+      },
+      {
+        "type": "resistor",
+        "label": "R1",
+        "holes": [
+          "b2",
+          "b6"
+        ],
+        "values": {
+          "resistance": 470
+        }
+      },
+      {
+        "type": "led",
+        "label": "LED1",
+        "holes": [
+          "c8",
+          "c6"
+        ],
+        "values": {
+          "color": "red",
+          "vf": 2,
+          "maxCurrent": 0.02,
+          "thresholdCurrent": 0.001
+        }
+      }
+    ],
+    "wires": [
+      {
+        "id": "W1",
+        "from": "BAT1.0",
+        "to": "tp_63"
+      },
+      {
+        "id": "W2",
+        "from": "BAT1.1",
+        "to": "tn_63"
+      },
+      {
+        "id": "W3",
+        "from": "tp_3",
+        "to": "a2"
+      },
+      {
+        "id": "W4",
+        "from": "a8",
+        "to": "tn_8"
+      }
+    ]
+  },
+  "markdown": "**Board status: 3 component(s), 4 wire(s).**\n\n## Components\n| id | type | value | pin_A | pin_B |\n|----|------|-------|-------|-------|\n| BAT1 | battery | 9 V | off-board + → wire ref: BAT1.0 | off-board − → wire ref: BAT1.1 |\n| R1 | resistor | 470 Ω | b2 | b6 |\n| LED1 | led | red | c8 (cathode) | c6 (anode) |\n\n## Battery wiring (how to connect in add_wire actions)\n- **BAT1**: positive terminal → use `\"from\": \"BAT1.0\"`  |  negative terminal → use `\"from\": \"BAT1.1\"`\n\n## Wires\n| id | from | to | color |\n|----|------|----|-----------|\n| W1 | BAT1.0 | tp_63 | #ef4444 |\n| W2 | BAT1.1 | tn_63 | #111111 |\n| W3 | tp_3 | a2 | #ef4444 |\n| W4 | a8 | tn_8 | #111111 |\n\n## Simulation\nStatus: solved. Voltages are measured from BAT1.1 (the first battery's − terminal).\n- BAT1: 9.00 V battery, supplying 14.9 mA\n  - BAT1.0 (off-board): 9.00 V\n  - BAT1.1 (off-board): 0.00 V\n- R1: 470 ohm resistor, 14.9 mA\n  - R1 pin 0 (b2, lead1): 9.00 V\n  - R1 pin 1 (b6, lead2): 2.00 V\n- LED1: LED ON (lit), 14.9 mA\n  - LED1 pin 0 (c8, cathode): 0.00 V\n  - LED1 pin 1 (c6, anode): 2.00 V\n\n## Breadboard topology (always true)\n- Columns 1-63. Holes a1-e1 share one node; f1-j1 share another node (center channel divides them).\n- Same rule for every column: a-e connected together, f-j connected together.\n- To connect top half (a-e) to bottom half (f-j) of the SAME column, you MUST add a wire.\n- tp = positive top rail (+), tn = negative top rail (GND).\n- bp = positive bottom rail (+), bn = negative bottom rail (−).\n- Rails are NOT connected to body rows — you must wire from rail to a body hole explicitly.\n- 882 holes total: 63 columns × 14 rows.\n"
+}

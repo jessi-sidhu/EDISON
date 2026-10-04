@@ -13,3 +13,34 @@
   pointer-events: none;
 }
 #equation-card[hidden] { display: none; }
+
+/* colouring + hover card (#91) */
+
+.btn-colouring {
+  margin-left: 6px;
+  padding: 5px 10px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.btn-colouring[aria-pressed="true"] { color: var(--text-primary); }
+
+#hover-card {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.13);
+  white-space: nowrap;
+}
+#hover-card .hc-title { font-weight: 600; }
+#hover-card .hc-warn  { color: #dc2626; font-weight: 600; }

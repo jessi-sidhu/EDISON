@@ -12,7 +12,7 @@
 const http = require('http');
 const fs   = require('fs');
 const path = require('path');
-const { makeAsk } = require('./ai-providers');
+const { makeAsk, isFixRequest } = require('./ai-providers');
 // The board's size: the same file the 3D editor builds the board from.
 const { COLS, TOTAL_HOLES, BODY_ROWS } = require('../circuit3d/js/board-geometry.js');
 // The parts registry: every part's tool, prompt lines and circuit behaviour.
@@ -167,10 +167,13 @@ const buildPrompt = tools => [
   '- Other parts: use the body holes they sit in, e.g. "b3", never "<label>.<k>".',
   '',
   'BUILDING BEHAVIOR:',
-  '- When asked to build, fix, or create a circuit: call delete_all FIRST, then rebuild from scratch.',
+  '- Keep every part and wire on the board that is correct. Change only what is wrong: delete_wire, delete_part or change a value (below) first, then place and wire what is missing.',
+  '- To add to a circuit, place only the new parts and wires.',
+  '- Call delete_all only when the user asks to start over or to build something new; then build the whole circuit from scratch.',
+  '- When asked to fix a circuit, say what was wrong first, then what you changed.',
   '- To change one part\'s value or control ("make the resistor 1k", "make LED1 green", "press the button"), call set_value or set_control on its label, with no delete_all.',
   '- To remove one part, call delete_part on its label.',
-  '- Anything that changes wiring or adds parts: never patch. Always clear and rebuild the full correct circuit.',
+  '- Wires connect to holes, not parts: delete_part removes only the part, and the wires in its columns stay. Never re-add a wire the Wires table already lists.',
   '- After building, write 2-3 sentences explaining what you built and how it works.',
   '- When you explain a build with more than one LED, say which topology you built: series, parallel, or separate branches.',
   '- When you build LEDs in series, say in your reply that they are dimmer than one LED alone, or need a lower resistor.',
@@ -185,6 +188,8 @@ const buildPrompt = tools => [
   '- Every hole, body or rail, takes at most one part lead or wire end. Spread leads across rows a-e of a column.',
   '- Rail wires land in row a, nearest the rails. Put parts in rows b–e, so no wire passes under or through a part.',
   '',
+  'The worked recipes below each build a NEW circuit from an empty board (step 1 is delete_all).',
+  'To add to an existing circuit, do only the new steps, with no delete_all.',
   'COMPLETE RECIPE FOR ONE LED (starting at column C):',
   '  1. delete_all',
   '  2. place_battery',
@@ -210,11 +215,11 @@ const LED_PACK = [
   'SERIES vs PARALLEL:',
   '- Parallel: the parts share BOTH nodes. Every LED\'s anode sits in the same column as the other anodes, and every cathode in the same column as the other cathodes, each in a free row. One resistor can feed them all.',
   '- Series: a chain with one current path. LED1\'s cathode column is LED2\'s anode column. Each red LED drops about 2 V, so two in series are dimmer, or need a lower resistor on a low-voltage battery.',
-  '- "Add a second LED in parallel" means the parallel recipe below: the new LED goes across the same two columns, NOT a second resistor and its own rail wires.',
+  '- "Add a second LED in parallel" on a board that already has the one-LED circuit means only the new LED (step 9 of the parallel recipe below): it goes across the same two columns as LED1, NOT a second resistor and its own rail wires.',
   '- Separate branches (each LED with its own resistor and rail wires) ONLY when the user asks for independent LEDs or one resistor each.',
   '',
   'RECIPE FOR 2 LEDs IN PARALLEL (one shared resistor, starting at column C):',
-  '  Steps 1-8 of the one-LED recipe, then:',
+  '  On an empty board (a new build): steps 1-8 of the one-LED recipe, then:',
   '  9. place_led: holeA=d{C+6} (cathode), holeB=d{C+4} (anode)   ← same two columns as LED1, free row d',
   '  Total calls: 9.',
   '',
@@ -328,7 +333,7 @@ function partTool(def) {
 
 const DELETE_ALL = {
   name: 'delete_all',
-  description: 'Clear all components and wires from the board. Call this FIRST when building or fixing a circuit.',
+  description: 'Clear all components and wires from the board. Use only when the user asks to start over or to build something new.',
 };
 const ADD_WIRE = {
   name: 'add_wire',
@@ -611,6 +616,37 @@ function boardSoFar(prior) {
     for (const leg of actionLegs(def, a)) if (!map.has(leg.hole)) map.set(leg.hole, { label, pin: leg.pin });
   });
   return { map, counts, cleared };
+}
+
+// A wire end compared case-insensitively: "A8" is a8, "bat1.1" is BAT1.1.
+const wireKey = (from, to) => [String(from).trim().toLowerCase(), String(to).trim().toLowerCase()].sort().join('|');
+
+// Why this add_wire repeats a wire already there, or null (issue #85): one
+// on the sent board, or an earlier add_wire in `prior`, either direction,
+// unless a delete_wire (or a delete_all) in `prior` took it away. A
+// delete_part takes the wires on its LABEL.k pins with it; hole wires stay.
+function duplicateWire(a, prior, board) {
+  if (!a || a.tool !== 'add_wire' || a.from == null || a.to == null) return null;
+  const there = new Map();   // key → wire id, or null for one earlier in this reply
+  for (const w of (board && Array.isArray(board.wires) ? board.wires : [])) {
+    if (w && w.from != null && w.to != null) there.set(wireKey(w.from, w.to), w.id || null);
+  }
+  for (const b of prior || []) {
+    if (!b) continue;
+    if (b.tool === 'delete_all') there.clear();
+    else if (b.tool === 'delete_wire') { for (const [k, id] of there) if (id === b.wire) there.delete(k); }
+    else if (b.tool === 'delete_part' && b.part) {
+      const pin = new RegExp(`(^|\\|)${String(b.part).toLowerCase().replace(/[^a-z0-9]/g, '')}\\.`);
+      for (const k of [...there.keys()]) if (pin.test(k)) there.delete(k);
+    } else if (b.tool === 'add_wire' && b.from != null && b.to != null) {
+      const k = wireKey(b.from, b.to);
+      if (!there.has(k)) there.set(k, null);
+    }
+  }
+  const key = wireKey(a.from, a.to);
+  if (!there.has(key)) return null;
+  const id = there.get(key);
+  return `a wire ${a.from} → ${a.to} is already ${id ? `on the board (${id})` : 'earlier in this reply'}. Wires stay when a part is deleted.`;
 }
 
 // Why this action can't be placed after `prior`, or null if it can. The
@@ -967,7 +1003,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
 const SYSTEM_PROMPT = buildPrompt(CIRCUIT_TOOLS[0].function_declarations);
 
 // ── Call Gemini ──────────────────────────────────────────────
-const ask = makeAsk(
+const askAI = makeAsk(
   (markdown, userMsg, history, board) => askGemini(markdown, userMsg, history, board),
   {
     SYSTEM_PROMPT, CIRCUIT_TOOLS, finish: finishAIReply,
@@ -977,9 +1013,28 @@ const ask = makeAsk(
     promptFor: buildPrompt,
     partTools,
     refusal:   placementRefusal,
+    duplicate: duplicateWire,
     checkBuild,
   }
 );
+
+// A message that asks for a new circuit or a fresh start, where a delete_all
+// rebuild is right.
+// "Make a night light" and "new circuit" are new builds; "make the resistor
+// 1k" and "add a new LED" are edits.
+const NEW_BUILD = /\b(build|create|start over|from scratch|again|new circuit|make an?)\b/i;
+
+// Every provider's answer. A delete_all in reply to an edit request on a
+// built board (issue #85) is logged, not refused: the prompt says to edit in
+// place, so it shows how often the model still rebuilds.
+async function ask(markdown, userMsg, history, board) {
+  const out = await askAI(markdown, userMsg, history, board);
+  const hasParts = !!(board && Array.isArray(board.parts) && board.parts.length);
+  if (hasParts && out && (out.actions || []).some(a => a && a.tool === 'delete_all') && !NEW_BUILD.test(String(userMsg || ''))) {
+    console.warn(`[edit] delete_all in reply to an edit request: ${JSON.stringify(String(userMsg || ''))}`);
+  }
+  return out;
+}
 
 async function askGemini(markdown, userMsg, history, board) {
   const msg = userMsg || 'Analyze my circuit and tell me what to do next.';
@@ -1039,7 +1094,7 @@ async function askGemini(markdown, userMsg, history, board) {
     }
   }
 
-  return finishAIReply({ reply, actions, board });
+  return finishAIReply({ reply, actions, board, fullCheck: isFixRequest(userMsg) });
 }
 
 // ── Build check (the repair loop) ────────────────────────────
@@ -1087,14 +1142,17 @@ function problemsOn(board) {
 // A build's problems. A reply with a delete_all is checked from its last
 // one. An edit on a sent board (issue #84) reports only the problems it
 // adds: the board after it minus the board before, in the board's own
-// labels, so a student's unfinished wiring never triggers a repair. [] for
-// an edit with no board, a reply that changes nothing, or a malformed board.
-function checkBuild(actions, board) {
+// labels, so a student's unfinished wiring never triggers a repair. With
+// fullCheck ("Fix it.", issue #85) it reports every problem left on the
+// board after the edit. [] for an edit with no board, a reply that changes
+// nothing, or a malformed board.
+function checkBuild(actions, board, { fullCheck = false } = {}) {
   const build = fromLastDeleteAll(actions);
   if (build) return rebuildProblems(build);
   if (!board || !(actions || []).some(a => a && a.tool !== 'use_parts')) return [];
   try {
     const after  = problemsOn(Board.apply(board, actions).board);
+    if (fullCheck) return after;
     const before = new Set(problemsOn(board));
     return after.filter(p => !before.has(p));
   } catch { return []; }   // a malformed board from the client is not checked
@@ -1104,7 +1162,7 @@ function checkBuild(actions, board) {
 // Every model's { reply, actions } goes through this before the browser
 // sees it: a default reply, JSON-in-text fallback, malformed actions
 // dropped, and circuit problems reported.
-function finishAIReply({ reply, actions, board }) {
+function finishAIReply({ reply, actions, board, fullCheck = false }) {
   reply = String(reply || '').trim();
   actions = Array.isArray(actions) ? actions : [];
 
@@ -1156,8 +1214,12 @@ function finishAIReply({ reply, actions, board }) {
 
   // Drop parts Parts.checkPlacement refuses, in order, so a refused part
   // holds no holes. The DeepSeek loop has already refused most of them.
+  // A wire already on the board, or already in this reply, is dropped
+  // quietly: adding it again would stack two wire ends in one hole.
   const kept = [];
   for (const a of actions) {
+    const dup = duplicateWire(a, kept, board);
+    if (dup) { console.warn(`[edit] dropped: ${dup}`); continue; }
     const why = placementRefusal(a, kept);
     if (why) notes.push(why);
     else kept.push(a);
@@ -1167,13 +1229,14 @@ function finishAIReply({ reply, actions, board }) {
 
   // Report problems instead of patching them, so a wrong circuit is visible
   // rather than rewritten into a different one.
-  // An edit on a sent board gets the full checks against it; a rebuild, or
-  // no board, the checker as before.
-  const problems = board && !fromLastDeleteAll(actions) ? checkBuild(actions, board)
+  // An edit on a sent board gets the full checks against it (every problem
+  // left after a "Fix it.", else only the ones it adds); a rebuild, or no
+  // board, the checker as before.
+  const problems = board && !fromLastDeleteAll(actions) ? checkBuild(actions, board, { fullCheck })
     : findCircuitProblems(actions, { labelForm: !usedOldForm });
   if (problems.length) {
     console.warn('[validate] ' + problems.join(' | '));
-    reply += `\n\nHeads up, this build has a problem:\n- ${problems.join('\n- ')}\n\nAsk me to fix it and I will rebuild the circuit.`;
+    reply += `\n\nHeads up, this build has a problem:\n- ${problems.join('\n- ')}\n\nAsk me to fix it.`;
   }
 
   return { reply, actions };

@@ -96,7 +96,9 @@ test('an empty new circuit is not saved by a reload (pins current behaviour)', a
   expect(await boardCounts(page)).toEqual([0, 0]);
 });
 
-test('after Clear All, a reload does not bring the old circuit back (pins current behaviour)', async ({ page }) => {
+// Clear All keeps the circuit (issue #86): same id and name, so autosave
+// writes the empty board over its record and a reload reopens it.
+test('after Clear All, a reload reopens the same circuit, now empty, as one record', async ({ page }) => {
   test.setTimeout(90_000);
   await setUp(page, { saved: [TWO_LEDS], open: handOver(TWO_LEDS) });
   await openEditor(page);
@@ -105,33 +107,34 @@ test('after Clear All, a reload does not bring the old circuit back (pins curren
   page.on('dialog', d => d.accept());   // "Delete all 8 items on the board?"
   await page.locator('#clear-all-btn').click();
   expect(await boardCounts(page)).toEqual([0, 0]);
-  await expect(nameField(page)).not.toHaveText('Two LEDs');
+  await expect(nameField(page)).toHaveText('Two LEDs');
+  await expect.poll(async () => (await savedList(page)).map(p => [p.id, p.name, p.components.length]))
+    .toEqual([[TWO_LEDS.id, 'Two LEDs', 0]]);
 
   await reload(page);
   expect(await boardCounts(page)).toEqual([0, 0]);
-  await expect(nameField(page)).not.toHaveText('Two LEDs');
+  await expect(nameField(page)).toHaveText('Two LEDs');
+  expect(await page.evaluate(() => App.state.circuitId)).toBe(TWO_LEDS.id);
   await page.waitForTimeout(1200);
-  const [kept] = await savedList(page);
-  expect([kept.id, kept.components.length]).toEqual([TWO_LEDS.id, 4]);   // the old circuit is untouched
+  expect((await savedList(page)).map(p => [p.id, p.components.length])).toEqual([[TWO_LEDS.id, 0]]);
 });
 
-test('after Clear All, the new circuit built in its place is the one a reload reopens', async ({ page }) => {
+test('after Clear All, the circuit built in its place is saved to the same record and reopens after a reload', async ({ page }) => {
   test.setTimeout(90_000);
   await setUp(page, { saved: [TWO_LEDS], open: handOver(TWO_LEDS) });
   await openEditor(page);
 
   page.on('dialog', d => d.accept());
   await page.locator('#clear-all-btn').click();
-  const name = await nameField(page).textContent();
   await placeResistor(page);
-  await expect.poll(async () => (await savedList(page)).length).toBe(2);
-  const id = await page.evaluate(() => App.state.circuitId);
-  expect(id).not.toBe(TWO_LEDS.id);
+  await expect.poll(async () => (await savedList(page)).map(p => [p.id, p.name, p.components.length]))
+    .toEqual([[TWO_LEDS.id, 'Two LEDs', 1]]);
+  expect(await page.evaluate(() => App.state.circuitId)).toBe(TWO_LEDS.id);
 
   await reload(page);
-  await expect(nameField(page)).toHaveText(name);
+  await expect(nameField(page)).toHaveText('Two LEDs');
   expect(await boardCounts(page)).toEqual([1, 0]);
-  expect(await page.evaluate(() => App.state.circuitId)).toBe(id);
+  expect(await page.evaluate(() => App.state.circuitId)).toBe(TWO_LEDS.id);
   await page.waitForTimeout(1200);
-  expect(await savedList(page)).toHaveLength(2);
+  expect(await savedList(page)).toHaveLength(1);
 });

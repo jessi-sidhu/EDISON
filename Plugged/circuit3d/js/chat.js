@@ -200,15 +200,18 @@
   }
 
   // Apply the AI's actions in order. Returns how many took effect and how
-  // many did not, so the chat can report what really happened.
+  // many did not, so the chat can report what really happened, plus
+  // `failedActions`, the actions that did not (the same objects; not
+  // enumerable, so the result still reads { applied, failed }).
   function applyActions(actions, board) {
     let applied = 0, failed = 0;
+    const failedActions = [];
     (actions || []).forEach(a => {
       let ok = false;
       try { ok = applyOne(a, board); } catch (e) { console.warn('Action failed:', a, e.message); }
-      if (ok) applied++; else failed++;
+      if (ok) applied++; else { failed++; failedActions.push(a); }
     });
-    return { applied, failed };
+    return Object.defineProperty({ applied, failed }, 'failedActions', { value: failedActions });
   }
 
   // An accepted AI build: all its actions as one undo step.
@@ -249,7 +252,37 @@
     return (actions || []).some(a => !!a && typeof a.tool === 'string' && a.tool.startsWith('place_'));
   }
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, placesParts, partFor, partValues, colorHex, formatReply, EDITS, ROTATION };
+  // What the AI is told it did (issue #85): the model's history entry for a
+  // reply. A plain answer stays as it is; an accepted build is the reply
+  // plus one "Applied:" line naming each action that took effect (`failed`:
+  // the ones that didn't, left out and counted); a declined one is only the
+  // declined line, so the AI never thinks it built what it didn't.
+  const DECLINED = '(The user declined this build; the board is unchanged.)';
+
+  function describeAction(a) {
+    if (!a || typeof a.tool !== 'string') return '?';
+    if (a.tool === 'add_wire')    return `add_wire ${a.from}→${a.to}`;
+    if (a.tool === 'delete_wire') return `delete_wire ${a.wire}`;
+    if (EDITS.includes(a.tool)) {
+      const keys = Object.keys(a).filter(k => k !== 'tool' && k !== 'part' && a[k] != null);
+      return [a.tool, a.part, ...keys.map(k => `${k}=${a[k]}`)].join(' ');
+    }
+    if (a.holeA != null) return `${a.tool} ${a.holeA}/${a.holeB}`;
+    if (a.hole != null)  return `${a.tool} ${a.hole}${a.direction ? ' ' + a.direction : ''}`;
+    return a.tool;
+  }
+
+  function modelHistoryText(reply, actions, accepted, failed = []) {
+    const text = String(reply == null ? '' : reply);
+    if (!Array.isArray(actions) || !actions.length) return text;
+    if (!accepted) return DECLINED;
+    const bad  = new Set(failed || []);
+    const done = actions.filter(a => !bad.has(a));
+    const n    = actions.length - done.length;
+    return `${text}\nApplied: ${done.length ? done.map(describeAction).join(', ') : 'nothing'}` + (n ? ` (${n} could not be applied).` : '.');
+  }
+
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, EDITS, ROTATION };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -344,6 +377,14 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
 
   let _pendingActions = null;
   let _pendingGhosts  = [];
+  let _pendingEntry   = null;   // the model's history entry for the preview: { entry, reply }
+
+  // The pending preview's history entry, rewritten as accepted or declined.
+  function settleHistory(actions, accepted, failed) {
+    if (!_pendingEntry) return;
+    _pendingEntry.entry.text = Chat.modelHistoryText(_pendingEntry.reply, actions, accepted, failed);
+    _pendingEntry = null;
+  }
 
   function sparkyPreviewActions(actions) {
     sparkyDeclineChanges();          // clear any stale preview first
@@ -475,7 +516,9 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     _pendingActions = null;
     document.getElementById('sparky-pending-bar').style.display = 'none';
 
-    const { applied, failed } = Chat.acceptBuild(actions, board);
+    const result = Chat.acceptBuild(actions, board);
+    const { applied, failed } = result;
+    settleHistory(actions, true, result.failedActions);
     if (Chat.placesParts(actions)) App.frameCircuit();   // new parts: big enough to see and click (#67)
     sparkyAddMsg(`✓ Applied ${applied} change${applied !== 1 ? 's' : ''} to your circuit.` +
       (failed ? ` ${failed} could not be applied.` : ''), 'system');
@@ -483,6 +526,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
 
   function sparkyDeclineChanges() {
     if (!_pendingActions) return;
+    settleHistory(_pendingActions, false);
     clearGhosts();
     _pendingActions = null;
     document.getElementById('sparky-pending-bar').style.display = 'none';
@@ -501,8 +545,10 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     const msg   = (overrideMsg !== undefined) ? overrideMsg : input.value.trim();
     if (!msg) return;
 
-    // If there's an open preview, dismiss it before sending a new message
+    // If there's an open preview, dismiss it before sending a new message:
+    // the history says it was declined.
     if (_pendingActions) {
+      settleHistory(_pendingActions, false);
       clearGhosts();
       _pendingActions = null;
       document.getElementById('sparky-pending-bar').style.display = 'none';
@@ -521,10 +567,14 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
       typingEl.remove();
       sparkyAddMsg(data.reply || '(no reply)', 'ai');
 
+      const entry = { role: 'model', text: data.reply || '' };
       chatHistory.push({ role: 'user', text: msg });
-      chatHistory.push({ role: 'model', text: data.reply || '' });
+      chatHistory.push(entry);
 
-      if (data.actions && data.actions.length) sparkyPreviewActions(data.actions);
+      if (data.actions && data.actions.length) {
+        sparkyPreviewActions(data.actions);
+        if (_pendingActions) _pendingEntry = { entry, reply: data.reply || '' };
+      }
     } catch (err) {
       typingEl.remove();
       sparkyAddMsg('⚠️ ' + err.message, 'system');

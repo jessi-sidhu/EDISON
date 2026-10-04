@@ -163,22 +163,26 @@ async function askDeepSeek(markdown, userMsg, history, ctx, board) {
   const actions = [];
   let reply = '';
   let repairs = 0;
+  // "Fix it." is judged on the whole board after the edit, not only on the
+  // problems the edit adds (issue #85).
+  const check = { fullCheck: isFixRequest(userMsg) };
   for (let round = 0; round < DEEPSEEK_MAX_ROUNDS; round++) {
     const m = await deepSeekTurn(messages, tools, ctx);
     if (String(m.content || '').trim()) reply = String(m.content).trim();
     const calls = (m.tool_calls || []).filter(c => c && c.function && c.function.name);
     if (!calls.length) {
-      // The model ended its turn. A full rebuild the server finds problems
+      // The model ended its turn. A build or edit the server finds problems
       // in goes back to it with those problems, at most MAX_REPAIRS times,
       // and only while a round is left for the answer.
       const canRepair = !!ctx.checkBuild && repairs < MAX_REPAIRS && round + 1 < DEEPSEEK_MAX_ROUNDS;
-      const problems  = canRepair || (ctx.checkBuild && repairs > 0) ? safeCheck(ctx.checkBuild, actions, board) : [];
+      const problems  = canRepair || (ctx.checkBuild && repairs > 0) ? safeCheck(ctx.checkBuild, actions, board, check) : [];
       if (repairs > 0) console.log(`[repair] after round ${repairs}: ${problems.length ? `${problems.length} problems left` : 'clean'}`);
       if (!canRepair || !problems.length) break;
       repairs++;
       console.log(`[repair] round ${repairs}: ${problems.length} problems`);
       messages.push({ role: 'assistant', content: m.content || '' });
-      messages.push({ role: 'user', content: `${REPAIR_HEADING}\n${problems.map(p => `- ${p}`).join('\n')}` });
+      const heading = actions.some(a => a && a.tool === 'delete_all') ? REPAIR_HEADING : EDIT_REPAIR_HEADING;
+      messages.push({ role: 'user', content: `${heading}\n${problems.map(p => `- ${p}`).join('\n')}` });
       continue;
     }
 
@@ -200,8 +204,10 @@ async function askDeepSeek(markdown, userMsg, history, ctx, board) {
         result = text;
       } else {
         const action = { tool: c.function.name, ...args };
-        const why = ctx.refusal ? ctx.refusal(action, actions) : null;
-        if (why) result = `Refused: ${why} Nothing was queued; fix it and place it again.`;
+        const dup = ctx.duplicate ? ctx.duplicate(action, actions, board) : null;   // a wire already there (#85)
+        const why = dup ? null : ctx.refusal ? ctx.refusal(action, actions) : null;
+        if (dup) result = `Refused: ${dup}`;
+        else if (why) result = `Refused: ${why} Nothing was queued; fix it and place it again.`;
         else {
           actions.push(action);
           result = 'Done. Queued for the user to preview.';
@@ -216,20 +222,28 @@ async function askDeepSeek(markdown, userMsg, history, ctx, board) {
 // A chat turn is resent in full each round, so this bounds the cost of a
 // model that never stops calling tools. A 3-LED build is ~16 calls.
 const DEEPSEEK_MAX_ROUNDS = 12;
-// Repair rounds a full rebuild gets when checkBuild finds problems. They
+// Repair rounds a build or edit gets when checkBuild finds problems. They
 // count toward DEEPSEEK_MAX_ROUNDS.
 const MAX_REPAIRS = 2;
 const REPAIR_HEADING = 'Your build has problems. Rebuild it with these fixed (delete_all first, then the whole corrected circuit):';
+// The heading for an edit (no delete_all so far): fix in place (issue #85).
+const EDIT_REPAIR_HEADING = 'Your build has problems. Fix only these, keeping everything else:';
 
 // checkBuild's problems, or none if it throws: a broken check never costs a round.
-function safeCheck(checkBuild, actions, board) {
+function safeCheck(checkBuild, actions, board, opts) {
   try {
-    const problems = checkBuild(actions, board);
+    const problems = checkBuild(actions, board, opts);
     return Array.isArray(problems) ? problems : [];
   } catch (e) {
     console.warn('[repair] check failed:', e.message);
     return [];
   }
+}
+
+// A "fix it" / "repair it" message: its edit is checked against the whole
+// board after it (checkBuild's fullCheck), in the repair loop and the Heads up.
+function isFixRequest(userMsg) {
+  return /\b(fix|repair)\b/i.test(String(userMsg || ''));
 }
 
 // One request to DeepSeek. Returns the assistant message.
@@ -349,7 +363,7 @@ function makeAsk(askGemini, ctx) {
     } else if (provider === 'deepseek') {
       // Same clean-up and circuit checks the Gemini path applies itself.
       const finish = ctx.finish || (r => r);
-      result = finish({ ...(await askDeepSeek(markdown, userMsg, history, ctx, board)), board });
+      result = finish({ ...(await askDeepSeek(markdown, userMsg, history, ctx, board)), board, fullCheck: isFixRequest(userMsg) });
     } else {
       result = await askGemini(markdown, userMsg, history, board);
     }
@@ -361,4 +375,4 @@ function makeAsk(askGemini, ctx) {
   };
 }
 
-module.exports = { makeAsk, parseAgentJSON, fixtureKey, describeTools, toOpenAITools, askDeepSeek, DEEPSEEK_MAX_ROUNDS };
+module.exports = { makeAsk, isFixRequest, parseAgentJSON, fixtureKey, describeTools, toOpenAITools, askDeepSeek, DEEPSEEK_MAX_ROUNDS };

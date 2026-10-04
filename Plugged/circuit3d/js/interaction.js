@@ -739,9 +739,10 @@
     });
 
     // ── Clear All guard ──────────────────────────────────────
-    // The button calls App.clearAll() from an inline onclick, so confirm here
-    // in the capture phase, before the event reaches it. Clear All is undoable,
-    // but a whole board is a lot to lose to a stray click.
+    // The button calls App.clearAll({ keepCircuit: true }) from an inline
+    // onclick, so confirm here in the capture phase, before the event reaches
+    // it. Clear All is undoable, but a whole board is a lot to lose to a stray
+    // click. It keeps the circuit (same name and saved record).
     // App.clearAll itself stays silent: loading and AI actions call it too.
     document.addEventListener('click', e => {
       if (!e.target.closest?.('#clear-all-btn')) return;

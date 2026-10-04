@@ -1049,9 +1049,11 @@
     state.unknownWires = [];   // unknown parts go with the rest of the board
   }
 
-  // Clear All starts a new blank circuit, with a fresh ID and name.
-  // keepCircuit: empty the board but stay on the same circuit, as an AI
-  // build's delete_all does, so its autosave updates the same record.
+  // keepCircuit: empty the board but stay on the same circuit (same ID and
+  // name), so autosave updates the same record. The Clear All button and an
+  // AI build's delete_all both pass it; new circuits come from the dashboard.
+  // With no options it also forgets the circuit and starts a fresh "Untitled"
+  // one: loadCircuitData calls it that way before restoring a loaded circuit.
   App.clearAll = function ({ keepCircuit = false } = {}) {
     pushHistory();
     clearBoard();

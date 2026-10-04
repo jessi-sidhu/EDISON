@@ -33,8 +33,40 @@ function matches(got, want) {
   return got === want;
 }
 
+// A case's starting board: the board-model shape App.exportBoard() gives
+// (wires { id, from, to }) as it is, or an Example (wires [from, to],
+// numbered W1…Wn in order).
+function startBoard(b) {
+  if (!b) return Board.empty();
+  const wires = b.wires || [];
+  if (wires.some(Array.isArray)) return Board.fromExample(b);
+  return { parts: b.parts || [], wires: wires.map(w => ({ id: w.id, from: w.from, to: w.to })) };
+}
+
+const end = e => String(e).toLowerCase();
+
+// checks.keep (issue #85): each part still there with exactly those holes,
+// in order, and each wire id still there with the ends it had at the start.
+function checkKeep(board, keep, start, fail) {
+  for (const [label, holes] of Object.entries(keep.parts || {})) {
+    const p = board.parts.find(q => q.label === label);
+    if (!p || JSON.stringify((p.holes || []).map(end)) !== JSON.stringify((holes || []).map(end))) fail('keep.parts.' + label);
+  }
+  for (const id of keep.wires || []) {
+    const was = start.wires.find(w => w.id === id);
+    const now = board.wires.find(w => w.id === id);
+    if (!was || !now || end(was.from) !== end(now.from) || end(was.to) !== end(now.to)) fail('keep.wires.' + id);
+  }
+}
+
 // One board's checks (see ai-eval-cases.js), each failure passed to fail().
-function checkBoard(board, checks, reply, fail) {
+// `start` is the case's starting board, for checks.keep.
+function checkBoard(board, checks, reply, fail, start) {
+  if (checks.keep) checkKeep(board, checks.keep, start || Board.empty(), fail);
+  // An edit, not a rebuild: a delete_all anywhere fails, even one that puts
+  // every part and wire back under the same ids (keep can't see that).
+  if (checks.noDeleteAll && ((reply && reply.actions) || []).some(a => a && a.tool === 'delete_all')) fail('noDeleteAll');
+
   if (checks.noHeadsUp && String((reply && reply.reply) || '').includes(HEADS_UP)) fail('noHeadsUp');
 
   if (checks.parts) {
@@ -81,7 +113,7 @@ function grade(testCase, reply) {
   const failed = [];
   const failer = prefix => name => { const n = prefix + name; if (!failed.includes(n)) failed.push(n); };
 
-  const start = testCase.board ? Board.fromExample(testCase.board) : Board.empty();
+  const start = startBoard(testCase.board);
   const built = Board.apply(start, (reply && reply.actions) || []);
   if (built.errors.length) failer('')('apply');
 
@@ -92,7 +124,7 @@ function grade(testCase, reply) {
       if (then.errors.length) fail('apply');
       board = then.board;
     }
-    checkBoard(board, checks || {}, reply, fail);
+    checkBoard(board, checks || {}, reply, fail, start);
   };
 
   gradeState(testCase.after, testCase.checks, failer(''));
@@ -197,7 +229,7 @@ async function main() {
       let res;
       try {
         // The board the browser would send with the markdown (#84).
-        res = await ask(markdown, c.message, [], c.board ? Board.fromExample(c.board) : Board.empty());
+        res = await ask(markdown, c.message, [], startBoard(c.board));
       } catch (e) {
         res = e instanceof Error ? e : new Error(String(e));
       }
@@ -216,9 +248,9 @@ async function main() {
 
   const summary = summarize(results);
   const runs = args.runs;
-  console.log(`\n${'case'.padEnd(10)} ${'passes'.padEnd(8)} pass^${runs}`);
+  console.log(`\n${'case'.padEnd(18)} ${'passes'.padEnd(8)} pass^${runs}`);
   for (const s of summary.cases) {
-    console.log(`${s.id.padEnd(10)} ${(s.passes + '/' + s.runs).padEnd(8)} ${s.passAll ? '✓' : '✗'}`);
+    console.log(`${s.id.padEnd(18)} ${(s.passes + '/' + s.runs).padEnd(8)} ${s.passAll ? '✓' : '✗'}`);
   }
   if (args.json) {
     fs.writeFileSync(args.json, JSON.stringify({ runs, summary, raw }, null, 2));
@@ -229,4 +261,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { grade, describeError, outcome, summarize, parseArgs, emptyBoardMarkdown };
+module.exports = { grade, startBoard, describeError, outcome, summarize, parseArgs, emptyBoardMarkdown };
