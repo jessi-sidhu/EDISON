@@ -568,7 +568,7 @@
     const mat = new THREE.MeshPhysicalMaterial({ color: hexColor, roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.3,
                                                  envMapIntensity: 0.35 });
     const SLEEVE = 0.09;   // where the insulation ends above a board hole
-    const onBoard = p => p.y <= 0.15;   // a board hole, not a raised terminal (battery, supply)
+    const onBoard = p => Math.abs(p.y) < 0.01;   // a board hole (y 0), not a terminal: a battery's, or a supply's on Edison's bench
 
     // Use actual pin height for arc endpoints
     const startY = onBoard(start) ? SLEEVE : start.y;
@@ -699,8 +699,9 @@
   // to see and click them. Off-board parts (the battery) are left out, or the
   // frame would span the whole board. No parts → the home view. Instant, no
   // animation. Called after an AI build and when a circuit is opened; hand
-  // placement never calls it.
-  App.frameCircuit = function () {
+  // placement never calls it. minDistance is the closest the camera comes:
+  // 6 by default, further back for a lab (tools/labs.js, issue #194).
+  App.frameCircuit = function ({ minDistance = 6 } = {}) {
     const boxes = [];
     for (const c of state.components) {
       const def = Parts.get(c.type);
@@ -709,7 +710,7 @@
       if (!b.isEmpty()) boxes.push({ min: b.min.toArray(), max: b.max.toArray() });
     }
     const { target, pos } = CameraFrame.frameParts(boxes, {
-      home: App.CAMERA.home, fov: App.camera.fov, aspect: App.camera.aspect, minDistance: 6,
+      home: App.CAMERA.home, fov: App.camera.fov, aspect: App.camera.aspect, minDistance,
     });
     App.controls.target.set(...target);
     App.camera.position.set(...pos);

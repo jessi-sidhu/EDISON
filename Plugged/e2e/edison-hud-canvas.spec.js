@@ -19,8 +19,9 @@
 // - The live state comes from the page: t is #sim-results' "t = … s" clock,
 //   open is the run's "Circuit open" line, problems is the count of
 //   #mistakes-panel's .mistake-row rows that aren't .mistake-info.
-// - #sim-results stays visible while running (restyled, not hidden: about 12
-//   specs check it), #reset-cam-btn and #clear-all-btn stay in the DOM.
+// - #sim-results keeps its text while running (about 12 specs read it; in
+//   Edison it folds into the Details drawer, #193, e2e/edison-hud-details.spec.js),
+//   #reset-cam-btn and #clear-all-btn stay in the DOM.
 // - With ?ui=classic none of the frame shows.
 // Lab 2's starter (circuit3d/labs/lab2.sparky: U1, PS1, FG1, unwired) is a
 // time run (FG1 is a wave source) and an open circuit with the mistake
@@ -111,7 +112,7 @@ test('?ui=edison: four corner brackets and a BREADBOARD title whose status line 
   // Run: the line shows the sim's own clock, open state and problem count,
   // frame by frame, and the clock moves.
   await page.locator('#sim-run-btn').click();
-  await expect(page.locator('#sim-results'), '#sim-results stays visible in the HUD').toBeVisible();
+  await expect(page.locator('#sim-results'), '#sim-results keeps the run\'s clock (folded into Details in Edison, #193)').toContainText(CLOCK);
   const live = async () => {
     const s = await snapshot(page);
     if (s.clock === null) return 'no "t = … s" clock in #sim-results yet';

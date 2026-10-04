@@ -5,8 +5,9 @@
 //  list of lab starter circuits, one per lab sheet (labs/sheets.js), as
 //  "Lab <n>: <title>". Picking one fetches the sheet's starter .sparky
 //  and loads it with App.loadCircuitData, the same path as opening a
-//  file, so it is one undo step. The menu closes on a pick, an outside
-//  click or Esc.
+//  file, so it is one undo step, then frames it from FRAME_DISTANCE back
+//  so the board and the mat show around a lone starter part (#194). The
+//  menu closes on a pick, an outside click or Esc.
 //
 //  On load, ?lab=<id> opens that lab; otherwise ?open=<path> (a path from
 //  Plugged/, e.g. edison/figures/ohm.sparky) loads that circuit, but only
@@ -23,6 +24,8 @@
 //  urlFor(id)  → the lab sheet's starter, relative to circuit3d/index.html
 //                (null for an id with no sheet)
 //  labFromSearch(search) → the ?lab= id in a location.search, or null
+//  FRAME_DISTANCE  the closest the camera comes when a lab opens
+//                (App.frameCircuit's minDistance; a saved circuit gets 6)
 // ─────────────────────────────────────────────────────────────
 
 (function (root, factory) {
@@ -45,6 +48,11 @@
 
   const labFromSearch = search => new URLSearchParams(search || '').get('lab') || null;
 
+  // Picked from 1440×900 screenshots of Lab 2 with the sheet and chat open
+  // (a 608 px canvas): at 12, U1, all four supply rails and a strip of mat
+  // beyond each long edge of the board; at 6, U1 filled the view.
+  const FRAME_DISTANCE = 12;
+
   if (typeof document !== 'undefined') {
     wire();
     // Every script tag, app.js's boot included, has run by DOMContentLoaded.
@@ -60,7 +68,7 @@
     const sheet = window.LabSheets ? LabSheets.get(id) : null;
     if (!sheet) { App.setHint(`There's no ${id}`, 4000); return; }
     if (window.LabSheet) LabSheet.open(id);
-    load({ id, title: `${sheet.code}: ${sheet.title}` }, sheet.starter);
+    load({ id, title: `${sheet.code}: ${sheet.title}` }, sheet.starter, FRAME_DISTANCE);
   }
 
   // ?open= (the textbook's "Open in the editor"): allow-listed like the viewer's ?circuit=.
@@ -84,7 +92,7 @@
       item.className = 'labs-menu-item';
       item.setAttribute('role', 'menuitem');
       item.textContent = lab.title;
-      item.addEventListener('click', () => { close(); load(lab); });
+      item.addEventListener('click', () => { close(); load(lab, urlFor(lab.id), FRAME_DISTANCE); });
       menu.appendChild(item);
     }
 
@@ -104,7 +112,9 @@
     });
   }
 
-  async function load(lab, url = urlFor(lab.id)) {
+  // frameDistance: a lab's wider view; without it the circuit is framed as
+  // any opened file is (App.loadCircuitData).
+  async function load(lab, url = urlFor(lab.id), frameDistance) {
     let data;
     try {
       const res = await fetch(url);
@@ -115,8 +125,9 @@
       return false;
     }
     App.loadCircuitData(data);
+    if (frameDistance) App.frameCircuit({ minDistance: frameDistance });
     return true;
   }
 
-  return { LABS, urlFor, labFromSearch };
+  return { LABS, urlFor, labFromSearch, FRAME_DISTANCE };
 });

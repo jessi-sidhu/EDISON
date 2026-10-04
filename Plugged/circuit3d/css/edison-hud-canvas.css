@@ -29,12 +29,14 @@ html[data-ui="edison"] .hud-bracket-tr { top: 16px; right: 16px; border-top-widt
 html[data-ui="edison"] .hud-bracket-bl { bottom: 16px; left: 16px; border-bottom-width: 1px; border-left-width: 1px; }
 html[data-ui="edison"] .hud-bracket-br { bottom: 16px; right: 16px; border-bottom-width: 1px; border-right-width: 1px; }
 
-/* ── Title block, top left: the name over the live status line ── */
+/* ── Title block, top left: the name over the live status line and Details ── */
 html[data-ui="edison"] .hud-title {
   position: absolute; top: 7px; left: 42px; padding: 6px 10px 5px; pointer-events: none;
+  display: grid; grid-template-columns: auto auto; justify-content: start; align-items: end; column-gap: 14px;
   background: var(--hc-veil); font-family: var(--hc-mono); color: var(--hc-ink);
 }
 html[data-ui="edison"] .hud-title p { margin: 0; white-space: nowrap; }
+html[data-ui="edison"] .hud-title-name { grid-column: 1 / -1; }
 html[data-ui="edison"] .hud-title-name {
   font-size: 17px; font-weight: 400; line-height: 22px; letter-spacing: 0.1em; text-transform: uppercase;
 }
@@ -49,6 +51,35 @@ html[data-ui="edison"] .hud-status-dot {
   background: var(--hc-blue); color: transparent; font-size: 0;
 }
 html[data-ui="edison"] .hud-status-bad { background: var(--hc-pink); }
+/* The problem count and Details +/− open the drawer, so they take clicks
+   through the title block's pointer-events: none. */
+html[data-ui="edison"] .hud-status-count { pointer-events: auto; cursor: pointer; }
+html[data-ui="edison"] .hud-status-count:hover { color: var(--hc-ink); text-decoration: underline; text-underline-offset: 3px; }
+html[data-ui="edison"] .hud-details-btn {
+  height: 18px; padding: 0 6px; background: transparent; border: 1px solid var(--hc-line); border-radius: 0;
+  font: 400 11px/16px var(--hc-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--hc-ink);
+  white-space: nowrap; cursor: pointer; pointer-events: auto;
+}
+html[data-ui="edison"] .hud-details-btn:hover, html[data-ui="edison"] .hud-details-btn[aria-expanded="true"] { border-color: var(--hc-ink); }
+
+/* ── Details drawer (#193): the results and mistakes boxes, one column
+   under the title block. Closed, they're hidden by CSS only: their text
+   stays for the code and specs that read it, and !important beats the
+   inline display simulate.js and tools/mistakes.js set on every solve. ── */
+html[data-ui="edison"] #canvas-wrap:not([data-hud-details="open"]) #sim-results,
+html[data-ui="edison"] #canvas-wrap:not([data-hud-details="open"]) #mistakes-panel { display: none !important; }
+html[data-ui="edison"] .hud-drawer {
+  position: absolute; top: 70px; left: 42px; display: flex; flex-direction: column;
+  width: max-content; min-width: 260px; max-width: 420px; max-height: calc(100% - 124px); overflow-y: auto;
+  pointer-events: auto;
+}
+html[data-ui="edison"] .hud-drawer #sim-results, html[data-ui="edison"] .hud-drawer #mistakes-panel {
+  position: static; width: auto; min-width: 0; max-height: none; overflow: visible; padding: 8px 12px;
+  background: var(--hc-k); border: 1px solid var(--hc-line); border-radius: 0; box-shadow: none;
+  font: 400 11px/1.6 var(--hc-mono); letter-spacing: 0.04em; color: var(--hc-ink);
+}
+html[data-ui="edison"] .hud-drawer #mistakes-panel { border-top-color: var(--hc-k); }
+html[data-ui="edison"] .hud-drawer .sim-clock { border-bottom-color: var(--hc-line); color: var(--hc-grey); }
 
 /* ── The hint: a caps grey line at the bottom, clear of Reset View ── */
 html[data-ui="edison"] #hint-box {

@@ -49,11 +49,15 @@
   }
 
   // The circuit is framed for the canvas it had; frame it again once the
-  // canvas has its narrower size (scene.js's observer has run by then).
+  // canvas has its narrower size (scene.js's observer has run by then), from
+  // a lab's distance (tools/labs.js's FRAME_DISTANCE, #194).
   function reframeOnResize() {
     const wrap = document.getElementById('canvas-wrap');
     if (!wrap || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => { ro.disconnect(); if (App.frameCircuit) App.frameCircuit(); });
+    const ro = new ResizeObserver(() => {
+      ro.disconnect();
+      if (App.frameCircuit) App.frameCircuit({ minDistance: window.Labs ? Labs.FRAME_DISTANCE : undefined });
+    });
     ro.observe(wrap);
   }
 

@@ -164,10 +164,19 @@ test('?lab=lab9 (no such lab): the hint "There\'s no lab9", no sheet, nothing lo
   expect(errors).toEqual([]);
 });
 
-// Depends on Edison E1 (#147: edison/tokens.css, edison/ui-flag.js) and on
-// circuit3d/index.html loading them (the E2 head tags). Until both are on
-// this branch, data-ui is never set and this case fails on that.
-test('Edison styling (needs E1 + E2): ?lab=lab1&ui=edison gives the sheet the pad background rgb(233, 239, 226)', async ({ page }) => {
+// Edison styling: the Lab HUD's black sheet (issue #194; it was the pad,
+// rgb(233, 239, 226), before). The rest of the HUD look (DM Mono, the caps
+// code row, the grey Not yet outline, the square close button) and the wider
+// lab view are e2e/edison-hud-lab.spec.js. This case owns the failed tag:
+// Lab 1 is the lab whose steps can fail. R1 goes to 4.7 kΩ through
+// App.setValues, the inspector's own call (the inspector edit itself is the
+// first case above).
+const HUD_BLUE = 'rgb(61, 123, 255)';   // #3D7BFF: Passed
+const HUD_PINK = 'rgb(255, 61, 127)';   // #FF3D7F: Check failed
+
+test('Edison styling: ?lab=lab1&ui=edison gives the sheet the Lab HUD black rgb(16, 16, 16); after Run a Passed tag is square HUD blue, and R1 at 4.7 kΩ turns the I(R1) step\'s tag and dot HUD pink', async ({ page }) => {
+  test.setTimeout(60_000);   // a Run on a slow CI runner (software WebGL)
+  await page.setViewportSize({ width: 1440, height: 900 });
   const errors = watchErrors(page);
   await openLab(page, 'lab=lab1&ui=edison');
   await expect(page.locator('#lab-sheet'), 'the lab sheet opens in Edison too').toBeVisible();
@@ -175,7 +184,25 @@ test('Edison styling (needs E1 + E2): ?lab=lab1&ui=edison gives the sheet the pa
     ui: document.documentElement.dataset.ui || null,
     background: getComputedStyle(document.getElementById('lab-sheet')).backgroundColor,
   }));
-  expect(got, 'Edison is on, and the sheet sits on the pad colour').toEqual({ ui: 'edison', background: 'rgb(233, 239, 226)' });
+  expect.soft(got, 'Edison is on, and the sheet is the HUD black (was the pad, rgb(233, 239, 226))').toEqual({ ui: 'edison', background: 'rgb(16, 16, 16)' });
+
+  // Run: the measure steps pass, and a Passed tag is a square blue tag.
+  await expect.poll(() => labels(page), { message: '?lab=lab1 loads PS1, R1, R2 and R3' }).toEqual(['PS1', 'R1', 'R2', 'R3']);
+  const steps = await lab1Steps(page);
+  const r1 = steps.find(s => s.kind === 'measure' && s.label === 'R1' && s.quantity === 'I');
+  expect(r1, 'a step measures I(R1)').toBeTruthy();
+  await page.locator('#sim-run-btn').click();
+  await expect(pill(page, r1.n), 'after Run the I(R1) step reads Passed').toHaveText(/^\s*Passed\s*$/);
+  await expect.soft(pill(page, r1.n), 'a Passed tag is HUD blue').toHaveCSS('background-color', HUD_BLUE, { timeout: 2000 });
+  await expect.soft(pill(page, r1.n), 'a Passed tag is square').toHaveCSS('border-radius', '0px', { timeout: 2000 });
+
+  // Check failed: R1 at 4.7 kΩ re-solves to I(R1) = 10 / 6020 = 1.66 mA.
+  await page.evaluate(() => App.setValues(App.state.components.find(c => c.label === 'R1'), { resistance: 4700 }));
+  await expect(pill(page, r1.n), 'R1 at 4.7 kΩ: the I(R1) step reads Check failed').toHaveText(/^\s*Check failed\s*$/);
+  await expect.soft(pill(page, r1.n), 'a Check failed tag is HUD pink').toHaveCSS('background-color', HUD_PINK, { timeout: 2000 });
+  await expect.soft(pill(page, r1.n), 'a Check failed tag is square').toHaveCSS('border-radius', '0px', { timeout: 2000 });
+  await expect.soft(page.locator('#lab-sheet .lab-stepper-dot').nth(r1.n - 1), 'its stepper dot is HUD pink')
+    .toHaveCSS('background-color', HUD_PINK, { timeout: 2000 });
   expect(errors).toEqual([]);
 });
 
@@ -258,7 +285,9 @@ test('?lab=lab2&ui=edison loads the Lab 2 starter (unwired) and LAB-02 with ever
   }, [CLOCK.source, peak.pin]);
 
   await page.locator('#sim-run-btn').click();
-  await expect(page.locator('#sim-results')).toBeVisible();
+  // The run started: its clock in #sim-results (in Edison the box folds into
+  // the Details drawer, #193, so its text, not its visibility).
+  await expect(page.locator('#sim-results')).toContainText(CLOCK);
 
   // Wait on sim time, never wall time: 2 s on the clock, and a frame that has
   // shown OUT1 at its crest (within the step's tolerance of its expected

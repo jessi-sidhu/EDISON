@@ -1,0 +1,55 @@
+/* ─────────────────────────────────────────────
+   edison-hud-lab.css — the lab sheet in the Lab HUD (issue #194). The pad
+   sheet becomes a black panel like the parts sidebar, reading edison-hud.css's
+   --hud-* properties: DM Mono, hairline rules, a caps code row over a
+   sentence-case title, square status tags. Not yet is a grey outline,
+   Passed the HUD blue, Check failed the pink; dark text on both for
+   contrast. Caps from CSS only: the DOM text stays as labs/sheets.js writes
+   it. Every rule is scoped to html[data-ui="edison"], so classic keeps
+   lab-sheet.css as it is.
+───────────────────────────────────────────── */
+
+/* ── The panel ─────────────────────────────── */
+html[data-ui="edison"] #lab-sheet {
+  background: var(--hud-k); color: var(--hud-ink); border-color: var(--hud-rule); box-shadow: none;
+  font: 400 12px/1.6 var(--hud-mono);
+}
+
+/* ── Head: LAB-02  WEEK 4  [×], then the title ── */
+html[data-ui="edison"] .lab-sheet-head { gap: 8px 12px; padding: 12px 16px 16px; border-bottom-color: var(--hud-rule); }
+html[data-ui="edison"] .lab-sheet-code, html[data-ui="edison"] .lab-sheet-week {
+  font: 400 11px/1.4 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase;
+}
+html[data-ui="edison"] .lab-sheet-code  { color: var(--hud-ink); }
+html[data-ui="edison"] .lab-sheet-week  { color: var(--hud-grey); }
+html[data-ui="edison"] .lab-sheet-title { font: 400 17px/1.35 var(--hud-mono); letter-spacing: 0; color: var(--hud-ink); }
+html[data-ui="edison"] .lab-sheet-close {
+  width: 24px; height: 24px; background: transparent; border: 1px solid var(--hud-line); border-radius: 0;
+  color: var(--hud-ink); font: 400 14px/1 var(--hud-mono);
+}
+html[data-ui="edison"] .lab-sheet-close:hover { background: var(--hud-hover); border-color: var(--hud-ink); color: var(--hud-ink); }
+html[data-ui="edison"] .lab-sheet-close:focus-visible { outline: 1px solid var(--hud-ink); outline-offset: 1px; }
+
+/* ── Steps: hairline rows, a square tag on the right ── */
+html[data-ui="edison"] .lab-steps { padding: 0; scrollbar-color: #333333 var(--hud-k); }
+html[data-ui="edison"] .lab-steps::-webkit-scrollbar-thumb { background: #333333; }
+html[data-ui="edison"] .lab-step { gap: 6px 10px; padding: 12px 16px; border-bottom-color: var(--hud-rule); }
+html[data-ui="edison"] .lab-step-manual:hover { background: var(--hud-hover); }
+html[data-ui="edison"] .lab-step-manual:focus-visible { outline: 1px solid var(--hud-ink); outline-offset: -1px; }
+html[data-ui="edison"] .lab-step-n    { font-weight: 400; color: var(--hud-grey); }
+html[data-ui="edison"] .lab-step-text { color: var(--hud-ink); }
+html[data-ui="edison"] .lab-step-hint { color: var(--hud-pink); font-size: 11px; }
+html[data-ui="edison"] .lab-step-status {
+  padding: 1px 6px; background: transparent; border: 1px solid var(--hud-line); border-radius: 0;
+  color: var(--hud-grey); font: 400 11px/1.4 var(--hud-mono);
+}
+html[data-ui="edison"] .lab-step[data-status="passed"] .lab-step-status { background: var(--hud-blue); border-color: var(--hud-blue); color: var(--hud-k); }
+html[data-ui="edison"] .lab-step[data-status="failed"] .lab-step-status { background: var(--hud-pink); border-color: var(--hud-pink); color: var(--hud-k); }
+
+/* ── Foot: square stepper dots and the count ── */
+html[data-ui="edison"] .lab-sheet-foot {
+  gap: 12px; padding: 12px 16px; border-top-color: var(--hud-rule); color: var(--hud-grey); font: 400 11px/1.4 var(--hud-mono);
+}
+html[data-ui="edison"] .lab-stepper-dot { background: transparent; border: 1px solid var(--hud-line); border-radius: 0; }
+html[data-ui="edison"] .lab-stepper-dot[data-status="passed"] { background: var(--hud-blue); border-color: var(--hud-blue); }
+html[data-ui="edison"] .lab-stepper-dot[data-status="failed"] { background: var(--hud-pink); border-color: var(--hud-pink); }

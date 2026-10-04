@@ -1,6 +1,6 @@
 /* lab sheet (#151, Edison E5): built by js/tools/lab-sheet.js, docked left of
-   the canvas so the canvas narrows beside it. Classic tokens by default; the
-   Edison block below reads edison/tokens.css. */
+   the canvas so the canvas narrows beside it. Classic tokens; Edison's look
+   (the Lab HUD's black sheet, #194) is edison-hud-lab.css. */
 
 #lab-sheet {
   width: 260px;
@@ -108,41 +108,3 @@
     border-top: 1px solid var(--border);
   }
 }
-
-/* Edison (spec §4): the pad, solder-mask green for Passed, bus red for
-   Check failed, Barlow, B612 Mono for the lab code. No shadows. */
-html[data-ui="edison"] #lab-sheet {
-  background-color: var(--pad);
-  background-image: var(--pad-grid-image);
-  background-size: 20px 20px;
-  border-right-color: var(--pad-grid);
-  font-family: var(--font-ui);
-  color: var(--graphite);
-}
-html[data-ui="edison"] .lab-sheet-head,
-html[data-ui="edison"] .lab-step,
-html[data-ui="edison"] .lab-sheet-foot { border-color: var(--pad-grid); }
-html[data-ui="edison"] .lab-sheet-code  { font-family: var(--font-num); }
-html[data-ui="edison"] .lab-sheet-title { font-size: var(--t-20); font-weight: 600; }
-html[data-ui="edison"] .lab-sheet-week,
-html[data-ui="edison"] .lab-step-n,
-html[data-ui="edison"] .lab-sheet-foot  { color: var(--graphite-2); }
-/* Edison's type scale starts at 13 px: no 11-12 px text. */
-html[data-ui="edison"] .lab-sheet-week,
-html[data-ui="edison"] .lab-step-hint,
-html[data-ui="edison"] .lab-step-status,
-html[data-ui="edison"] .lab-sheet-foot  { font-size: var(--t-13); }
-html[data-ui="edison"] .lab-sheet-close {
-  border-color: var(--pad-grid);
-  border-radius: var(--r-control);
-  background: var(--pad);
-  color: var(--graphite-2);
-}
-html[data-ui="edison"] .lab-step-manual:hover { background: var(--pad-grid); }
-html[data-ui="edison"] .lab-step-hint { color: var(--bus-red); }
-html[data-ui="edison"] .lab-step-status { background: var(--pad-grid); color: var(--graphite); }
-html[data-ui="edison"] .lab-step[data-status="passed"] .lab-step-status { background: var(--mask); color: #fff; }
-html[data-ui="edison"] .lab-step[data-status="failed"] .lab-step-status { background: var(--bus-red); color: #fff; }
-html[data-ui="edison"] .lab-stepper-dot { background: var(--pad-grid); border: 1px solid var(--graphite-2); }
-html[data-ui="edison"] .lab-stepper-dot[data-status="passed"] { background: var(--mask); border-color: var(--mask); }
-html[data-ui="edison"] .lab-stepper-dot[data-status="failed"] { background: var(--bus-red); border-color: var(--bus-red); }

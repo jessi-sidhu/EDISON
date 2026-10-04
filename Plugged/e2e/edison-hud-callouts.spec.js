@@ -4,7 +4,9 @@
 // test/result-callouts.test.js; this spec is what needs a real page: a fault
 // callout drawn on U1 when its V− is unwired in Lab 2, its dot on U1's
 // projected position, the dot following the camera, #sim-results and the
-// mistakes panel kept as mistake-checker.spec expects, and nothing in classic.
+// mistakes panel keeping their text as mistake-checker.spec expects (in
+// Edison they fold into the Details drawer, #193: e2e/edison-hud-details.spec.js),
+// and in classic no callouts and both boxes shown as before.
 // /api/ask is stubbed and never called. Guest only; sign-in is a manual QA case.
 // Doesn't depend on #189/#190 (the HUD chrome): only on Lab 2 and the callouts.
 //
@@ -104,7 +106,7 @@ const anchorAndDot = page => page.evaluate(() => {
 
 const fmt = p => (p ? `(${Math.round(p.x)}, ${Math.round(p.y)})` : 'none');
 
-test('Edison, Lab 2 with U1\'s V− unwired: a fault callout on U1 says it has no supply, its dot on U1, following the camera; #sim-results and the mistakes panel stay, mistakes below', async ({ page }) => {
+test('Edison, Lab 2 with U1\'s V− unwired: a fault callout on U1 says it has no supply, its dot on U1, following the camera; #sim-results and the mistakes panel keep their text', async ({ page }) => {
   test.setTimeout(90_000);   // a time run on a slow runner (software WebGL)
   const errors = watchErrors(page);
   await openLab(page, 'lab=lab2&ui=edison');
@@ -151,32 +153,33 @@ test('Edison, Lab 2 with U1\'s V− unwired: a fault callout on U1 says it has n
   const moved = Math.hypot(at.anchor.x - before.x, at.anchor.y - before.y);
   expect(moved, `U1 moved on screen (${fmt(before)} → ${fmt(at.anchor)}), so the dot followed it`).toBeGreaterThan(40);
 
-  // The text panels stay: #sim-results visible with the run's lines, the
-  // mistakes panel visible with the no-supply row, below the results.
+  // The text panels keep their text (mistake-checker.spec reads it): the
+  // run's lines in #sim-results, the no-supply row in the mistakes panel. In
+  // Edison both fold into the Details drawer (#193); whether they show, and
+  // stack, is e2e/edison-hud-details.spec.js.
   const results = page.locator('#sim-results');
   const panel = page.locator('#mistakes-panel');
-  await expect(results, '#sim-results stays visible in Edison').toBeVisible();
-  await expect(results).toContainText(/no supply/i);
-  await expect(panel, 'the mistakes panel stays visible in Edison').toBeVisible();
+  await expect(results, '#sim-results keeps the run\'s lines in Edison').toContainText(/no supply/i);
   await expect(panel.locator('.mistake-row').filter({ hasText: /no supply/i }), 'the mistakes panel lists U1 with no supply').toHaveCount(1);
-  const rb = await results.boundingBox(), pb = await panel.boundingBox();
-  expect(rb && pb, 'both panels are on screen').toBeTruthy();
-  expect(pb.y, `the mistakes panel (top ${pb.y}) starts below the results (bottom ${rb.y + rb.height})`)
-    .toBeGreaterThanOrEqual(rb.y + rb.height - 1);
   expect(errors).toEqual([]);
 });
 
-// Pin (passes today; guards the html[data-ui="edison"] scoping): classic draws no callouts.
-test('pin: classic, the same Lab 2 board run: no callouts, the mistakes panel as before', async ({ page }) => {
+// Pin (passes today; guards the html[data-ui="edison"] scoping of #191 and
+// #193): classic draws no callouts, and its results and mistakes boxes show
+// over the board as before, with no Details drawer.
+test('pin: classic, the same Lab 2 board run: no callouts, #sim-results and the mistakes panel shown as before, no Details button', async ({ page }) => {
   test.setTimeout(90_000);
   const errors = watchErrors(page);
   await openLab(page, 'lab=lab2&ui=classic');
   await buildWithoutVneg(page);
   await page.locator('#sim-run-btn').click();
-  await expect(page.locator('#mistakes-panel .mistake-row').filter({ hasText: /no supply/i }),
-    'the run finished: the mistakes panel lists U1 with no supply').toHaveCount(1);
+  const row = page.locator('#mistakes-panel .mistake-row').filter({ hasText: /no supply/i });
+  await expect(row, 'the run finished: the mistakes panel lists U1 with no supply').toHaveCount(1);
   await drawn(page);
   await expect(page.locator('.result-callout, .result-callout-dot'), 'classic draws no callouts').toHaveCount(0);
   await expect(page.locator('#result-callouts'), 'and no callout overlay is shown').toBeHidden();
+  await expect(page.locator('#sim-results'), 'classic shows #sim-results over the board').toBeVisible();
+  await expect(row, 'and the mistakes panel with its rows').toBeVisible();
+  await expect(page.locator('.hud-details-btn:visible'), 'classic has no Details button').toHaveCount(0);
   expect(errors).toEqual([]);
 });

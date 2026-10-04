@@ -104,7 +104,7 @@
       const mat = new THREE.MeshPhysicalMaterial({ color: hexColor, roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.3,
                                                    envMapIntensity: 0.35 });
       const SLEEVE = 0.09;   // where the insulation ends above a board hole
-      const onBoard = p => p.y <= 0.15;   // a board hole, not a raised terminal (battery, supply)
+      const onBoard = p => Math.abs(p.y) < 0.01;   // a board hole (y 0), not a terminal: a battery's, or a supply's on Edison's bench
 
       // Use actual pin height for arc endpoints
       const startY = onBoard(start) ? SLEEVE : start.y;
