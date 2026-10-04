@@ -9,7 +9,9 @@
 //  elements (one per op-amp), each from its OUT to V− with rails
 //  [V−, V+]: it amplifies, clips 1.5 V inside its rails, and limits its
 //  output to 20 mA. The inputs draw no current (JFET inputs). With
-//  either rail unsupplied, the simulator leaves both outputs open.
+//  either rail unsupplied, the simulator leaves both outputs open. A half
+//  with an input that connects to nothing and its output wired is opened
+//  too, when the board won't solve otherwise (issue #1).
 //
 //  The AI (#118): its pack goes only with place_tl072 (keywords below),
 //  and it is listed in the catalogue only then (ai.listed 'in-play'), so
@@ -38,6 +40,7 @@
   const ILIM     = 0.02;    // A
 
   const PINS = ['out1', 'in1n', 'in1p', 'vneg', 'in2p', 'in2n', 'out2', 'vpos'];
+  const LABELS = ['OUT1', 'IN1−', 'IN1+', 'V−', 'IN2+', 'IN2−', 'OUT2', 'V+'];   // datasheet names (U+2212 minus)
   const OPS  = [{ id: 'op1', out: 'out1', plus: 'in1p', minus: 'in1n' },
                 { id: 'op2', out: 'out2', plus: 'in2p', minus: 'in2n' }];
 
@@ -65,9 +68,10 @@
   const plainV = (v, d) => (v < 0 ? '−' : '') + Math.abs(v).toFixed(d) + ' V';
 
   // One op-amp's state in words: its Vout, or why it's pinned. A half
-  // with both inputs floating is unused, not clipped.
-  function state(v, mode, unused) {
-    if (mode === 'open') return 'no supply (output open)';
+  // with both inputs floating is unused, not clipped. An open half was
+  // opened because an input connects to nothing (inputsOut), or has no supply.
+  function state(v, mode, unused, inputsOut) {
+    if (mode === 'open') return inputsOut ? 'inputs not connected (output open)' : 'no supply (output open)';
     if (unused) return 'unused';
     if (mode === 'isrc+' || mode === 'isrc−') return `current-limited at ${ILIM * 1000} mA`;
     if (v === null) return 'floating';
@@ -75,19 +79,40 @@
     return plainV(Math.abs(v) < 0.005 ? 0 : v, 2);
   }
 
-  const unpowered = m => m.mode1 === 'open' || m.mode2 === 'open';
+  // The simulator says which halves it opened for a floating input
+  // (r.floatingInputs, issue #1); any other open half has no supply.
+  const floats    = (r, k) => !!(r.floatingInputs && r.floatingInputs[OPS[k - 1].id]);
+  const unpowered = (r, m) => (m.mode1 === 'open' && !floats(r, 1)) || (m.mode2 === 'open' && !floats(r, 2));
+  const states    = (r, m) => [1, 2].map(k => state(m['vout' + k], m['mode' + k], m['unused' + k], floats(r, k)));
+
+  // A half opened for a floating input: its output and the inputs that read null.
+  function floatingWarning(r, o) {
+    const out = LABELS[PINS.indexOf(o.out)];
+    const ins = [o.plus, o.minus].filter(p => r.pins[p] === null).map(p => LABELS[PINS.indexOf(p)]);
+    if (!ins.length) return null;
+    const one = ins.length === 1;
+    return `${r.label}: ${ins.join(' and ')} connect${one ? 's' : ''} to nothing, so ${out} drives nothing. ` +
+           `Wire ${one ? 'that input' : 'its inputs'} or clear ${out}'s column.`;
+  }
 
   function warnings(r, m) {
-    return unpowered(m) ? ['the op-amp has no supply: wire V+ (pin 8) and V− (pin 4)'] : [];
+    if (unpowered(r, m)) return ['the op-amp has no supply: wire V+ (pin 8) and V− (pin 4)'];
+    return OPS.filter((o, k) => floats(r, k + 1)).map(o => floatingWarning(r, o)).filter(Boolean);
   }
 
+  // A half opened for a floating input drops "(output open)" when the line
+  // would run past 80 characters; its warning says so.
   function report(r, m) {
-    if (unpowered(m)) return 'no supply: both outputs open';
-    return `op-amp 1 ${state(m.vout1, m.mode1, m.unused1)}; op-amp 2 ${state(m.vout2, m.mode2, m.unused2)}`.slice(0, 80);
+    if (unpowered(r, m)) return 'no supply: both outputs open';
+    const [s1, s2] = states(r, m), full = `op-amp 1 ${s1}; op-amp 2 ${s2}`;
+    return (full.length > 80 ? full.replace(/ \(output open\)/g, '') : full).slice(0, 80);
   }
 
-  const line = (r, m) => (unpowered(m) ? null
-    : { text: `  🔺 TL072 ${r.label}: op-amp 1 ${state(m.vout1, m.mode1, m.unused1)} · op-amp 2 ${state(m.vout2, m.mode2, m.unused2)}`, cls: 'sim-on' });
+  const line = (r, m) => {
+    if (unpowered(r, m)) return null;
+    const [s1, s2] = states(r, m);
+    return { text: `  🔺 TL072 ${r.label}: op-amp 1 ${s1} · op-amp 2 ${s2}`, cls: 'sim-on' };
+  };
 
   // ── The model: a DIP-8 across the gap. A matte black epoxy body that
   //  tapers to its top and bottom from the parting line, the pin-1 notch
@@ -198,7 +223,7 @@
     place:    { kind: 'footprint', legs: LEGS, straddle: true, rotations: [0, 180] },
     // The inspector's top-view diagram (#132), in pin order (U+2212 minus).
     pinout:   { title: 'TL072 (top view)', style: 'dip',
-                labels: ['OUT1', 'IN1−', 'IN1+', 'V−', 'IN2+', 'IN2−', 'OUT2', 'V+'] },
+                labels: LABELS },
 
     elements,
     measure,

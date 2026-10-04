@@ -121,9 +121,9 @@ The element `pins` name the part's pins, or internal nodes written `'#name'` (pr
 | `low` | `lo` behind `rout` | `u ≤ lo` and `|I| ≤ ilim` |
 | `isrc+` | `I = +ilim` | `V(out+) ≤ clamp(u, lo, hi) − rout·ilim` (the clipped drive would push more) |
 | `isrc−` | `I = −ilim` | `V(out+) ≥ clamp(u, lo, hi) + rout·ilim` |
-| `open` | `I = 0` (drives nothing) | Unpowered: a `rails` pin reaches no source through wires and the other elements (the E's own output pair doesn't count). Not a mode block; set before the solve, never flipped. |
+| `open` | `I = 0` (drives nothing) | Not a mode block; never flipped. Set for one of two reasons. **Unpowered**, before the solve: a `rails` pin reaches no source's `ref` pin through wires and the non-`E` elements (`unpoweredEs` leaves out every `E`, so no op-amp's output counts as a supply; an open `SW`, or a `C` outside a time step, doesn't join either). **A floating input** (#1), only when the first solve fails: an `E` with `rails` that has a `ctrl` pin no other pin reaches (only this E's own inputs on its node, through holes and wires) and an `out+` that reaches another part's pin. The board is solved once more with those open too, and each one is named in its part's `r.floatingInputs`. |
 
-An `E` with `rails` whose rail pin isn't connected to any source has its output open (`open` above), so a chip with no supply drives nothing. Boards with no E with `rails` are unaffected.
+An `E` with `rails` whose rail pin isn't connected to any source has its output open (`open` above), so a chip with no supply drives nothing. When a board can't be solved, an `E` with a floating input and its output wired to another part is opened too, and the board is solved once more; "cannot be solved" only if that also fails (#1). A board that solves first time is unchanged. Boards with no E with `rails` are unaffected.
 
 A board with no `E` solves exactly as before.
 
@@ -145,6 +145,7 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
   modes:   { d: 'on' },                       // mode blocks only
   open:    { d: 9.00 },                       // volts across each mode block with every mode block off
   swings?: true,                              // on every part when the board holds a sine that crosses 0 V (amplitude > |offset|)
+  floatingInputs?: { op2: true },             // E ids the simulator opened for a floating input (#1, the `open` mode); absent when none
 }
 ```
 
@@ -369,7 +370,7 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
   - `voltage(hole | net)` → volts, or `null` when floating
   - `part(label)` → `{ V, I, P, rating, over, energy?, opamps?, channels? }`
     - `channels: [{ name, V }]` only from a part's `reading` hook: an independent bench supply gives `[{ name: 'CH1', V: pos − com }, { name: 'CH2', V: com2 − neg }]`, and its V is CH1's. In series its V is pos − neg, with no `channels`.
-    - A part with `E` elements (an op-amp) has `opamps: [{ pin, vout, mode, iout, ilim, unused }]`, one per E: its `out+` pin, Vout there (V vs ground, signed), the E's mode, Iout (mA, + sourcing out of `out+`), `ilim` (mA), and `unused` (both `ctrl` pins floating: a half nobody wired). Its V and I are op-amp 1's Vout and Iout, P is `null`.
+    - A part with `E` elements (an op-amp) has `opamps: [{ pin, vout, mode, iout, ilim, unused, floating }]`, one per E: its `out+` pin, Vout there (V vs ground, signed), the E's mode, Iout (mA, + sourcing out of `out+`), `ilim` (mA), `unused` (both `ctrl` pins floating: a half nobody wired), and `floating` (`true` when its PartResult's `floatingInputs` names this E: the simulator opened it because an input connects to nothing and its output is wired (#1); `false` otherwise, an unpowered chip included). Its V and I are op-amp 1's Vout and Iout, P is `null`.
     - V is the voltage across the part's outer pins, I is its current, and P = V·I, in W (I is in mA, so P = V × I ÷ 1000).
     - `rating` comes from the part's own values where it has one. Resistors are rated **¼ W**. A part with no rating has none.
     - `energy` is ½CV², in µJ, for capacitors only.

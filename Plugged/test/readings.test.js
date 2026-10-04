@@ -535,3 +535,52 @@ test('thevenin leaves the board and this solve\'s readings as they were', () => 
   near(r1.I, 3, 1e-6, 'R1.I (mA) after thevenin');
   assert.strictEqual(readings.part('IS1'), null, 'no current source is left in this solve');
 });
+
+// ── 10. part(label).opamps: why a half is open (issue #1) ──────
+// Each opamps entry gains `floating`: true when the simulator opened the
+// half because an input touches nothing (its PartResult's r.floatingInputs
+// names the half's E id); false otherwise (a half that drives, or a chip with
+// no supply). The hover card words an open half from it.
+// PS1 at 12 V (+ on tp, COM on tn), the TL072 at f30 facing right: OUT1 f30,
+// IN1− f31, IN1+ f32, V− f33, IN2+ e33, IN2− e32, OUT2 e31, V+ e30.
+
+const PS1    = { type: 'bench_supply', label: 'PS1', values: { voltage: 12 } };
+const TL072  = { type: 'tl072', label: 'U1', holes: ['f30', 'f31', 'f32', 'f33', 'e33', 'e32', 'e31', 'e30'] };
+const SUPPLY = [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63']];
+const VPOS = ['tp_30', 'a30'], VNEG = ['j33', 'tn_33'];   // V+ (pin 8) +12 V, V− (pin 4) 0 V
+const OUT2_HIGH = ['a31', 'tp_31'];
+// OUT2 on +12 V with every input floating, and the supply wired as `rails` says.
+const UNPOWERED = [['no rails', []], ['V+ only', [VPOS]], ['V− only', [VNEG]]];
+
+function opampsOf(pairs) {
+  const { result, readings } = solve([PS1, TL072], pairs);
+  const part = readings.part('U1');
+  assert.ok(part && Array.isArray(part.opamps), `readings.part(U1).opamps is missing (status ${result.status}); got ${JSON.stringify(part)}`);
+  return part.opamps;
+}
+const without = (o, key) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key));
+
+test('opamps (#1): repro A (rails wired, OUT2 on +12 V, IN2± floating) — op-amp 2 is open with floating: true; the unused op-amp 1 has floating: false', () => {
+  const [op1, op2] = opampsOf([...SUPPLY, VPOS, VNEG, OUT2_HIGH]);
+  assert.strictEqual(op2.mode, 'open', `op-amp 2: ${JSON.stringify(op2)}`);
+  assert.strictEqual(op2.floating, true, `op-amp 2 was opened because its inputs float: ${JSON.stringify(op2)}`);
+  assert.strictEqual(op1.mode, 'low', `op-amp 1, an unused half: ${JSON.stringify(op1)}`);
+  assert.strictEqual(op1.floating, false, `op-amp 1 drives (low), so it isn't floating: ${JSON.stringify(op1)}`);
+});
+
+test('opamps (#1): an unpowered chip (no rails, V+ only, V− only) has floating: false on both halves', () => {
+  for (const [what, rails] of UNPOWERED) {
+    const ops = opampsOf([...SUPPLY, ...rails, OUT2_HIGH]);
+    assert.deepStrictEqual(ops.map(o => o.floating), [false, false], `${what}: ${JSON.stringify(ops)}`);
+  }
+});
+
+test('pin (#1): an unpowered chip\'s opamps entries keep today\'s other fields (both open, 0 mA, 20 mA limit, unused)', () => {
+  for (const [what, rails] of UNPOWERED) {
+    const ops = opampsOf([...SUPPLY, ...rails, OUT2_HIGH]);
+    assert.deepStrictEqual(ops.map(o => without(o, 'floating')), [
+      { pin: 'out1', vout: null, mode: 'open', iout: 0, ilim: 20, unused: true },
+      { pin: 'out2', vout: 12,   mode: 'open', iout: 0, ilim: 20, unused: true },
+    ], what);
+  }
+});

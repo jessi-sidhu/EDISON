@@ -296,7 +296,7 @@
     //   high    V(out+) − V(vpos) + rout·j = −headroom
     //   low     V(out+) − V(vneg) + rout·j = +headroom
     //   isrc±   j = ±ilim
-    //   open    j = 0 (unpowered: a rail reaches no source)
+    //   open    j = 0 (unpowered: a rail reaches no source; or a floating input, issue #1)
     // An E that is not a mode block (no rails, no ilim) is always linear.
     es.forEach((e, k) => {
       const row = N + vs.length + k, el = e.el, [op, om] = e.nodes;
@@ -473,6 +473,28 @@
     return new Set(es.filter(e => e.rails.some(n => !fed.has(uf.find(n)))));
   }
 
+  // The E elements with rails (not in skip) that have a floating input and
+  // a driven output: an input pin whose node no other pin reaches (only this
+  // E's own inputs, through holes and wires), and an output that reaches a
+  // pin of another part. GMIN alone holds that input, so once the output is
+  // pinned the E's pivot falls under PIVOT_EPS (issue #1). Each is opened
+  // only when the board won't solve otherwise.
+  function floatingInputEs(graph, skip) {
+    // Does a pin of any entry reach node, besides the pins leftOut(entry, pin) names?
+    const reached = (node, leftOut) => graph.some((h, hi) => h.nodes.some((n, k) => n === node && !leftOut(hi, k)));
+    const out = new Set();
+    graph.forEach((g, gi) => {
+      if (!g.part) return;
+      g.part.els.forEach(e => {
+        if (e.el.kind !== 'E' || !e.rails || skip.has(e)) return;
+        const own = e.el.ctrl.map(p => g.part.def.pins.indexOf(p));
+        const floats = own.some((k, j) => k >= 0 && !reached(e.ctrl[j], (hi, q) => hi === gi && own.includes(q)));
+        if (floats && reached(e.nodes[0], hi => hi === gi)) out.add(e);
+      });
+    });
+    return out;
+  }
+
   function groundCircuits(graph, modeOf) {
     const uf = new UnionFind();
     graph.forEach(g => {
@@ -522,7 +544,9 @@
   // vf > 0 along a chain, so it settles within one pass per diode.
   // swings: true on every result when the board holds a sine that crosses
   // 0 V (crossesZero), absent otherwise.
-  function partResults(graph, sol, live, modeOf, openSol) {
+  // floating (optional): the E elements the retry opened for a floating
+  // input (issue #1); a part with any gets floatingInputs { [E id]: true }.
+  function partResults(graph, sol, live, modeOf, openSol, floating) {
     const swings = allElements(graph).some(e => crossesZero(e.el));
     const cap = new Map();   // floating node → its lowest cap
     const offEls = [...modeOf].filter(([, mode]) => mode === 'off').map(([e]) => e);
@@ -555,6 +579,7 @@
         if (mode === undefined) return;
         r.modes[id] = mode;
         r.open[id] = openSol ? openSol.v(e.nodes[0]) - openSol.v(e.nodes[1]) : 0;
+        if (floating && floating.has(e)) (r.floatingInputs = r.floatingInputs || {})[id] = true;
       });
       const m = def.measure ? def.measure(r) : {};
       return { r, m, warnings: def.warnings ? def.warnings(r, m) : [] };
@@ -728,18 +753,29 @@
     }
 
     // Every mode block (D, and E with rails or ilim) in board order, and the
-    // loop that settles them. An unpowered E is no block: it stays open.
+    // loop that settles them. An open E (unpowered, or a floating input
+    // below) is no block: it stays open.
     const { grounds } = groundCircuits(graph);
     const unpowered = unpoweredEs(graph);
-    const blockEls = els.filter(e => e.el.kind === 'D' || (isModeE(e) && !unpowered.has(e)));
-    const blocks   = blockEls.map(e => (e.el.kind === 'E'
-      ? { initial: 'linear', check: (sol, mode) => checkE(e, sol, mode) }
-      : { initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
-    const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]).concat([...unpowered].map(e => [e, 'open'])));
     const waveT    = timed && Number.isFinite(step.t) ? step.t : undefined;
-    const solveFor = modes => solveMNA(graph, grounds, modesOf(modes), parallel.skip, waveT);
+    const settle   = open => {
+      const blockEls = els.filter(e => e.el.kind === 'D' || (isModeE(e) && !open.has(e)));
+      const blocks   = blockEls.map(e => (e.el.kind === 'E'
+        ? { initial: 'linear', check: (sol, mode) => checkE(e, sol, mode) }
+        : { initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
+      const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]).concat([...open].map(e => [e, 'open'])));
+      const solveFor = modes => solveMNA(graph, grounds, modesOf(modes), parallel.skip, waveT);
+      return { blockEls, modesOf, solveFor, solved: settleModes(blocks, solveFor) };
+    };
 
-    const solved = settleModes(blocks, solveFor);
+    // No solve: an op-amp with a floating input and a driven output can
+    // make the matrix singular (issue #1). Once more with those open.
+    let attempt = settle(unpowered), floating = null;
+    if (!attempt.solved) {
+      floating = floatingInputEs(graph, unpowered);
+      if (floating.size) attempt = settle(new Set([...unpowered, ...floating]));
+    }
+    const { blockEls, modesOf, solveFor, solved } = attempt;
     if (!solved) {
       lines.push({ text: '  ⚠ This circuit cannot be solved. Two batteries may be wired straight into each other.', cls: 'sim-err' });
       return done({ status: 'unsolvable', lines: withHeads(null) });
@@ -790,7 +826,7 @@
 
     const currents = graph.map(g => (g.part ? partAmps(g, sol, modeOf) : 0));
 
-    const results = partResults(graph, sol, live, modeOf, openSol);
+    const results = partResults(graph, sol, live, modeOf, openSol, floating);
     const parts = {};
     graph.forEach((g, i) => { if (results[i] && g.comp.label != null) parts[g.comp.label] = results[i]; });
     const extra = { graph, results, live };

@@ -10,7 +10,7 @@
 //      part(label)     { V, I, P, rating, over }, plus energy (µJ) for a
 //                      capacitor; or null without readings. A part with E
 //                      elements (an op-amp) also has opamps[{ pin, vout,
-//                      mode, iout, ilim, unused }] and V, I are op-amp 1's Vout
+//                      mode, iout, ilim, unused, floating }] and V, I are op-amp 1's Vout
 //                      (signed, vs ground) and Iout (+ sourcing). A part
 //                      def's reading(r) hook may set V and P and add
 //                      channels[{ name, V }] (an independent bench supply)
@@ -161,8 +161,9 @@
     }
 
     // Each E element of a part: its out+ pin, Vout there (V vs ground),
-    // mode, Iout (mA, + out of out+), ilim (mA), and unused: both its
-    // ctrl pins floating (an op-amp half nobody wired).
+    // mode, Iout (mA, + out of out+), ilim (mA), unused: both its ctrl
+    // pins floating (an op-amp half nobody wired), and floating: the
+    // simulator opened it because an input floats (r.floatingInputs, #1).
     function opampsOf(g, pr) {
       const out = [];
       g.part.els.forEach((e, k) => {
@@ -171,7 +172,8 @@
         const v = pr.r.pins[e.el.out[0]], i = pr.r.current[id];
         out.push({ pin: e.el.out[0], vout: typeof v === 'number' ? v : null, mode: pr.r.modes[id] || null,
                    iout: typeof i === 'number' ? i : null, ilim: e.el.ilim !== undefined ? e.el.ilim * 1000 : null,
-                   unused: e.el.ctrl.every(n => pr.r.pins[n] === null) });
+                   unused: e.el.ctrl.every(n => pr.r.pins[n] === null),
+                   floating: !!(pr.r.floatingInputs && pr.r.floatingInputs[id]) });
       });
       return out;
     }
