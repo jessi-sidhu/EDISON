@@ -13,6 +13,11 @@
 //   tools, nothing carried over from the primary's rounds. This holds on any
 //   round, not only the first. The fallback never switches back and is not
 //   retried itself.
+// - Since issue #4 the primary timeout applies only with reasoning off
+//   (DEEPSEEK_THINKING=0) or in explain mode, which never reasons. With
+//   reasoning on (the default; a build took 8–195 s) a primary request that
+//   runs long is never switched: only a 5xx or a network error falls back.
+//   So these tests run with DEEPSEEK_THINKING=0 unless they say otherwise.
 // - A 4xx from the primary (bad request, bad key, empty balance, rate limit)
 //   never falls back: the error stands, and /api/ask answers 502 as today.
 // - Primary and fallback share the one overall deadline of #129
@@ -124,11 +129,22 @@ beforeAll(() => new Promise(r => Server.server.listen(0, '127.0.0.1', () => {
   r();
 })));
 afterAll(() => new Promise(r => Server.server.close(r)));
+// Read per ask, and changed by single tests: put back after each one.
+const ENV = ['DEEPSEEK_THINKING', 'DEEPSEEK_TIMEOUT_MS', 'DEEPSEEK_PRIMARY_TIMEOUT_MS'];
+let savedEnv;
 beforeEach(() => {
+  savedEnv = ENV.map(k => process.env[k]);
   delete process.env.DEEPSEEK_FALLBACK_MODEL;   // the default fallback unless a test says otherwise
+  process.env.DEEPSEEK_THINKING = '0';           // reasoning off unless a test says otherwise (#4)
   for (const m of ['log', 'info', 'warn', 'error']) vi.spyOn(console, m).mockImplementation(() => {});
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); delete process.env.DEEPSEEK_FALLBACK_MODEL; });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  delete process.env.DEEPSEEK_FALLBACK_MODEL;
+  ENV.forEach((k, i) => { if (savedEnv[i] === undefined) delete process.env[k]; else process.env[k] = savedEnv[i]; });
+});
 
 // POST /api/ask with node:http, so the fake global fetch only sees DeepSeek.
 function postAsk(message, ms) {
@@ -171,11 +187,15 @@ test('primary hangs: the same ask goes to the fallback model, and its build is t
   assert.equal(out.value.actions.length, Recipes.ONE_LED.length, `actions: ${JSON.stringify(out.value.actions)}`);
 });
 
+// Errors fall back with reasoning on or off (#4): only running long differs.
 test.each([
-  ['500', { status: 500 }],
-  ['503', { status: 503 }],
-  ['a network error', { network: true }],
-])('primary answers %s: the fallback model is used', async (_name, failure) => {
+  ['500',                                               { status: 500 },   '0'],
+  ['503',                                               { status: 503 },   '0'],
+  ['a network error',                                   { network: true }, '0'],
+  ['500 with reasoning on (DEEPSEEK_THINKING unset)',   { status: 500 },   undefined],
+  ['a network error with reasoning on (DEEPSEEK_THINKING unset)', { network: true }, undefined],
+])('primary answers %s: the fallback model is used', async (_name, failure, thinking) => {
+  if (thinking === undefined) delete process.env.DEEPSEEK_THINKING; else process.env.DEEPSEEK_THINKING = thinking;
   const fetch = fakeDeepSeek([failure, BUILD('f'), DONE('Built it.')]);
   vi.stubGlobal('fetch', fetch);
   const out = await settleWithin(Server.ask('', PROMPT, []), OVERALL + SLACK);
@@ -184,6 +204,7 @@ test.each([
     `expected the primary, then the fallback's build and its answer; got ${JSON.stringify(fetch.models())}`);
   assertResolved(out, 'Server.ask after a failed primary');
   assert.equal(out.value.actions.length, Recipes.ONE_LED.length);
+  assert.equal(out.value.fallbackModel, FALLBACK, 'the reply does not say the fallback answered');
 });
 
 test('primary stalls on a later round: the whole ask restarts on the fallback, nothing from the primary kept', async () => {
@@ -272,6 +293,64 @@ test('pin: fallback off: a primary slower than the primary timeout still gets th
 
   assertResolved(out, `Server.ask with a ${PRIMARY + 60} ms primary and no fallback`);
   assert.deepStrictEqual(fetch.models(), ['deepseek-flash', 'deepseek-flash']);
+});
+
+// ── Running long, with reasoning on or off (issue #4) ───────────────────────
+
+// Each model answers from its own list of steps (see fakeDeepSeek), so the
+// primary's rounds and the fallback's never share a script.
+function perModel(primarySteps, fallbackSteps) {
+  const primary = fakeDeepSeek(primarySteps), fallback = fakeDeepSeek(fallbackSteps);
+  const models = [];
+  const fn = (url, opts) => {
+    const model = JSON.parse(opts.body).model;
+    models.push(model);
+    return (model === FALLBACK ? fallback : primary)(url, opts);
+  };
+  Object.assign(fn, { primary, fallback, models: () => models });
+  return fn;
+}
+
+// On a fake clock with the real default primary timeout (25 s) and a 300 s
+// overall deadline, so only the switching rule is judged. The primary
+// answers after 60 s; the fallback answers at once.
+const LONG_PRIMARY = 60000, DEFAULT_PRIMARY = 25000;
+test.each([
+  ['reasoning on (DEEPSEEK_THINKING unset): a build request answering after 60 s is not switched; the primary\'s build is the reply', undefined, false, false],
+  ['pin: reasoning off (DEEPSEEK_THINKING=0): a build request past 25 s switches to the fallback, as before',                '0',       false, true],
+  ['pin: explain mode never reasons: with DEEPSEEK_THINKING unset, an explain request past 25 s switches to the fallback, as before', undefined, true, true],
+])('%s', async (_, thinking, explain, switches) => {
+  if (thinking === undefined) delete process.env.DEEPSEEK_THINKING; else process.env.DEEPSEEK_THINKING = thinking;
+  delete process.env.DEEPSEEK_PRIMARY_TIMEOUT_MS;
+  process.env.DEEPSEEK_TIMEOUT_MS = '300000';
+  vi.useFakeTimers();
+  const fetch = explain
+    ? perModel([{ ...DONE('LED1 is backwards (primary).'), delay: LONG_PRIMARY }], [DONE('LED1 is backwards (fallback).')])
+    : perModel([{ ...BUILD('p'), delay: LONG_PRIMARY }, DONE('Built it on the primary.')], [BUILD('f'), DONE('Built it on the fallback.')]);
+  vi.stubGlobal('fetch', fetch);
+
+  let out = null;
+  Server.ask('', explain ? 'What is wrong with my circuit?' : PROMPT, [], undefined, { explain }).then(
+    value => { out = { state: 'resolved', value }; },
+    error => { out = { state: 'rejected', error }; });
+  await vi.advanceTimersByTimeAsync(LONG_PRIMARY + 1000);
+
+  assert.ok(out, `the ask had no answer ${LONG_PRIMARY + 1000} ms in (models: ${JSON.stringify(fetch.models())})`);
+  assert.equal(out.state, 'resolved', `the ask failed: ${out.error && (out.error.code || '')} ${out.error && out.error.message}`);
+  const reply = String(out.value.reply);
+  if (switches) {
+    assert.equal(fetch.models()[1], FALLBACK, `expected the switch to ${FALLBACK}; got ${JSON.stringify(fetch.models())}`);
+    assert.ok(Math.abs(fetch.fallback.at[0] - DEFAULT_PRIMARY) <= 1000,
+      `the fallback started at ${fetch.fallback.at[0]} ms; expected at the ${DEFAULT_PRIMARY} ms primary timeout`);
+    assert.match(reply, /\(fallback\)|on the fallback/, `reply: ${reply}`);
+    assert.equal(out.value.fallbackModel, FALLBACK);
+  } else {
+    assert.deepStrictEqual(fetch.models().filter(m => m === FALLBACK), [],
+      `a request went to the fallback model: ${JSON.stringify(fetch.models())}`);
+    assert.ok(reply.startsWith('Built it on the primary.'), `reply: ${reply}`);
+    assert.equal(out.value.actions.length, Recipes.ONE_LED.length, `actions: ${JSON.stringify(out.value.actions)}`);
+    assert.equal(out.value.fallbackModel, undefined, `the reply says ${out.value.fallbackModel} answered`);
+  }
 });
 
 // ── /api/ask and the log ────────────────────────────────────────────────────

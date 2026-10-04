@@ -336,8 +336,9 @@
   }
 
   // The page's own guard on /api/ask (issue #129): longer than the server's
-  // 60 s DeepSeek deadline, so the server's clear 504 normally arrives first.
-  const ASK_TIMEOUT_MS = 75000;
+  // 240 s DeepSeek deadline (issue #4: a build with reasoning took up to
+  // 195 s), so the server's clear 504 normally arrives first.
+  const ASK_TIMEOUT_MS = 255000;
 
   return { resolveEndpoint, applyActions, acceptBuild, predictLabels, predictSpots, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, describeAction, photoContext, EDITS, ROTATION, ASK_TIMEOUT_MS };
 });

@@ -80,6 +80,50 @@ test('cardLines: over-rated parts get an "over its … rating" line (¼ W, ½ W,
   }
 });
 
+// ── cardLines on a TL072 with an open half (issue #1) ──────────
+// PS1 at 12 V (+ on tp, COM on tn), the chip at f30 facing right: OUT1 f30,
+// IN1− f31, IN1+ f32, V− f33, IN2+ e33, IN2− e32, OUT2 e31, V+ e30. OUT2 is
+// wired to +12 V and nothing touches IN2+ or IN2−. test/opamp-floating-input.test.js
+// has the solve itself; this is what the hover card says about it.
+
+const PS1    = { type: 'bench_supply', label: 'PS1', values: { voltage: 12 } };
+const TL072  = { type: 'tl072', label: 'U1', holes: ['f30', 'f31', 'f32', 'f33', 'e33', 'e32', 'e31', 'e30'] };
+const SUPPLY = [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63']];
+const VPOS = ['tp_30', 'a30'], VNEG = ['j33', 'tn_33'];   // V+ (pin 8) +12 V, V− (pin 4) 0 V
+const OUT2_HIGH = ['a31', 'tp_31'];
+
+function opampCard(pairs) {
+  const { readings } = solve([PS1, TL072], pairs);
+  const part = readings.part('U1');
+  assert.ok(part, 'readings.part(U1) is null: the board did not solve');
+  return HoverCard().cardLines('U1', part);
+}
+
+test('cardLines (#1): a supplied TL072 whose OUT2 is wired but whose inputs float says op-amp 2 "inputs not connected (output open)", not "no supply"', () => {
+  const card = opampCard([...SUPPLY, VPOS, VNEG, OUT2_HIGH]);
+  const op2 = (card || []).find(l => /^op-amp 2\b/.test(l));
+  assert.ok(op2, `a line for op-amp 2; card ${JSON.stringify(card)}`);
+  assert.ok(op2.includes('inputs not connected (output open)'), `op-amp 2's line: ${op2}`);
+  assert.ok(!card.some(l => /no supply/i.test(l)), `V+ and V− are wired, so nothing says "no supply": ${JSON.stringify(card)}`);
+});
+
+test('cardLines (#1): a supplied TL072 with both outputs wired (OUT1 on +12 V, OUT2 on 0 V) and every input floating says "inputs not connected (output open)" for both halves', () => {
+  const card = opampCard([...SUPPLY, VPOS, VNEG, ['j30', 'tp_29'], ['a31', 'tn_31']]);
+  for (const k of [1, 2]) {
+    const line = (card || []).find(l => new RegExp(`^op-amp ${k}\\b`).test(l));
+    assert.ok(line, `a line for op-amp ${k}; card ${JSON.stringify(card)}`);
+    assert.ok(line.includes('inputs not connected (output open)'), `op-amp ${k}'s line: ${line}`);
+  }
+  assert.ok(!card.some(l => /no supply/i.test(l)), `V+ and V− are wired, so nothing says "no supply": ${JSON.stringify(card)}`);
+});
+
+test('pin (#1): an unpowered TL072 (no rails, V+ only, V− only) still says "no supply (output open)" for both halves', () => {
+  for (const [what, rails] of [['no rails', []], ['V+ only', [VPOS]], ['V− only', [VNEG]]]) {
+    assert.deepStrictEqual(opampCard([...SUPPLY, ...rails, OUT2_HIGH]),
+      ['U1', 'op-amp 1: no supply (output open)', 'op-amp 2: no supply (output open)'], what);
+  }
+});
+
 test('cardLines: a null part gives null', () => {
   assert.strictEqual(HoverCard().cardLines('R9', null), null);
 });

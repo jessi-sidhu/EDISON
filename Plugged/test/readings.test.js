@@ -319,7 +319,9 @@ test('voltage() and kcl() given something that is not a net give null and [] on 
 // server's key phrase: "short circuit", "backwards", "not connected".
 // Every circuit was checked against the real simulator first.
 
-const KINDS = ['short', 'no-resistor', 'backwards', 'open', 'over'];
+// #95's five, the op-amp kinds (docs/API-CONTRACT.md → Readings problems()),
+// and 'floating-input' (#8, section 11).
+const KINDS = ['short', 'no-resistor', 'backwards', 'open', 'over', 'no-supply', 'output-shorted', 'clipped', 'floating-input'];
 
 // problems() for a board, each row checked for its shape.
 function problemsOf(readings) {
@@ -534,4 +536,195 @@ test('thevenin leaves the board and this solve\'s readings as they were', () => 
   near(r1.V, 3, 1e-6, 'R1.V after thevenin');
   near(r1.I, 3, 1e-6, 'R1.I (mA) after thevenin');
   assert.strictEqual(readings.part('IS1'), null, 'no current source is left in this solve');
+});
+
+// ── 10. part(label).opamps: why a half is open (issue #1) ──────
+// Each opamps entry gains `floating`: true when the simulator opened the
+// half because an input touches nothing (its PartResult's r.floatingInputs
+// names the half's E id); false otherwise (a half that drives, or a chip with
+// no supply). The hover card words an open half from it.
+// PS1 at 12 V (+ on tp, COM on tn), the TL072 at f30 facing right: OUT1 f30,
+// IN1− f31, IN1+ f32, V− f33, IN2+ e33, IN2− e32, OUT2 e31, V+ e30.
+
+const PS1    = { type: 'bench_supply', label: 'PS1', values: { voltage: 12 } };
+const TL072  = { type: 'tl072', label: 'U1', holes: ['f30', 'f31', 'f32', 'f33', 'e33', 'e32', 'e31', 'e30'] };
+const SUPPLY = [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63']];
+const VPOS = ['tp_30', 'a30'], VNEG = ['j33', 'tn_33'];   // V+ (pin 8) +12 V, V− (pin 4) 0 V
+const OUT2_HIGH = ['a31', 'tp_31'];
+// OUT2 on +12 V with every input floating, and the supply wired as `rails` says.
+const UNPOWERED = [['no rails', []], ['V+ only', [VPOS]], ['V− only', [VNEG]]];
+
+function opampsOf(pairs) {
+  const { result, readings } = solve([PS1, TL072], pairs);
+  const part = readings.part('U1');
+  assert.ok(part && Array.isArray(part.opamps), `readings.part(U1).opamps is missing (status ${result.status}); got ${JSON.stringify(part)}`);
+  return part.opamps;
+}
+const without = (o, key) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== key));
+
+test('opamps (#1): repro A (rails wired, OUT2 on +12 V, IN2± floating) — op-amp 2 is open with floating: true; the unused op-amp 1 has floating: false', () => {
+  const [op1, op2] = opampsOf([...SUPPLY, VPOS, VNEG, OUT2_HIGH]);
+  assert.strictEqual(op2.mode, 'open', `op-amp 2: ${JSON.stringify(op2)}`);
+  assert.strictEqual(op2.floating, true, `op-amp 2 was opened because its inputs float: ${JSON.stringify(op2)}`);
+  assert.strictEqual(op1.mode, 'low', `op-amp 1, an unused half: ${JSON.stringify(op1)}`);
+  assert.strictEqual(op1.floating, false, `op-amp 1 drives (low), so it isn't floating: ${JSON.stringify(op1)}`);
+});
+
+test('opamps (#1): an unpowered chip (no rails, V+ only, V− only) has floating: false on both halves', () => {
+  for (const [what, rails] of UNPOWERED) {
+    const ops = opampsOf([...SUPPLY, ...rails, OUT2_HIGH]);
+    assert.deepStrictEqual(ops.map(o => o.floating), [false, false], `${what}: ${JSON.stringify(ops)}`);
+  }
+});
+
+test('pin (#1): an unpowered chip\'s opamps entries keep today\'s other fields (both open, 0 mA, 20 mA limit, unused)', () => {
+  for (const [what, rails] of UNPOWERED) {
+    const ops = opampsOf([...SUPPLY, ...rails, OUT2_HIGH]);
+    assert.deepStrictEqual(ops.map(o => without(o, 'floating')), [
+      { pin: 'out1', vout: null, mode: 'open', iout: 0, ilim: 20, unused: true },
+      { pin: 'out2', vout: 12,   mode: 'open', iout: 0, ilim: 20, unused: true },
+    ], what);
+  }
+});
+
+// ── 11. problems(): an op-amp input that connects to nothing (issue #8) ──
+// Since #1 the simulator opens an op-amp half whose input touches nothing
+// (r.floatingInputs, opamps[].floating) and the TL072 warns, e.g. "U1: IN2+
+// and IN2− connect to nothing, so OUT2 drives nothing. …". The results panel
+// shows that warning; problems() gains a row for it so the mistakes panel
+// and Edison's callouts (lines()) agree:
+// - kind 'floating-input', one row per chip with any floating half, never
+//   info; labels [chip]; why the chip's own floating-input warning (it already
+//   starts "U1: "), each of them when both halves float.
+// - lines(): a 'fault' for that chip, title "Input not connected".
+// - An unpowered chip keeps 'no-supply' only; a board with no floating half
+//   gives exactly today's problems().
+// Boards as #1's (test/opamp-floating-input.test.js): PS1 12 V on tp/tn, the
+// chip with pin 1 at f<col> facing right, rails V+ tp → a<col>, V− j<col+3> → tn.
+// Every row below was checked against the real simulator.
+
+const chipAt = (label, col) => ({ type: 'tl072', label,
+  holes: [0, 1, 2, 3].map(k => 'f' + (col + k)).concat([3, 2, 1, 0].map(k => 'e' + (col + k))) });
+const RAILS_AT = col => [['tp_' + col, 'a' + col], ['j' + (col + 3), 'tn_' + (col + 3)]];
+
+// The chip's warnings, from the solve (#1 owns their wording); every one of
+// them is a floating-input warning on these boards.
+function floatingWarnings(result, label) {
+  const u = result.parts[label];
+  assert.ok(u, `analyze().parts has no ${label} (status ${result.status}); got ${JSON.stringify(Object.keys(result.parts || {}))}`);
+  assert.ok(u.warnings.length && u.warnings.every(w => w.startsWith(label + ':') && /to nothing/.test(w)),
+    `${label}'s warnings are its floating-input ones (#1): ${JSON.stringify(u.warnings)}`);
+  return u.warnings;
+}
+
+const FLOATING = [
+  { id: 'A', what: 'OUT2 on +12 V, IN2± floating',            label: 'U1', wires: [['a31', 'tp_31']] },
+  { id: 'B', what: 'OUT2 on 0 V, IN2± floating, labelled U2', label: 'U2', wires: [['a31', 'tn_31']] },
+  { id: 'G', what: 'IN1− on OUT1, OUT1 on +12 V, IN1+ floating', label: 'U1', wires: [['g30', 'g31'], ['j30', 'tp_29']] },
+];
+const floatingBoard = c => solve([PS1, chipAt(c.label, 30)], [...SUPPLY, ...RAILS_AT(30), ...c.wires]);
+
+for (const c of FLOATING) {
+  test(`problems (#8): repro ${c.id} (${c.what}) gives exactly one 'floating-input' row for ${c.label}, why its own warning`, () => {
+    const { result, readings } = floatingBoard(c);
+    const [warning, ...more] = floatingWarnings(result, c.label);
+    assert.deepStrictEqual(more, [], `one floating half, one warning: ${JSON.stringify(result.parts[c.label].warnings)}`);
+    const list = problemsOf(readings);
+    assert.deepStrictEqual(list, [{ kind: 'floating-input', labels: [c.label], why: warning }], showP(list));
+  });
+}
+
+test('lines (#8): repro A — U1\'s callout is a fault titled "Input not connected" that says OUT2\'s inputs connect to nothing, shown before PS1\'s', () => {
+  const { readings } = floatingBoard(FLOATING[0]);
+  const all = readings.lines();
+  const u1 = all.filter(l => l.label === 'U1');
+  assert.strictEqual(u1.length, 1, `one line for U1: ${JSON.stringify(all)}`);
+  assert.strictEqual(u1[0].level, 'fault', `U1's level: ${JSON.stringify(u1[0])}`);
+  assert.strictEqual(u1[0].title, 'Input not connected', `U1's title: ${JSON.stringify(u1[0])}`);
+  const sub = u1[0].sub.join(' ');
+  assert.ok(/connect to nothing/.test(sub) && sub.includes('OUT2'), `U1's sublines say OUT2's inputs connect to nothing: ${JSON.stringify(u1[0].sub)}`);
+  assert.strictEqual(all[0].label, 'U1', `faults come first: ${JSON.stringify(all.map(l => [l.label, l.level]))}`);
+});
+
+// Both halves floating: one row whose why leads with "U1: " once, then each
+// warning's text after its own "U1: ", so the callout never reads "… U1.".
+const BOTH_FLOATING = [...SUPPLY, VPOS, VNEG, ['j30', 'tp_29'], ['a31', 'tn_31']];
+
+test('problems (#8): both halves floating (OUT1 on +12 V, OUT2 on 0 V) is still one row for U1: why says "U1: " once, then both warnings\' text', () => {
+  const { result, readings } = solve([PS1, TL072], BOTH_FLOATING);
+  const warnings = floatingWarnings(result, 'U1');
+  assert.strictEqual(warnings.length, 2, `one warning per half (#1): ${JSON.stringify(warnings)}`);
+  const list = problemsOf(readings);
+  assert.deepStrictEqual(kindsOf(list), ['floating-input'], showP(list));
+  assert.deepStrictEqual(list[0].labels, ['U1'], showP(list));
+  const why = list[0].why;
+  assert.ok(why.startsWith('U1: '), `why leads with "U1: ": ${JSON.stringify(why)}`);
+  assert.strictEqual(why.split('U1: ').length - 1, 1, `"U1: " appears once, not once per warning: ${JSON.stringify(why)}`);
+  for (const w of warnings.map(t => t.replace(/^U1:\s*/, ''))) {
+    assert.ok(why.includes(w), `why carries "${w}": ${JSON.stringify(why)}`);
+  }
+});
+
+test('lines (#8): both halves floating — U1\'s callout is a fault titled "Input not connected", names OUT1 and OUT2, and no subline is a stray "U1"', () => {
+  const { readings } = solve([PS1, TL072], BOTH_FLOATING);
+  const all = readings.lines();
+  const u1 = all.filter(l => l.label === 'U1');
+  assert.strictEqual(u1.length, 1, `one line for U1: ${JSON.stringify(all)}`);
+  assert.deepStrictEqual([u1[0].level, u1[0].title], ['fault', 'Input not connected'], JSON.stringify(u1[0]));
+  const stray = u1[0].sub.filter(s => /(^|\s)U1\.?$/.test(s.trim()));
+  assert.deepStrictEqual(stray, [], `no subline ends in or is a bare "U1": ${JSON.stringify(u1[0].sub)}`);
+  const sub = u1[0].sub.join(' ');
+  for (const out of ['OUT1', 'OUT2']) assert.ok(sub.includes(out), `the sublines name ${out}: ${JSON.stringify(u1[0].sub)}`);
+});
+
+test('problems (#8): two chips, U1 with OUT2 floating and U2 with OUT1 floating, give one row each, each its own warning', () => {
+  // U1 at f30: OUT2 a31 → tp_31. U2 at f40, rails wired: OUT1 j40 → tp_39, IN1± floating.
+  const { result, readings } = solve([PS1, chipAt('U1', 30), chipAt('U2', 40)],
+    [...SUPPLY, ...RAILS_AT(30), ['a31', 'tp_31'], ...RAILS_AT(40), ['j40', 'tp_39']]);
+  const list = problemsOf(readings);
+  assert.deepStrictEqual(kindsOf(list), ['floating-input', 'floating-input'], showP(list));
+  for (const label of ['U1', 'U2']) {
+    const rows = list.filter(p => p.labels.includes(label));
+    assert.deepStrictEqual(rows, [{ kind: 'floating-input', labels: [label], why: floatingWarnings(result, label)[0] }], `${label}: ${showP(list)}`);
+  }
+});
+
+test('problems (#8): a floating U1 beside an unpowered U2 — U1 floating-input, U2 no-supply only; both callouts are faults', () => {
+  // U1 at f30 as repro A. U2 at f40, rails unwired, OUT2 a41 → tp_41, every input floating.
+  const { result, readings } = solve([PS1, chipAt('U1', 30), chipAt('U2', 40)],
+    [...SUPPLY, ...RAILS_AT(30), ['a31', 'tp_31'], ['a41', 'tp_41']]);
+  const list = problemsOf(readings);
+  assert.deepStrictEqual(kindsOf(list), ['floating-input', 'no-supply'], showP(list));
+  assert.deepStrictEqual(rowsOf(list, 'floating-input'), [{ kind: 'floating-input', labels: ['U1'], why: floatingWarnings(result, 'U1')[0] }], showP(list));
+  assert.deepStrictEqual(rowsOf(list, 'no-supply').map(p => p.labels), [['U2']], showP(list));
+  const at = Object.fromEntries(readings.lines().map(l => [l.label, [l.level, l.title]]));
+  assert.deepStrictEqual([at.U1, at.U2], [['fault', 'Input not connected'], ['fault', 'No supply']], JSON.stringify(at));
+});
+
+// Pins: captured from today's code (they pass before #8 and must after).
+const OPEN_ROW = { kind: 'open', labels: ['PS1'],
+  why: 'No current flows: the circuit is not connected all the way from the battery + terminal back to the − terminal. ' +
+       'Check for a missing wire, often the one to ground.' };
+const NO_SUPPLY_ROW = { kind: 'no-supply', labels: ['U1'], why: 'U1: the op-amp has no supply: wire V+ (pin 8) and V− (pin 4)' };
+const SHORTED_ROW = { kind: 'output-shorted', labels: ['U1'],
+  why: 'U1\'s output (out2) is at its 20 mA current limit: it is tied straight to ground, a rail or the other output, ' +
+       'or its load takes too much current. Use a bigger resistor.' };
+
+test('pin (#8): boards with no floating half give exactly today\'s problems(): an unpowered chip keeps no-supply only; repros C and I, which solve first time', () => {
+  const boards = [
+    // An unpowered chip, OUT2 on +12 V, every input floating (#1's pin).
+    ['unpowered, no rails', [PS1, TL072], [...SUPPLY, OUT2_HIGH], [OPEN_ROW, NO_SUPPLY_ROW]],
+    ['unpowered, V+ only',  [PS1, TL072], [...SUPPLY, VPOS, OUT2_HIGH], [OPEN_ROW, NO_SUPPLY_ROW]],
+    ['unpowered, V− only',  [PS1, TL072], [...SUPPLY, VNEG, OUT2_HIGH], [NO_SUPPLY_ROW]],
+    // Repro C: op-amp 2 a follower of 0 V with OUT2 on +12 V, at its 20 mA limit.
+    ['repro C', [PS1, TL072], [...SUPPLY, VPOS, VNEG, OUT2_HIGH, ['a32', 'b31'], ['a33', 'tn_34']], [SHORTED_ROW]],
+    // Repro I: R1 1 kΩ from OUT1 to COM, every input floating: both halves unused.
+    ['repro I', [PS1, TL072, res('R1', ['h26', 'h30'], 1000)], [...SUPPLY, VPOS, VNEG, ['j26', 'tn_26']], []],
+  ];
+  for (const [what, parts, pairs, want] of boards) {
+    const { readings } = solve(parts, pairs);
+    assert.deepStrictEqual(problemsOf(readings), want, what);
+    const u1 = readings.lines().find(l => l.label === 'U1');
+    assert.notStrictEqual(u1 && u1.title, 'Input not connected', `${what}: U1's callout: ${JSON.stringify(u1)}`);
+  }
 });

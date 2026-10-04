@@ -4,31 +4,12 @@ The work queue, in order, with everything needed to pick a task up cold on any m
 
 Every AI task is measured on the AI test set (`docs/AI-TEST-SET.md`, 16 cases × 3 runs), not judged by eye:
 - `npm run ai-eval -- --only bank --json <file>` runs it, from `Plugged/`.
-- Add `DEEPSEEK_THINKING=1 DEEPSEEK_TIMEOUT_MS=300000` for reasoning, and `DEEPSEEK_MODEL=deepseek-v4-pro` for the Pro model.
+- Reasoning is on by default (#4); add `DEEPSEEK_THINKING=0` to turn it off, and `DEEPSEEK_MODEL=deepseek-v4-pro` for the Pro model.
 - It costs well under a dollar a run.
 
 Where the test set stands: **11/48 with reasoning off, 24/48 with reasoning on** (deepseek-flash, median 36.6 s per build).
 
 ---
-
-## 1. Reasoning on by default, with the right model and limits
-
-**Why.** Reasoning took the test set from 11/48 to 24/48, about 0.6¢ a build. The app still runs with it off, and two limits would break it if it were turned on as is:
-- **Time:** builds take 8–195 s (median 37 s). The server gives up at 60 s (`DEEPSEEK_TIMEOUT_MS`) and the page at 75 s (`ASK_TIMEOUT_MS` in `Plugged/circuit3d/js/chat.js`).
-- **Tokens:** cases 06 and 16 returned no build at all in all 6 runs, about 70–77 s each, with reply "(no response)" and 0 actions. That's most likely reasoning using the whole `max_tokens` (16000) before any tool call. The server now logs `[ask] DeepSeek stopped at max_tokens` when this happens.
-
-**Steps.**
-1. Run the test set with reasoning on and `DEEPSEEK_MAX_TOKENS=32000` (or `DEEPSEEK_REASONING_EFFORT` lower). Check that 06 and 16 now build. Record the results.
-2. Run it on `deepseek-v4-pro` with reasoning on (about 3–4× flash's token price). Compare pass rate, median and worst seconds per build, and cents per build. **Aarmen picks the model.**
-3. Make reasoning the default for builds in `Plugged/backend/ai-providers.js`. Explain mode stays off, and `DEEPSEEK_THINKING=0` stays as the off switch.
-4. Set the server deadline and the page timeout above the slowest build seen, with the page's longer than the server's so the server's own message shows. Write the decision in `docs/ARCHITECTURE.md` under Key decisions.
-5. Check that the chat's "Edison is thinking" indicator holds up through a 60 s wait.
-
-**Done when.**
-- Unit tests: the default request has thinking on; `DEEPSEEK_THINKING=0` turns it off; the page timeout is longer than the server's.
-- `npm run ai-eval -- --only demo` passes 3/3, with the demo build's time noted.
-- The full `npm run ai-eval` is compared with its last run.
-- In a browser: "Build a single LED circuit with a current-limiting resistor" → preview → Accept → lit.
 
 ## 2. TL072 guide: a sine input sets the generator's amplitude (GitHub #210)
 
@@ -45,42 +26,6 @@ Where the test set stands: **11/48 with reasoning off, 24/48 with reasoning on**
 - The guide fits 400 characters and names amplitude for a sine.
 - The recipes still simulate to their expected outputs.
 - With reasoning on, case 11 passes.
-
-## 3. The repair loop: keep the best build, never send a half-finished one
-
-**Why.** When the server's checker finds a problem in a build, `askDeepSeek`'s loop (`Plugged/backend/ai-providers.js`) tells the model to rebuild the whole circuit from scratch (`REPAIR_HEADING`). On the reasoning-off run:
-- **Repairs barely help.** 31 first builds had a problem. The first repair cleaned 11; the second cleaned 2 of 13, and some repairs raised the problem count (1→2, 7→8).
-- **Cut-off rebuilds get sent.** All 5 "parts placed, no wires" runs were a second rebuild cut off by the 12-round cap (`DEEPSEEK_MAX_ROUNDS`). Those runs log `[repair] round 2` with no `after round 2`, and `fromLastDeleteAll` then keeps only the unfinished rebuild.
-
-**Steps.**
-1. Each time the model ends its turn, keep that build and its problem count. When the loop ends (the model is done, repairs are used up, or the round cap hits), return the build with the fewest problems; a tie goes to the later one.
-2. Never return a rebuild the round cap cut off. If the rounds run out after a repair's `delete_all`, return the best earlier build.
-3. Ask for repairs as fixes, not rebuilds: list the build's wires with ids, as the board markdown's Wires table does, and ask for `delete_wire`, `add_wire` and `set_value` steps. Keep the rebuild wording only when the problems say the build is unusable (for example, nothing wired to a supply).
-4. Log which build was kept: `[repair] kept round N: K problems`.
-
-**Done when.**
-- Unit tests with a scripted model:
-  - a repair that makes things worse gets the first build back;
-  - a rebuild cut off at the cap is never returned;
-  - a repair that fixes everything is returned.
-- Live: the test set beats its last run with no "parts, no wires" runs, and the demo check passes 3/3.
-
-## 4. Checker false positives on two correct circuits
-
-**Why.** The server's circuit checker (`findCircuitProblems` in `Plugged/backend/server.js`) flags two correct circuits. That adds a "Heads up" and sends a correct build into a repair that can break it:
-- **Case 07, the precision half-wave rectifier (superdiode):** the diode inside the op-amp's feedback is called backwards.
-- **Case 15, two LEDs back to back on the function generator:** the second LED is said to have no forward path, but it conducts on the negative half of the sine. One case-15 run with reasoning on failed on this warning alone.
-
-`Plugged/test/prompt-bank.test.js` pins this list today, so update it when the checker is fixed.
-
-**Steps.**
-1. A diode or LED whose path runs through a source that swings both ways (a function generator with amplitude > 0) has a forward path in one half of the wave: don't call it backwards or pathless.
-2. A diode inside an op-amp's feedback loop (between OUT and IN−, or OUT and the load) is judged by the simulator, not the graph.
-3. No new misses: an LED backwards on a DC supply is still caught (pin the existing cases).
-
-**Done when.**
-- The clean builds of 07 and 15 give no checker problems; the existing backwards-LED and no-path cases still do.
-- `prompt-bank.test.js`'s pinned list is empty.
 
 ## 5. The op-amp repair checks (built; branch `aarmen/204-opamp-repair-checks`)
 

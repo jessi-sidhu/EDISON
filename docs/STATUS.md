@@ -2,14 +2,17 @@
 
 **Read this first when you pick the project up on any machine.** It's the shared memory: where things stand, what's next, what we learned, and how Aarmen likes to work. Claude Code's own memory lives on one laptop only, so anything worth keeping goes here. Update it at the end of each session (Claude: do it as part of wrapping up).
 
-*Last updated: 2026-10-03 evening, Mac session.*
+*Last updated: 2026-10-03 night, Mac session.*
 
 ## Where things are
 
 - **`main`** = `dev`, promoted in PR #211: Edison UI, Lab HUD, the parts redo, the photo feature, and the 2026-10-03 bug-fix round below. This is the demo branch.
 - **`dev`** is the workspace; promote it to `main` with `/promote` at natural points.
-- **Branch `aarmen/204-opamp-repair-checks`** (pushed, not on dev): the op-amp repair checks, held until the repair loop is fixed (`docs/TODO.md` tasks 3 and 5).
-- **The reasoning switch (#205) is on dev**, off by default: `DEEPSEEK_THINKING=1` turns it on (see "Running the AI test set" below).
+- **One repo now: `github.com/jessi-sidhu/EDISON`** (`~/Desktop/EDISON`). The old `aarmens702-hub/myproject` checkout was removed; its GitHub repo still holds two small commits that aren't here (a Firebase-config comment and a docs line).
+- **The op-amp repair checks (`docs/TODO.md` task 5):** the old branch `aarmen/204-opamp-repair-checks` was lost with the old myproject checkout; the checks were rebuilt as #10 (on `dev` with the fixes merge).
+- **The lab paper (paused, local only):** branch `aarmen/lab-paper-design` in `.worktrees/lab-paper`, one WIP commit. In the Edison editor Lab 2's sheet becomes a white lab manual pulled from the board's left edge: it pushes the board over (the parts fold to icons), with objective, equipment, pre-lab checked as typed, a data table filled from the sim, questions, and Give me / Hint / Explain on the current step (Give me builds that step and says where each piece went). Aarmen approved the mock. Left: fix two unused constants in `e2e/edison-hud-lab.spec.js` (lint), run the full browser suite, add a Give me browser test, then `/ship`. Next after it: the ENSC 220 course page in black, then textbook and landing polish.
+- **The editor's EDISON (top left) goes to the Edison landing** in the Edison UI (it went to the classic dashboard).
+- **Reasoning is on by default** (#205, #4): 32 000 `max_tokens`, a 240 s server deadline and a 255 s page timeout. `DEEPSEEK_THINKING=0` turns it off (see "Running the AI test set" below).
 
 ### The 2026-10-03 bug-fix round (on `main` since PR #211)
 - **#197 bench rules:** at most 1 bench supply, 1 function generator and 2 multimeters (`circuit3d/js/bench.js`). Every instrument the AI places gets its own spot in a row in front of the board, never stacked. The server refuses a 2nd supply or generator, or a 3rd meter, while the model is still answering.
@@ -26,10 +29,10 @@ The full detail of each task (why, files, steps, done-when) is in **`docs/TODO.m
 
 | # | Task (docs/TODO.md) | Why now |
 |---|---|---|
-| 1 | Reasoning on by default, with the right model and limits | It doubled the pass rate (11 → 24 of 48). Cases 06 and 16 need a bigger `max_tokens`, and the 60 s/75 s timeouts must rise. Aarmen picks flash vs Pro from a Pro run. |
+| 1 | Done (#4): reasoning on by default | 32 000 `max_tokens` (cases 06 and 16 ran out at 16 000), 240 s server / 255 s page timeouts; `DEEPSEEK_THINKING=0` turns it off. Left: a `deepseek-v4-pro` run, then Aarmen picks flash vs Pro. |
 | 2 | TL072 guide: a sine input sets the generator's amplitude | Case 11 built a DC input every time because our own guide says "offset = DC in". |
-| 3 | The repair loop: keep the best build, never send a half-finished one | Repairs often made builds worse; all 5 "parts, no wires" runs came from it. |
-| 4 | Checker false positives (superdiode, back-to-back LEDs) | They send correct builds into repair. |
+| 3 | Done (#6): the repair loop keeps the best build | The fewest problems wins (a tie goes to the later one), a build the round cap cut off is never sent, and wire fixes are asked for and folded into the build. |
+| 4 | Checker false positives (superdiode, back-to-back LEDs): **done in #3** | The clean BANK-07 and BANK-15 builds no longer get a Heads up. |
 | 5 | The op-amp repair checks (branch `aarmen/204-opamp-repair-checks`) | Built; waits for task 3. |
 | 6 | Wire on-board parts by pin name | Only if hole-level mistakes remain. |
 | 7 | Aarmen's call: the LED current floor in case 12 (4.9 mA vs a 5 mA floor) | |
@@ -43,31 +46,31 @@ Measured on the AI test set, 16 cases × 3 runs, graded in the simulator with wi
 
 | Setting | Runs passed | Notes |
 |---|---|---|
-| `deepseek-flash`, thinking **off** (the app today) | **11/48** | Cases 1, 13, 14 pass 3/3; 8 passes 2/3; the rest fail. |
+| `deepseek-flash`, thinking **off** (the app before #4) | **11/48** | Cases 1, 13, 14 pass 3/3; 8 passes 2/3; the rest fail. |
 | Same, plus an exact TL072 pin map in the prompt (#203) | 11/48 | No gain, so it wasn't shipped. Prompt wording isn't the lever. |
-| `deepseek-flash`, thinking **on** (#205) | **24/48** | Median 36.6 s per build (8–195 s), about 0.6¢ a build. Cases 02 and 03 went from 0/3 to 3/3. Cases 06 and 16 returned nothing (reasoning used the whole `max_tokens`); 11 built a DC input instead of a sine; 12 ran the LED at 4.9 mA (floor 5). Per case in `docs/AI-TEST-SET.md`. |
+| `deepseek-flash`, thinking **on** (#205; the app's default since #4) | **24/48** | Median 36.6 s per build (8–195 s), about 0.6¢ a build. Cases 02 and 03 went from 0/3 to 3/3. Cases 06 and 16 returned nothing (reasoning used the whole `max_tokens`); 11 built a DC input instead of a sine; 12 ran the LED at 4.9 mA (floor 5). Per case in `docs/AI-TEST-SET.md`. |
 
 Why builds failed, by impact:
-1. **Thinking was off** (fixed behind a switch; turning it on doubled the pass rate). The model is fast and cheap but didn't reason. Its mistakes were reasoning mistakes: op-amp inputs swapped, the meter on the wrong row of the TL072, wrong gain resistors.
-2. **The repair loop is our bug** (`docs/TODO.md` task 3). When the checker finds a problem, the model is told to rebuild the whole circuit from scratch. The first repair fixed 11 of 31 builds; the second fixed 2 of 13, and some repairs added problems. The 12-round cap cut second rebuilds off after the parts and before the wires.
+1. **Thinking was off** (now on by default, #4; turning it on doubled the pass rate). The model is fast and cheap but didn't reason. Its mistakes were reasoning mistakes: op-amp inputs swapped, the meter on the wrong row of the TL072, wrong gain resistors.
+2. **The repair loop was our bug** (fixed in #6). When the checker finds a problem, the model is told to rebuild the whole circuit from scratch. The first repair fixed 11 of 31 builds; the second fixed 2 of 13, and some repairs added problems. The 12-round cap cut second rebuilds off after the parts and before the wires.
 3. **Hole bookkeeping.** Every connection is a hole address, and a hole takes one lead. The leftover problems were mostly hole-level: wrong row (14 runs), two leads in one hole (6), supply unwired (5). `docs/TODO.md` task 6 removes this if it still matters after reasoning.
-4. **Our checker's false positives** on BANK-07 and BANK-15 (`docs/TODO.md` task 4).
+4. **Our checker's false positives** on BANK-07 and BANK-15 (fixed in #3).
 5. **Our own TL072 guide** taught "offset = DC input", so a sine was built as DC (task 2).
-6. **Reasoning can run out of tokens** before it builds anything (cases 06 and 16, task 1).
+6. **Reasoning can run out of tokens** before it builds anything (cases 06 and 16, at 16 000; the default is 32 000 since #4).
 
 Cost: `deepseek-flash` with thinking is about 0.6¢ a build. `deepseek-v4-pro` is about 3–4× the token price. DeepSeek's balance was $5.72 after all of the day's testing; Aarmen planned to add about $20.
 
 ### Running the AI test set
 From `Plugged/`, with `DEEPSEEK_API_KEY` in the environment or in `backend/.env`:
-- `npm run ai-eval -- --only bank` runs the 16 cases × 3 (48 calls).
-- `DEEPSEEK_THINKING=1 DEEPSEEK_TIMEOUT_MS=300000 npm run ai-eval -- --only bank` runs with reasoning on.
+- `npm run ai-eval -- --only bank` runs the 16 cases × 3 (48 calls), with reasoning on (the default since #4).
+- `DEEPSEEK_THINKING=0 npm run ai-eval -- --only bank` runs with reasoning off.
 - Add `DEEPSEEK_MODEL=deepseek-v4-pro` for the Pro model.
 - `--json <file>` saves every reply and grade; each line shows seconds per build.
 - `npm run ai-eval -- --only demo` is the demo check (must be 3/3 before shipping a prompt change).
 
 ## Setting up a new laptop
 
-1. Clone `github.com/aarmens702-hub/myproject`. Use the personal GitHub account `aarmens702-hub`, not the work one.
+1. Clone `github.com/jessi-sidhu/EDISON`. Use the personal GitHub account `aarmens702-hub`, not the work one.
 2. `cd Plugged && npm ci && npx playwright install chromium`.
 3. Create `Plugged/backend/.env` from `.env.example` and fill in the keys by hand: `DEEPSEEK_API_KEY` (the app's AI) and `GEMINI_API_KEY` (photo reading). Never commit it, and copy the keys over privately (not through the repo or chat). Agents are blocked from touching `.env` files.
 4. Run the app: `cd Plugged/backend && node server.js`, then open http://localhost:5001 (Edison is at `/circuit3d/index.html?ui=edison`). `AI_PROVIDER=fixture node server.js` runs with no AI cost.

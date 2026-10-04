@@ -64,6 +64,23 @@
     return { on, current };
   }
 
+  // Off with the cathode driven at least vf above the anode. A floating
+  // anode counts at its pinMax, the most an off diode on its node lets it
+  // rise; uncapped, the LED is only dark (#73).
+  function reversed(r) {
+    if (r.modes[D] === 'on' || r.pins.cathode == null) return false;
+    const anode = r.pins.anode != null ? r.pins.anode : r.pinMax && r.pinMax.anode;
+    if (typeof anode !== 'number') return false;
+    return volts(r.pins.cathode) - volts(anode) >= r.values.vf;
+  }
+
+  // The results-panel line: the generic ON line while lit; on a sine that
+  // crosses 0 V (r.swings), why a reversed LED is dark (#2); else none.
+  function line(r, m) {
+    if (m.on === true) return { text: `  💡 LED ON  (${m.current.toFixed(1)} mA)`, cls: 'sim-on' };
+    return r.swings && reversed(r) ? { text: `  ${r.label} dark: the sine reverses it on this half.`, cls: 'sim-info' } : null;
+  }
+
   function warnings(r, m) {
     const mode = r.modes[D];
     if (mode === 'on' && m.current > SHORT_MA) {
@@ -79,14 +96,10 @@
               `Needs at least ${a.minR} ohm in series, so use ${a.stock} ohm.`];
     }
     if (mode !== 'on') {
-      // Backwards only when a source drives the cathode above the anode. A
-      // floating anode counts at its pinMax, the most an off diode on its
-      // node lets it rise; uncapped, the LED is only dark (#73).
-      if (r.pins.cathode == null) return [];
-      const anode = r.pins.anode != null ? r.pins.anode : r.pinMax && r.pinMax.anode;
-      if (typeof anode !== 'number') return [];
-      const reverse = volts(r.pins.cathode) - volts(anode);
-      return reverse >= r.values.vf ? ['LED is backwards. Current cannot flow from cathode to anode. Flip it around.'] : [];
+      // Backwards only when a source drives the cathode above the anode. On
+      // a sine that crosses 0 V that is just its other half: line() says so.
+      if (r.swings) return [];
+      return reversed(r) ? ['LED is backwards. Current cannot flow from cathode to anode. Flip it around.'] : [];
     }
     // On, but under the threshold. Below OPEN_MA the "current" is only GMIN
     // leaking through a floating node: the open-circuit line says that.
@@ -247,6 +260,7 @@
     elements: v => [{ kind: 'D', id: D, pins: ['anode', 'cathode'], vf: v.vf, ron: RON }],
     measure,
     warnings,
+    line,
     report:   (r, m) => `LED ${m.on ? 'ON (lit)' : 'OFF (dark)'}, ${Math.max(0, m.current).toFixed(1)} mA`,
 
     ai: {

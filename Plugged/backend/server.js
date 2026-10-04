@@ -8,7 +8,9 @@
  * POST /api/photo          { image, grid, sample? }        →  { reading, provider, model, ms, key }
  * POST /api/photo/leads    { key, items }                  →  { items, provider, model, ms }
  *                          (Accept application/x-ndjson: a line per item as it settles, then { done, … })
- * GET  /api/health
+ * POST /api/voice/stt      { audio } (a base64 audio data URL)  →  { text }
+ * POST /api/voice/tts      { text } (1–600 characters)          →  audio/mpeg, streamed
+ * GET  /api/health                                         →  { status, model, voice }
  * POST /api/course/canvas/sync                             →  { ok, demo, syncedAt }  (Edison demo, no real Canvas)
  * GET  anything else       the app's static files
  */
@@ -16,9 +18,11 @@
 const http = require('http');
 const fs   = require('fs');
 const path = require('path');
+const { Readable, pipeline } = require('stream');
 const { makeAsk, isFixRequest } = require('./ai-providers');
 const { readPhoto, isSafeId } = require('./photo-reader');
 const { readLeads } = require('./photo-leads');
+const Voice = require('./voice');
 // The board's size: the same file the 3D editor builds the board from.
 const { COLS, TOTAL_HOLES, BODY_ROWS } = require('../circuit3d/js/board-geometry.js');
 // The parts registry: every part's tool, prompt lines and circuit behaviour.
@@ -143,7 +147,7 @@ const buildPrompt = tools => [
   'PART LABELS:',
   GENERATED.labels(tools),
   '- The board state lists parts by label, so you can talk about them as R1, LED1 and so on.',
-  '- Only an off-board part\'s pins can be wire ends by label, by pin index: "BAT1.0" (+) or "BAT1.1" (-) on a battery, and the same LABEL.k form for any other off-board part (its guide names them).',
+  '- An off-board part\'s pins are wire ends by label, by pin index: "BAT1.0" (+) or "BAT1.1" (-) on a battery, and the same LABEL.k form for any other off-board part (its guide names them).',
   GENERATED.wiredBy(tools),
   '- A new part gets the next free number for its type. After delete_all, numbering starts again at 1, so the first place_battery is BAT1.',
   '- Without delete_all, a battery added next to BAT1 is BAT2.',
@@ -174,9 +178,9 @@ const buildPrompt = tools => [
   'HOLE NAMES:',
   '- Body: "a3", "e14", "j22"',
   '- Rail: "tp_5" (positive col 5), "tn_5" (GND col 5)',
-  '- Off-board parts: "BAT1.0" (+), "BAT1.1" (-), or another off-board part\'s LABEL.k. This label form is only for off-board part pins.',
+  '- Off-board parts: "BAT1.0" (+), "BAT1.1" (-), or another off-board part\'s LABEL.k.',
   '- The bench holds ONE bench supply (PS1, two channels), ONE function generator (FG1) and at most TWO multimeters: never place a second supply or generator, or a third meter. One wire per terminal.',
-  '- Other parts: use the body holes they sit in, e.g. "b3", never "<label>.<k>".',
+  '- Other parts: their body holes, e.g. "b3", or a pin by name, e.g. "LED1.anode".',
   '',
   'BUILDING BEHAVIOR:',
   '- Keep every part and wire on the board that is correct. Change only what is wrong: delete_wire, delete_part or change a value (below) first, then place and wire what is missing.',
@@ -354,7 +358,7 @@ const DELETE_ALL = {
 };
 const ADD_WIRE = {
   name: 'add_wire',
-  description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or off-board part pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -, or another off-board part\'s LABEL.k). Other parts are wired through the body holes they sit in.',
+  description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or off-board part pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -, or another off-board part\'s LABEL.k). Other parts are wired through the body holes they sit in, or by pin name ("LED1.anode"); the server picks a free hole in its strip.',
   parameters: {
     type: 'OBJECT',
     properties: {
@@ -567,7 +571,7 @@ const listed = (tools, defs = PARTS) => {
 };
 const GENERATED = {
   labels:     tools => `- Every part has a label that never changes: its prefix and a number, e.g. R1, R2. Prefixes: ${listed(tools).map(d => `${d.prefix} = ${partName(d)}`).join(', ')}.`,
-  wiredBy:    tools => `- Parts on the board (${listed(tools, onBoard).map(d => d.prefix).join(', ')}) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.`,
+  wiredBy:    tools => `- Parts on the board (${listed(tools, onBoard).map(d => d.prefix).join(', ')}) are wired through the breadboard holes they sit in, which the Components table lists. A wire end may also be an on-board part's pin by name, e.g. "LED1.anode": the server picks a free hole in its strip.`,
   catalogue:  tools => `- Every part (type: name): ${listed(tools).map(d => `${d.type}: ${d.name}`).join(', ')}.`,
   pinRoles:   tools => inPlay(tools).flatMap(pinRoleLines),
   sizing:     tools => inPlay(tools).flatMap(sizingLines),
@@ -695,6 +699,92 @@ function placementRefusal(a, prior) {
   return check.ok ? null : `${who} not placed: ${check.reason}`;
 }
 
+// ── Wire ends by pin name (issue #11) ────────────────────────
+// An add_wire end may name an on-board part's pin: "U1.in1p", "LED1.anode",
+// or "LED1.1" by index for a 2-pin part. It becomes the first free hole in
+// that pin's strip, so hole bookkeeping isn't the model's job. Free means no
+// part lead and no wire end on the board the earlier steps leave (the sent
+// board, unless a delete_all cleared it, then `prior`). Off-board pins
+// (BAT1.0, MM1.red) and a label no placed part has stay as written.
+const TOP_ROWS    = BODY_ROWS.slice(0, BODY_ROWS.length / 2);             // a→e
+const BOTTOM_ROWS = BODY_ROWS.slice(BODY_ROWS.length / 2).reverse();      // j→f
+
+// The other holes in `hole`'s strip, in the order they are tried: its
+// column half from the outer row toward the gap, or its rail from the
+// nearest column out.
+function stripHoles(hole) {
+  const leg = legAt(null, hole);
+  if (!leg.row) return [];
+  if (!BODY_ROWS.includes(leg.row)) {
+    const out = [];
+    for (let d = 1; d < COLS; d++) for (const c of [leg.col + d, leg.col - d]) if (c >= 0 && c < COLS) out.push(`${leg.row}_${c + 1}`);
+    return out;
+  }
+  return (TOP_ROWS.includes(leg.row) ? TOP_ROWS : BOTTOM_ROWS).filter(r => r !== leg.row).map(r => `${r}${leg.col + 1}`);
+}
+// "column 32, rows f–j", or "the tp rail".
+const stripName = hole => {
+  const leg = legAt(null, hole);
+  return BODY_ROWS.includes(leg.row) ? `column ${leg.col + 1}, rows ${TOP_ROWS.includes(leg.row) ? 'a–e' : 'f–j'}` : `the ${leg.row} rail`;
+};
+
+// A pin's index in `def`, -1 if it has none. On a 2-pin part all digits is
+// an index, as Board.apply and BAT1.0 read it ("LP1.1" is a bulb's second
+// pin, the one named "2"). On a bigger part it is refused: a model counting
+// a chip's printed pins from 1 would get the wrong pin. Anything else is a
+// pin name, in any case.
+function pinIndexOf(def, pin) {
+  if (/^\d+$/.test(String(pin))) return def.pins.length === 2 && +pin < 2 ? +pin : -1;
+  return def.pins.findIndex(p => p.toLowerCase() === String(pin).toLowerCase());
+}
+
+// Why `pin` names no pin of `part`, listing each pin with the hole it sits
+// in ("cathode c8, anode c6"). A pin whose name is a number (the
+// potentiometer's 1 and 3) is never offered as a name: on a part with more
+// than 2 pins it is wired through a free hole in its column.
+function badPin(part, def, pin) {
+  const number = /^\d+$/.test(String(pin));
+  const lead = !number ? `${part.label} has no pin "${pin}".`
+    : def.pins.length === 2 ? `${part.label} has no pin index ${pin}.` : `${part.label}'s pins can't be named by number.`;
+  const tail = def.pins.length === 2 ? ' A number is an index, 0 or 1.'
+    : def.pins.some(p => /^\d+$/.test(p)) ? ' Wire a pin whose name is a number through a free hole in its column.' : '';
+  return `${lead} Its pins, in their holes: ${def.pins.map((p, j) => `${p} ${part.holes[j]}`).join(', ')}.${tail}`;
+}
+
+// → { action } with its pin-named ends as holes (the action itself when it
+// has none), or { end, why } it is refused: a pin the part doesn't have, or
+// a strip with no free hole.
+function pinWire(a, prior, board) {
+  if (!a || a.tool !== 'add_wire' || a.from == null || a.to == null) return { action: a };
+  const named = ['from', 'to'].filter(k => !legAt(null, a[k]).row && (Ids.parsePinRef(a[k]) || {}).label);
+  if (!named.length) return { action: a };
+  const before = prior || [];
+  let now;
+  try { now = Board.apply(isBoard(board) ? board : Board.empty(), before); } catch { return { action: a }; }
+  const taken = new Set();
+  const take = h => { const leg = legAt(null, h); if (leg.row) taken.add(leg.hole); };
+  for (const p of now.board.parts) (p.holes || []).forEach(take);
+  for (const w of now.board.wires) [w.from, w.to].forEach(take);
+  // A wire the board model skipped still reaches the page with its holes.
+  for (const e of now.errors) if (before[e.index] && before[e.index].tool === 'add_wire') [before[e.index].from, before[e.index].to].forEach(take);
+  [a.from, a.to].forEach(take);   // this wire's own hole end: U1.in1p → j32 is never j32 → j32
+  const out = { ...a };
+  const refused = (end, why) => ({ end, why: `The wire ${a.from} → ${a.to} was not added: ${why}` });
+  for (const k of named) {
+    const ref  = Ids.parsePinRef(a[k]);
+    const part = Ids.findByLabel(now.board.parts, ref.label);
+    const def  = part && part.holes && Parts.get(part.type);
+    if (!def) continue;
+    const i = pinIndexOf(def, ref.pin);
+    if (i < 0 || !part.holes[i]) return refused(a[k], badPin(part, def, ref.pin));
+    const hole = stripHoles(part.holes[i]).find(h => !taken.has(h));
+    if (!hole) return refused(a[k], `${stripName(part.holes[i])}, the strip of ${a[k]}, has no free hole.`);
+    taken.add(hole);
+    out[k] = hole;
+  }
+  return { action: out };
+}
+
 // ── Part values: Parts.checkValue ────────────────────────────
 // Drops a value the board can't use from its action, keeping the part at its
 // default, with a note. A kit hint (350 Ω → 330 Ω) keeps the value and adds a
@@ -737,6 +827,22 @@ const OLD_BATTERY_PIN = /^battery_(\d+)_pin(\d+)$/i;
 // sit beside the board. Their pins are wire ends by label.
 const SOURCES = PARTS.filter(def => def.place.kind === 'offboard' && def.ref !== undefined);
 const isBattery = def => toolName(def) === BATTERY_TOOL;
+
+// A multimeter probe as a wire end: "MM1.red" or "MM1.0" is
+// { label: 'MM1', pin: 'red', end }; anything else is null.
+const METER = Parts.get('multimeter');
+function meterProbe(end) {
+  const m = METER && new RegExp(`^${METER.prefix}(\\d+)\\.(\\w+)$`, 'i').exec(String(end));
+  if (!m) return null;
+  const pin = /^\d+$/.test(m[2]) ? METER.pins[+m[2]] : METER.pins.find(p => p === m[2].toLowerCase());
+  return pin ? { label: `${METER.prefix}${+m[1]}`, pin, end: String(end) } : null;
+}
+
+// A node that is only board: a body strip ("top12") or a rail ("tn").
+const BOARD_NODE = /^(?:(?:top|bot)\d+|tp|tn|bp|bn)$/;
+const RAIL_NODES = ['tp', 'tn', 'bp', 'bn'];
+// A pin as its part's pinout names it (the TL072's "IN1−"), else its own name.
+const pinLabel = (def, pin) => (def.pinout && def.pinout.labels && def.pinout.labels[def.pins.indexOf(pin)]) || pin;
 
 // An off-board source pin, as { def, n, pin } with n counting from 0:
 // "PS1.2" is { bench_supply, n: 0, pin: 2 }. The battery's old form
@@ -807,7 +913,10 @@ function findStackedHoles(actions) {
 // The graph comes from each part's elements: R and SW conduct both ways (a
 // button counts as closed, since the user presses it), and D conducts one way,
 // from its first pin to its second (anode to cathode).
-function findCircuitProblems(actions, { labelForm = true } = {}) {
+//
+// `solved` (rebuildProblems' plain solve of the same build) adds the op-amp
+// checks that need the simulator (#10).
+function findCircuitProblems(actions, { labelForm = true, solved = null } = {}) {
   if (!Array.isArray(actions) || actions.length === 0) return [];
   const problems = [];
   const wires = actions.filter(a => a.tool === 'add_wire');
@@ -843,7 +952,11 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     const node = p => (p in holeOf ? nodeKey(holeOf[p]) : `part${i}${p}`);   // "#mid" is inside the part
     placedParts.push({ i, a, def, holeOf, pinNodes: def.pins.map(node) });
     for (const el of elementsOf(def)) {
-      if (el.kind === 'E' && Array.isArray(el.out)) opamps.push({ i, out: node(el.out[0]), ctrl: (el.ctrl || []).map(node) });
+      if (el.kind === 'E' && Array.isArray(el.out)) {
+        const [plus, minus] = el.ctrl || [];   // k: which op-amp of the part (its mode is m['mode' + (k + 1)])
+        opamps.push({ i, def, holeOf, k: opamps.filter(o => o.i === i).length, out: node(el.out[0]),
+                      ctrl: (el.ctrl || []).map(node), pins: { out: el.out[0], plus, minus } });
+      }
       if (!Array.isArray(el.pins)) continue;
       const [x, y] = el.pins;
       joins.push({ x: node(x), y: node(y), part: i });
@@ -854,15 +967,16 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     }
   });
 
-  // The nodes `seed` reaches in `joins`, leaving out part `skip`'s own elements.
-  function joined(seed, skip) {
+  // The nodes `seed` reaches in `joins`, leaving out part `skip`'s own
+  // elements. Nodes in `blocked` are never entered.
+  function joined(seed, skip, blocked = new Set()) {
     const seen = new Set([seed]), queue = [seed];
     while (queue.length) {
       const at = queue.shift();
       for (const { x, y, part } of joins) {
         if (part === skip || !x || !y) continue;
         const next = x === at ? y : (y === at ? x : null);
-        if (next && !seen.has(next)) { seen.add(next); queue.push(next); }
+        if (next && !seen.has(next) && !blocked.has(next)) { seen.add(next); queue.push(next); }
       }
     }
     return seen;
@@ -894,12 +1008,14 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // Every source the build places or wires to, as "<type>|<n>".
   const sources = new Map();
   const placed = new Map();   // def → how many the build places
+  const placeAction = new Map();   // "<type>|<n>" → its place action
   for (const a of actions) {
     const def = PART_BY_TOOL.get(a.tool);
     if (!SOURCES.includes(def)) continue;
     const n = placed.get(def) || 0;
     placed.set(def, n + 1);
     sources.set(`${def.type}|${n}`, { def, n });
+    placeAction.set(`${def.type}|${n}`, a);
   }
   for (const e of ends) { const p = sourcePin(e); if (p) sources.set(`${p.def.type}|${p.n}`, { def: p.def, n: p.n }); }
   const byOrder = (x, y) => SOURCES.indexOf(x.def) - SOURCES.indexOf(y.def) || x.n - y.n;
@@ -918,25 +1034,53 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   };
   const srcPin = (def, n, k) => (isBattery(def) ? pinName(n, k) : `${def.prefix}${n + 1}.${k}`);
 
-  const pos = new Set(), neg = new Set();
+  // #3: a source whose wave crosses 0 V (a sine's amplitude above
+  // |offset|) drives its + both above and below its −, so its pair is grown
+  // both ways. Its values are its place action's own keys, else the part's
+  // defaults. Returns { f } (the wave's frequency) or null.
+  const crossingWave = (def, a) => {
+    const values = {};
+    for (const [k, spec] of Object.entries(def.values || {})) values[k] = a && a[k] != null ? Number(a[k]) : spec.default;
+    let els = [];
+    try { els = def.elements(values, {}) || []; } catch { els = []; }
+    const w = els.map(el => el.kind === 'V' && el.wave).find(Boolean);
+    return w && w.amp > Math.abs(w.offset) ? { f: w.freq } : null;
+  };
+  let crossing = null;   // the first source whose wave crosses 0 V
+
+  // #9: orientation is judged within one group, { P, N }: a source's own
+  // pairs grow into that source's group (the bench supply's pos → com → neg
+  // in series spans both its pairs), and each current source's pair into its
+  // own. Mixed, one source's + meets another's − through a shared tn (a
+  // generator's − growth round a correct LED to tp) and excuses a backwards
+  // LED on the other source. A crossing wave's reversed pair (COM as +, OUT
+  // as −) grows into a wave group of its own, with its wave (#3).
+  const groups = [], waveGroups = [];
+  const newGroup = () => ({ P: new Set(), N: new Set() });
   const terminals = [];
-  // A terminal pair's reach into pos / neg: first each side without diodes,
+  // A terminal pair's reach into a group: first each side without diodes,
   // then grown through forward diodes without crossing into the other side:
   // an LED that lit up one branch must not carry + round through the ground
   // rail and hide a reversed LED elsewhere.
-  function growPair(plus, minus) {
+  function growPair(plus, minus, { P, N }) {
     const plusSide = reach(plus), minusSide = reach(minus);
     const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
     const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
-    for (const k of plusSide) pos.add(k);
-    for (const k of minusSide) neg.add(k);
-    for (const k of reach(plus, fromPlus, onlyMinus))  pos.add(k);
-    for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
+    for (const k of plusSide) P.add(k);
+    for (const k of minusSide) N.add(k);
+    for (const k of reach(plus, fromPlus, onlyMinus))  P.add(k);
+    for (const k of reach(minus, fromMinus, onlyPlus)) N.add(k);
   }
   const railPairs = new Map();   // "tp|tn" → the batteries wired to that rail pair
   for (const { def, n } of [...sources.values()].sort(byOrder)) {
     const key = k => sourceKey(def, n, k);
     const ref = def.pins.indexOf(def.ref);
+    const wave = crossingWave(def, placeAction.get(`${def.type}|${n}`));
+    if (wave && !crossing) crossing = wave;
+    const group = newGroup();
+    groups.push(group);
+    const waveGroup = wave ? { ...newGroup(), wave } : null;
+    if (waveGroup) waveGroups.push(waveGroup);
     if (n < (placed.get(def) || 0)) {
       if (isBattery(def)) {
         if (!wired(key(0))) problems.push(`${pinName(n, 0)} is not wired to a positive rail (tp_N), so nothing on the board is powered.`);
@@ -964,18 +1108,21 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
       const pair = `${rails(plusWires)}|${rails(reach(minus, wireEdges))}`;
       if (isBattery(def) && !/^\||\|$/.test(pair)) railPairs.set(pair, [...(railPairs.get(pair) || []), n]);
 
-      growPair(plus, minus);
+      growPair(plus, minus, group);
+      if (waveGroup) growPair(minus, plus, waveGroup);
     }
   }
 
   for (const [p, m] of isrcPairs) {
     terminals.push([p, m]);
-    growPair(p, m);
+    const group = newGroup();
+    groups.push(group);
+    growPair(p, m, group);
   }
 
   // #118: an op-amp's output sources current into, and sinks it from, any
   // supply terminal, so for the on-path checks it pairs with each both ways.
-  // Not for orientation (pos / neg): a diode at an op-amp output is left to
+  // Not for orientation (the groups): a diode at an op-amp output is left to
   // the simulator, below. An unused op-amp (both inputs joined to nothing
   // outside their own column, as tl072.js's `unused`) drives nothing.
   const opampOuts = opamps.filter(o => o.ctrl.some(n => joined(n, o.i).size > 1)).map(o => o.out);
@@ -1006,7 +1153,14 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // nothing over accusing a correctly wired LED of being backwards.
   // A diode with a breakdown voltage (vz, a Zener) is used reversed: its
   // cathode on + and anode on − is how it regulates, not a mistake.
-  const reversedZener = d => d.el.vz !== undefined && pos.has(d.cathode) && neg.has(d.anode);
+  // Forward / against within one group: anode on its + side and cathode on
+  // its − side, or the other way round.
+  const forwardIn = d => g => g.P.has(d.anode) && g.N.has(d.cathode);
+  const againstIn = d => g => g.P.has(d.cathode) && g.N.has(d.anode);
+  const reversedZener = d => d.el.vz !== undefined && groups.some(againstIn(d));
+  // Forward for some source's own group, or for a crossing wave's reversed
+  // pair on its own (#3).
+  const forward = d => groups.some(forwardIn(d)) || waveGroups.some(forwardIn(d));
 
   // #77: the graph's "backwards" is only a candidate. A source with more
   // than one V element (the bench supply's com is the − of one pair and the
@@ -1015,20 +1169,21 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // V(anode) above REVERSE_VOLTS. A floating pin is bounded instead: an
   // anode by the simulator's cap (pinMax), a cathode from below by the off
   // diodes feeding its node (V(their anode) − vf). Unbounded is not
-  // reverse-biased. The simulation runs once, only when some part is a
-  // candidate; if it fails, the graph's verdict stands.
+  // reverse-biased. The simulation runs once per moment t (undefined: a
+  // plain solve, a wave at its offset), only when some part is a candidate;
+  // if it fails, the graph's verdict stands.
   const REVERSE_VOLTS = 0.5;
-  let simmed;   // undefined until needed; then { at: part index → PartResult }, or null
-  function simulated() {
-    if (simmed !== undefined) return simmed;
-    simmed = null;
+  const simmed = new Map();   // t → { at: part index → PartResult }, or null
+  function simulated(t) {
+    if (simmed.has(t)) return simmed.get(t);
+    simmed.set(t, null);
     try {
       const build = fromLastDeleteAll(actions);
-      if (!build) return simmed;
+      if (!build) return null;
       const { board, errors } = Board.apply(Board.empty(), build);
-      if (errors.length) return simmed;   // the sim would see a different build (e.g. old battery pin form)
+      if (errors.length) return null;   // the sim would see a different build (e.g. old battery pin form)
       const { components, wires: simWires } = Board.toSim(board);
-      const r = Sim.analyze(components, simWires);
+      const r = t === undefined ? Sim.analyze(components, simWires) : Sim.analyze(components, simWires, { dt: 1e-3, state: {}, t });
       const same = (p, holes) => p.holes && p.holes.length === holes.length
         && p.holes.every((h, k) => h === String(holes[k]).toLowerCase());
       const at = i => {
@@ -1038,9 +1193,9 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
         const res = part && r.parts && r.parts[part.label];
         return res ? res.r : null;
       };
-      simmed = { at };
-    } catch { simmed = null; }
-    return simmed;
+      simmed.set(t, { at });
+    } catch { simmed.set(t, null); }
+    return simmed.get(t);
   }
   const known = v => typeof v === 'number' && Number.isFinite(v);
   // The lowest a floating cathode node can sit: each off diode into it holds
@@ -1059,8 +1214,9 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   }
   // true / false from the simulation; null when it can't say (keep the graph's
   // verdict): no simulation, or a part dead in it with neither pin bounded.
-  function reverseBiased(d) {
-    const sim = simulated();
+  // t: the moment solved (undefined: the plain solve).
+  function reverseBiased(d, t) {
+    const sim = simulated(t);
     const res = sim && sim.at(d.i);
     if (!res) return null;
     const [ap, cp] = d.el.pins;
@@ -1068,6 +1224,22 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     const va = known(res.pins[ap]) ? res.pins[ap] : (res.pinMax && res.pinMax[ap]);
     if (!known(vc) && !known(va)) return null;
     return known(vc) && known(va) && vc - va > REVERSE_VOLTS;
+  }
+  // #3: a plain solve reads a wave at its offset, where a diode at an
+  // op-amp output may be off as it should be on that half. With a wave that
+  // crosses 0 V, it is read at the peak and the trough (t = 1/(4f), 3/(4f))
+  // and is backwards only if reversed at both.
+  const reversedAt = (d, wave) => (wave && wave.f > 0 ? [1 / (4 * wave.f), 3 / (4 * wave.f)] : [undefined])
+    .every(t => reverseBiased(d, t) === true);
+  const reversedAtOutput = d => reversedAt(d, crossing);
+  // #9: a diode against some source's group and forward for none is a
+  // candidate. Forward only for a crossing wave's reversed pair, it is
+  // backwards only if reversed at that wave's peak and trough; otherwise the
+  // plain solve decides, as above.
+  function backwardsDiode(d) {
+    if (groups.some(forwardIn(d)) || !groups.some(againstIn(d))) return false;
+    const byWave = waveGroups.filter(forwardIn(d));
+    return byWave.length ? byWave.every(g => reversedAt(d, g.wave)) : reverseBiased(d) !== false;
   }
 
   for (const { i, a, def, holeOf, pinNodes } of fullRebuild ? placedParts : []) {
@@ -1078,10 +1250,8 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     // At an op-amp output the graph can't tell + from −: only the simulator
     // says backwards, and nothing is said without it.
     const atOutput = diodes.find(d => d.i === i && d.outer && !reversedZener(d) && driven(d));
-    const backwards = atOutput ? (reverseBiased(atOutput) === true ? atOutput : null)
-      : diodes.find(d => d.i === i && d.outer && !reversedZener(d)
-        && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode)
-        && reverseBiased(d) !== false);
+    const backwards = atOutput ? (reversedAtOutput(atOutput) ? atOutput : null)
+      : diodes.find(d => d.i === i && d.outer && !reversedZener(d) && backwardsDiode(d));
     if (backwards) {
       const { el, holeOf } = backwards;
       const [ap, cp] = el.pins;
@@ -1096,7 +1266,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     }
     // On a path, but a diode on it faces the wrong way (e.g. both LEDs of a
     // series pair flipped, so neither reads as backwards on its own).
-    const stuck = !atOutput && diodes.find(d => d.i === i && d.outer && !reversedZener(d) && !(pos.has(d.anode) && neg.has(d.cathode)));
+    const stuck = !atOutput && diodes.find(d => d.i === i && d.outer && !reversedZener(d) && !forward(d));
     if (stuck) {
       problems.push(`The ${partName(def)} at ${a.holeA}/${a.holeB} has no forward path from + to −, so it cannot light. Check each diode on its path: cathode (holeA) toward −, anode (holeB) toward +.`);
     }
@@ -1114,6 +1284,93 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     return def.pins.filter((pin, k) => must.includes(pin) && holeOf[pin] && reached[k].size === 1)
       .map(pin => `The ${partName(def)} at ${a.hole} has its ${pin} pin (${holeOf[pin]}) wired to nothing, so nothing uses it. Wire ${holeOf[pin]}'s column to the part it should feed.`);
   }
+
+  // #10: the op-amp wiring mistakes the AI makes, on a full rebuild (only
+  // then are the labels and every strip's occupants known). Each E element
+  // is one op-amp (half of a TL072), its pins named as on the pinout. A
+  // meter probe only reads a node, so probes are left out of what a node
+  // holds.
+  function opampProblems() {
+    const found = [];
+    const lastClear = actions.map(a => a.tool).lastIndexOf('delete_all');
+    const labelOf = i => `${PART_BY_TOOL.get(actions[i].tool).prefix}${actions.slice(lastClear + 1, i).filter(a => a.tool === actions[i].tool).length + 1}`;
+    const named = (o, pin) => `${pinLabel(o.def, pin)} (${o.holeOf[pin] || 'off the board'})`;
+    const halves = opamps.filter(o => o.pins.plus && o.pins.minus);
+    const probeNodes = new Set(ends.filter(meterProbe).map(nodeKey));
+    // Whether the nodes joined to `seed` hold anything but bare holes and
+    // rails: a source, another off-board end, or a part's pin (unless own(i, pin)).
+    const holdsSomething = (seed, own) => [...joined(seed, undefined, probeNodes)].some(k => !BOARD_NODE.test(k)
+      || placedParts.some(p => p.pinNodes.some((n, j) => n === k && !own(p.i, p.def.pins[j]))));
+    // Unused: both inputs reach nothing but the half's own pins.
+    const ownPin = o => (i, pin) => i === o.i && Object.values(o.pins).includes(pin);
+    const unused = new Set(halves.filter(o => !o.ctrl.some(n => holdsSomething(n, ownPin(o)))));
+    const unusedInput = (i, pin) => [...unused].find(o => o.i === i && (o.pins.plus === pin || o.pins.minus === pin));
+    // The rails and the sources' pins: a path through one is a supply, not feedback.
+    const supply = new Set([...RAIL_NODES, ...[...sources.values()].flatMap(({ def, n }) => def.pins.map((_, k) => sourceKey(def, n, k)))]);
+
+    // 1. OUT joined to its own IN+ by wires alone, not through a rail or
+    // source (OUT shorted to COM with IN+ on COM is not this): positive feedback.
+    for (const o of halves) {
+      if (!reach(o.out, wireEdges, supply).has(o.ctrl[0])) continue;
+      found.push(`${labelOf(o.i)}'s ${named(o, o.pins.out)} is wired straight to its + input ${named(o, o.pins.plus)}: that is positive feedback. Feed back to ${named(o, o.pins.minus)} instead.`);
+    }
+
+    // 3. A probe whose strip holds nothing else, or only an unused input.
+    const claimed = new Set();   // probe wires check 3 names, left out of check 2
+    for (const w of wires) {
+      const [pf, pt] = [w.from, w.to].map(meterProbe);
+      if (!pf === !pt) continue;   // no probe, or one at each end
+      const probe = pf || pt, hole = pf ? w.to : w.from, node = nodeKey(hole);
+      if (!node || holdsSomething(node, (i, pin) => !!unusedInput(i, pin))) continue;
+      claimed.add(w);
+      const reached = joined(node, undefined, probeNodes);
+      const chip = placedParts.find(p => p.pinNodes.some((n, j) => reached.has(n) && unusedInput(p.i, p.def.pins[j])));
+      const pin = chip && chip.def.pins.find((pn, j) => reached.has(chip.pinNodes[j]) && unusedInput(chip.i, pn));
+      const with_ = chip ? `only ${pinLabel(chip.def, pin)} of ${labelOf(chip.i)}'s unused op-amp ${unusedInput(chip.i, pin).k + 1}` : 'nothing else';
+      found.push(`${probe.label}'s ${probe.pin} probe (${probe.end}) at ${hole} has ${with_} in its strip, so it measures nothing. Move it to the ${probe.pin === 'red' ? '+' : '−'} side of what it should measure.`);
+    }
+
+    // 2. A wire, probe or part lead in an unused half's strips.
+    for (const o of unused) {
+      const strips = new Map([[o.out, 'out'], [o.ctrl[0], 'plus'], [o.ctrl[1], 'minus']]);
+      let lander = null;
+      for (const w of wires) {
+        for (const [end, other] of [[w.from, w.to], [w.to, w.from]]) {
+          if (lander || claimed.has(w) || !strips.has(nodeKey(end))) continue;
+          const p = meterProbe(other);
+          // From a rail or a source pin, the wire can't belong on the used half's pin.
+          lander = { what: p ? `${p.label}'s ${p.pin} probe` : 'a wire', hole: end, role: strips.get(nodeKey(end)),
+                     fromSupply: supply.has(nodeKey(other)) };
+        }
+      }
+      for (const p of placedParts) {
+        p.pinNodes.forEach((n, j) => {
+          if (lander || p.i === o.i || !strips.has(n)) return;
+          const name = partName(p.def);   // "an LED lead", "a resistor lead"
+          lander = { what: `${/^(?:[aeiou]|[AEFHILMNORSX][A-Z0-9])/.test(name) ? 'an' : 'a'} ${name} lead`, hole: p.holeOf[p.def.pins[j]], role: strips.get(n) };
+        });
+      }
+      if (!lander) continue;
+      const mate = halves.find(m => m.i === o.i && !unused.has(m));
+      const fix = !mate ? `wire ${pinLabel(o.def, o.pins.plus)} and ${pinLabel(o.def, o.pins.minus)} into the circuit, or move it`
+        : lander.fromSupply ? 'move it to a free column'
+        : `move it to a free column, or to ${named(mate, mate.pins[lander.role])} only if it should connect there`;
+      found.push(`${labelOf(o.i)}'s op-amp ${o.k + 1} is unused: ${named(o, o.pins.plus)} and ${named(o, o.pins.minus)} lead nowhere. Yet ${lander.what} is in ${pinLabel(o.def, o.pins[lander.role])}'s strip at ${lander.hole}: ${fix}.`);
+    }
+
+    // 4. Clipped (the solve's mode 'high' or 'low') although OUT reaches IN−
+    // through wires and resistors, not through a rail, a source, or a strip
+    // wired to one (a divider and a load sharing a grounded strip).
+    const feedbackStops = new Set([...supply].flatMap(n => [...reach(n, wireEdges)]));
+    for (const o of solved && solved.parts ? halves : []) {
+      const res = solved.parts[labelOf(o.i)];
+      const mode = res && res.m && res.m[`mode${o.k + 1}`];
+      if ((mode !== 'high' && mode !== 'low') || unused.has(o) || !reach(o.out, steady, feedbackStops).has(o.ctrl[1])) continue;
+      found.push(`${labelOf(o.i)}'s ${named(o, o.pins.out)} is clipped at the rail although it has negative feedback to ${named(o, o.pins.minus)}: check the gain (Rf/Rin) and the input.`);
+    }
+    return found;
+  }
+  if (fullRebuild) problems.push(...opampProblems());
 
   problems.push(...findStackedHoles(actions));
   return problems;
@@ -1133,6 +1390,7 @@ const askAI = makeAsk(
     partTools,
     refusal:   (action, prior, board) => placementRefusal(action, prior) || benchRefusal(action, prior, board) || referenceRefusal(action, prior, board),
     duplicate: duplicateWire,
+    rewriteWire: pinWire,
     checkBuild,
   }
 );
@@ -1229,19 +1487,23 @@ function fromLastDeleteAll(actions) {
 // A rebuild's problems as sentences the model can act on: the checker's,
 // then the simulator's. Board.apply errors are not problems (the live board
 // accepts older pin forms), and a simulator that throws leaves just the
-// checker's list.
+// checker's list. The checker gets the solve too, for an op-amp clipped
+// although it has negative feedback (#10).
 function rebuildProblems(build) {
-  const problems = findCircuitProblems(build, { labelForm: true });
+  let r = null;
   try {
     const { components, wires } = Board.toSim(Board.apply(Board.empty(), build).board);
-    const r = Sim.analyze(components, wires);
+    r = Sim.analyze(components, wires);
+  } catch { r = null; /* the checker's problems stand alone */ }
+  const problems = findCircuitProblems(build, { labelForm: true, solved: r && r.status === 'ok' ? r : null });
+  if (r) {
     if (r.status === 'unsolvable') problems.push('The simulator cannot solve this circuit. Check that every part sits between power and ground.');
     if (r.status === 'unsettled')  problems.push('The simulator could not settle this circuit, so it has no readings.');
     if (r.shorted) problems.push('The battery is shorted: current reaches ground with nothing to limit it.');
     for (const [label, part] of Object.entries(r.parts || {})) {
-      for (const w of (part && part.warnings) || []) problems.push(`${label}: ${w}`);
+      for (const w of (part && Array.isArray(part.warnings) && part.warnings) || []) problems.push(`${label}: ${w}`);
     }
-  } catch { /* the checker's problems stand alone */ }
+  }
   return [...new Set(problems)];
 }
 
@@ -1387,8 +1649,16 @@ function finishAIReply({ reply, actions, board, fullCheck = false }) {
   // holds no holes. The DeepSeek loop has already refused most of them.
   // A wire already on the board, or already in this reply, is dropped
   // quietly: adding it again would stack two wire ends in one hole.
+  // A wire end by pin name becomes a free hole first (#11), so every check
+  // below, and the page, sees holes.
+  // On an edit, a wire it can't add is a fix that can't land whole (#199).
+  const edit = isBoard(board) && !fromLastDeleteAll(actions);
+  const unwired = [];
   const kept = [];
-  for (const a of actions) {
+  for (let a of actions) {
+    const pinned = pinWire(a, kept, board);
+    if (pinned.why) { notes.push(pinned.why); if (edit) unwired.push(pinned.end); continue; }
+    a = pinned.action;
     const dup = duplicateWire(a, kept, board);
     if (dup) { console.warn(`[edit] dropped: ${dup}`); continue; }
     const why = placementRefusal(a, kept) || benchRefusal(a, kept, board);
@@ -1405,6 +1675,10 @@ function finishAIReply({ reply, actions, board, fullCheck = false }) {
     console.warn(`[edit] dropped a reply that names ${missing.join(', ')}, not on the board`);
     actions = [];
     reply += `\n\nI couldn't make that change: it named ${missing.join(', ')}, not on your board. Nothing was changed. Ask me again.`;
+  } else if (unwired.length) {
+    console.warn(`[edit] dropped a reply with a wire to ${unwired.join(', ')} it can't add`);
+    actions = [];
+    reply += `\n\nI couldn't make that change without the wire to ${unwired.join(', ')}. Nothing was changed. Ask me again.`;
   }
 
   // Report problems instead of patching them, so a wrong circuit is visible
@@ -1439,14 +1713,18 @@ function sendJSON(res, status, obj) {
 const MAX_BODY_BYTES  = 256 * 1024;
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 const MAX_LEADS_BYTES = 6 * 1024 * 1024;   // up to 24 crops
+const MAX_VOICE_BYTES = 2 * 1024 * 1024 + 64 * 1024;   // ~60 s of opus, as base64 JSON
+const MAX_TTS_BYTES   = 8 * 1024;
 
 const RATE_WINDOW_MS       = 60000;
 const ASK_MAX_PER_WINDOW   = 20;
 const PHOTO_MAX_PER_WINDOW = 6;
 const LEADS_MAX_PER_WINDOW = 6;
+const VOICE_MAX_PER_WINDOW = 20;   // stt and tts together
 const askHits   = new Map();
 const photoHits = new Map();
 const leadsHits = new Map();
+const voiceHits = new Map();
 
 // Behind a proxy (Render and similar) every request arrives from the proxy,
 // so the limit would be shared by every visitor. Only trust the header when
@@ -1625,6 +1903,66 @@ async function handleLeads(req, res) {
   if (!res.writableEnded && !res.destroyed) res.end();
 }
 
+// ── /api/voice/stt and /api/voice/tts (#12) ──────────────────
+// ElevenLabs behind the server (backend/voice.js), so the key never reaches
+// the page. Env is read per request. One [voice] line per request that
+// reached a provider; never the audio, the transcript, an upstream body or the key.
+const VOICE_STATUS  = { BAD_AUDIO: 400, BAD_TEXT: 400, VOICE_OFF: 503, VOICE_TIMEOUT: 504, VOICE_FAILED: 502 };
+const VOICE_RATE    = { reply: 'Too many voice requests. Wait a moment.', code: 'RATE_LIMITED' };
+const MAX_TTS_CHARS = 600;
+const voiceCode  = e => (e && VOICE_STATUS[e.code] ? e.code : 'VOICE_FAILED');
+const voiceError = (res, code) => sendJSON(res, VOICE_STATUS[code], { reply: Voice.VOICE_REPLY[code], code });
+const logVoice   = (route, outcome, started, tail = '') => console.log(`[voice] ${route} ${outcome} ${Date.now() - started} ms${tail}`);
+
+// The JSON body's `key`, or undefined when the body isn't a JSON object.
+function voiceField(raw, key) {
+  try {
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' ? o[key] : undefined;
+  } catch { return undefined; }
+}
+
+async function handleVoiceStt(req, res) {
+  if (rateLimited(req, voiceHits, VOICE_MAX_PER_WINDOW)) return sendJSON(res, 429, VOICE_RATE);
+  const raw = await readBody(req, res, MAX_VOICE_BYTES, { reply: 'That recording is too long.', code: 'TOO_LARGE' });
+  if (raw === null) return;
+  const clip = Voice.parseAudioDataUrl(voiceField(raw, 'audio'));
+  if (!clip) return voiceError(res, 'BAD_AUDIO');
+  if (Voice.voiceMode() === 'off') return voiceError(res, 'VOICE_OFF');
+  const started = Date.now();
+  try {
+    const text = await Voice.transcribe(clip);
+    logVoice('stt', 200, started);
+    return sendJSON(res, 200, { text });
+  } catch (e) {
+    const code = voiceCode(e);
+    logVoice('stt', `${VOICE_STATUS[code]} ${code}`, started);
+    return voiceError(res, code);
+  }
+}
+
+async function handleVoiceTts(req, res) {
+  if (rateLimited(req, voiceHits, VOICE_MAX_PER_WINDOW)) return sendJSON(res, 429, VOICE_RATE);
+  const raw = await readBody(req, res, MAX_TTS_BYTES, { reply: 'That reply is too long to speak.', code: 'TOO_LARGE' });
+  if (raw === null) return;
+  const said = voiceField(raw, 'text');
+  const text = typeof said === 'string' ? said.trim() : '';
+  if (!text || text.length > MAX_TTS_CHARS) return voiceError(res, 'BAD_TEXT');
+  if (Voice.voiceMode() === 'off') return voiceError(res, 'VOICE_OFF');
+  const started = Date.now();
+  let audio;
+  try {
+    audio = Readable.fromWeb((await Voice.speak(text)).body);
+  } catch (e) {
+    const code = voiceCode(e);
+    logVoice('tts', `${VOICE_STATUS[code]} ${code}`, started);
+    return voiceError(res, code);
+  }
+  const firstByte = Date.now() - started;
+  res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' });
+  pipeline(audio, res, err => console.log(`[voice] tts 200 ${firstByte} ms to first byte${err ? ', stream cut off' : ''}`));
+}
+
 // A sent board in the board-model shape; anything else is ignored, as
 // from an older client.
 const isBoard = b => !!b && Array.isArray(b.parts) && Array.isArray(b.wires);
@@ -1652,7 +1990,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/api/health') {
-    return sendJSON(res, 200, { status: 'ok', model: MODEL_NAME });
+    return sendJSON(res, 200, { status: 'ok', model: MODEL_NAME, voice: Voice.voiceMode() });
   }
 
   // The Edison course hub's Canvas dummy: a sync that worked, marked as a demo. No real Canvas.
@@ -1682,6 +2020,8 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/photo') return handlePhoto(req, res);
   if (req.method === 'POST' && req.url === '/api/photo/leads') return handleLeads(req, res);
+  if (req.method === 'POST' && req.url === '/api/voice/stt') return handleVoiceStt(req, res);
+  if (req.method === 'POST' && req.url === '/api/voice/tts') return handleVoiceTts(req, res);
 
   // ── Static file serving ───────────────────────────────────
   const STATIC_ROOT = path.join(__dirname, '..');
@@ -1750,6 +2090,7 @@ if (require.main === module) {
     console.log(`⚡ Sparky AI  →  http://localhost:${PORT}`);
     console.log(`   AI    : ${AI_PROVIDER}`);
     console.log(`   Model : ${MODEL_NAME}`);
+    console.log(`   Voice : ${Voice.voiceMode()}`);
     console.log(`   Health: http://localhost:${PORT}/api/health`);
   });
 }
