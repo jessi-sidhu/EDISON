@@ -828,6 +828,22 @@ const OLD_BATTERY_PIN = /^battery_(\d+)_pin(\d+)$/i;
 const SOURCES = PARTS.filter(def => def.place.kind === 'offboard' && def.ref !== undefined);
 const isBattery = def => toolName(def) === BATTERY_TOOL;
 
+// A multimeter probe as a wire end: "MM1.red" or "MM1.0" is
+// { label: 'MM1', pin: 'red', end }; anything else is null.
+const METER = Parts.get('multimeter');
+function meterProbe(end) {
+  const m = METER && new RegExp(`^${METER.prefix}(\\d+)\\.(\\w+)$`, 'i').exec(String(end));
+  if (!m) return null;
+  const pin = /^\d+$/.test(m[2]) ? METER.pins[+m[2]] : METER.pins.find(p => p === m[2].toLowerCase());
+  return pin ? { label: `${METER.prefix}${+m[1]}`, pin, end: String(end) } : null;
+}
+
+// A node that is only board: a body strip ("top12") or a rail ("tn").
+const BOARD_NODE = /^(?:(?:top|bot)\d+|tp|tn|bp|bn)$/;
+const RAIL_NODES = ['tp', 'tn', 'bp', 'bn'];
+// A pin as its part's pinout names it (the TL072's "IN1−"), else its own name.
+const pinLabel = (def, pin) => (def.pinout && def.pinout.labels && def.pinout.labels[def.pins.indexOf(pin)]) || pin;
+
 // An off-board source pin, as { def, n, pin } with n counting from 0:
 // "PS1.2" is { bench_supply, n: 0, pin: 2 }. The battery's old form
 // "battery_0_pin1" and "BAT1.1" are both { battery, n: 0, pin: 1 }. The
@@ -897,7 +913,10 @@ function findStackedHoles(actions) {
 // The graph comes from each part's elements: R and SW conduct both ways (a
 // button counts as closed, since the user presses it), and D conducts one way,
 // from its first pin to its second (anode to cathode).
-function findCircuitProblems(actions, { labelForm = true } = {}) {
+//
+// `solved` (rebuildProblems' plain solve of the same build) adds the op-amp
+// checks that need the simulator (#10).
+function findCircuitProblems(actions, { labelForm = true, solved = null } = {}) {
   if (!Array.isArray(actions) || actions.length === 0) return [];
   const problems = [];
   const wires = actions.filter(a => a.tool === 'add_wire');
@@ -933,7 +952,11 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     const node = p => (p in holeOf ? nodeKey(holeOf[p]) : `part${i}${p}`);   // "#mid" is inside the part
     placedParts.push({ i, a, def, holeOf, pinNodes: def.pins.map(node) });
     for (const el of elementsOf(def)) {
-      if (el.kind === 'E' && Array.isArray(el.out)) opamps.push({ i, out: node(el.out[0]), ctrl: (el.ctrl || []).map(node) });
+      if (el.kind === 'E' && Array.isArray(el.out)) {
+        const [plus, minus] = el.ctrl || [];   // k: which op-amp of the part (its mode is m['mode' + (k + 1)])
+        opamps.push({ i, def, holeOf, k: opamps.filter(o => o.i === i).length, out: node(el.out[0]),
+                      ctrl: (el.ctrl || []).map(node), pins: { out: el.out[0], plus, minus } });
+      }
       if (!Array.isArray(el.pins)) continue;
       const [x, y] = el.pins;
       joins.push({ x: node(x), y: node(y), part: i });
@@ -944,15 +967,16 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     }
   });
 
-  // The nodes `seed` reaches in `joins`, leaving out part `skip`'s own elements.
-  function joined(seed, skip) {
+  // The nodes `seed` reaches in `joins`, leaving out part `skip`'s own
+  // elements. Nodes in `blocked` are never entered.
+  function joined(seed, skip, blocked = new Set()) {
     const seen = new Set([seed]), queue = [seed];
     while (queue.length) {
       const at = queue.shift();
       for (const { x, y, part } of joins) {
         if (part === skip || !x || !y) continue;
         const next = x === at ? y : (y === at ? x : null);
-        if (next && !seen.has(next)) { seen.add(next); queue.push(next); }
+        if (next && !seen.has(next) && !blocked.has(next)) { seen.add(next); queue.push(next); }
       }
     }
     return seen;
@@ -1261,6 +1285,93 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
       .map(pin => `The ${partName(def)} at ${a.hole} has its ${pin} pin (${holeOf[pin]}) wired to nothing, so nothing uses it. Wire ${holeOf[pin]}'s column to the part it should feed.`);
   }
 
+  // #10: the op-amp wiring mistakes the AI makes, on a full rebuild (only
+  // then are the labels and every strip's occupants known). Each E element
+  // is one op-amp (half of a TL072), its pins named as on the pinout. A
+  // meter probe only reads a node, so probes are left out of what a node
+  // holds.
+  function opampProblems() {
+    const found = [];
+    const lastClear = actions.map(a => a.tool).lastIndexOf('delete_all');
+    const labelOf = i => `${PART_BY_TOOL.get(actions[i].tool).prefix}${actions.slice(lastClear + 1, i).filter(a => a.tool === actions[i].tool).length + 1}`;
+    const named = (o, pin) => `${pinLabel(o.def, pin)} (${o.holeOf[pin] || 'off the board'})`;
+    const halves = opamps.filter(o => o.pins.plus && o.pins.minus);
+    const probeNodes = new Set(ends.filter(meterProbe).map(nodeKey));
+    // Whether the nodes joined to `seed` hold anything but bare holes and
+    // rails: a source, another off-board end, or a part's pin (unless own(i, pin)).
+    const holdsSomething = (seed, own) => [...joined(seed, undefined, probeNodes)].some(k => !BOARD_NODE.test(k)
+      || placedParts.some(p => p.pinNodes.some((n, j) => n === k && !own(p.i, p.def.pins[j]))));
+    // Unused: both inputs reach nothing but the half's own pins.
+    const ownPin = o => (i, pin) => i === o.i && Object.values(o.pins).includes(pin);
+    const unused = new Set(halves.filter(o => !o.ctrl.some(n => holdsSomething(n, ownPin(o)))));
+    const unusedInput = (i, pin) => [...unused].find(o => o.i === i && (o.pins.plus === pin || o.pins.minus === pin));
+    // The rails and the sources' pins: a path through one is a supply, not feedback.
+    const supply = new Set([...RAIL_NODES, ...[...sources.values()].flatMap(({ def, n }) => def.pins.map((_, k) => sourceKey(def, n, k)))]);
+
+    // 1. OUT joined to its own IN+ by wires alone, not through a rail or
+    // source (OUT shorted to COM with IN+ on COM is not this): positive feedback.
+    for (const o of halves) {
+      if (!reach(o.out, wireEdges, supply).has(o.ctrl[0])) continue;
+      found.push(`${labelOf(o.i)}'s ${named(o, o.pins.out)} is wired straight to its + input ${named(o, o.pins.plus)}: that is positive feedback. Feed back to ${named(o, o.pins.minus)} instead.`);
+    }
+
+    // 3. A probe whose strip holds nothing else, or only an unused input.
+    const claimed = new Set();   // probe wires check 3 names, left out of check 2
+    for (const w of wires) {
+      const [pf, pt] = [w.from, w.to].map(meterProbe);
+      if (!pf === !pt) continue;   // no probe, or one at each end
+      const probe = pf || pt, hole = pf ? w.to : w.from, node = nodeKey(hole);
+      if (!node || holdsSomething(node, (i, pin) => !!unusedInput(i, pin))) continue;
+      claimed.add(w);
+      const reached = joined(node, undefined, probeNodes);
+      const chip = placedParts.find(p => p.pinNodes.some((n, j) => reached.has(n) && unusedInput(p.i, p.def.pins[j])));
+      const pin = chip && chip.def.pins.find((pn, j) => reached.has(chip.pinNodes[j]) && unusedInput(chip.i, pn));
+      const with_ = chip ? `only ${pinLabel(chip.def, pin)} of ${labelOf(chip.i)}'s unused op-amp ${unusedInput(chip.i, pin).k + 1}` : 'nothing else';
+      found.push(`${probe.label}'s ${probe.pin} probe (${probe.end}) at ${hole} has ${with_} in its strip, so it measures nothing. Move it to the ${probe.pin === 'red' ? '+' : '−'} side of what it should measure.`);
+    }
+
+    // 2. A wire, probe or part lead in an unused half's strips.
+    for (const o of unused) {
+      const strips = new Map([[o.out, 'out'], [o.ctrl[0], 'plus'], [o.ctrl[1], 'minus']]);
+      let lander = null;
+      for (const w of wires) {
+        for (const [end, other] of [[w.from, w.to], [w.to, w.from]]) {
+          if (lander || claimed.has(w) || !strips.has(nodeKey(end))) continue;
+          const p = meterProbe(other);
+          // From a rail or a source pin, the wire can't belong on the used half's pin.
+          lander = { what: p ? `${p.label}'s ${p.pin} probe` : 'a wire', hole: end, role: strips.get(nodeKey(end)),
+                     fromSupply: supply.has(nodeKey(other)) };
+        }
+      }
+      for (const p of placedParts) {
+        p.pinNodes.forEach((n, j) => {
+          if (lander || p.i === o.i || !strips.has(n)) return;
+          const name = partName(p.def);   // "an LED lead", "a resistor lead"
+          lander = { what: `${/^(?:[aeiou]|[AEFHILMNORSX][A-Z0-9])/.test(name) ? 'an' : 'a'} ${name} lead`, hole: p.holeOf[p.def.pins[j]], role: strips.get(n) };
+        });
+      }
+      if (!lander) continue;
+      const mate = halves.find(m => m.i === o.i && !unused.has(m));
+      const fix = !mate ? `wire ${pinLabel(o.def, o.pins.plus)} and ${pinLabel(o.def, o.pins.minus)} into the circuit, or move it`
+        : lander.fromSupply ? 'move it to a free column'
+        : `move it to a free column, or to ${named(mate, mate.pins[lander.role])} only if it should connect there`;
+      found.push(`${labelOf(o.i)}'s op-amp ${o.k + 1} is unused: ${named(o, o.pins.plus)} and ${named(o, o.pins.minus)} lead nowhere. Yet ${lander.what} is in ${pinLabel(o.def, o.pins[lander.role])}'s strip at ${lander.hole}: ${fix}.`);
+    }
+
+    // 4. Clipped (the solve's mode 'high' or 'low') although OUT reaches IN−
+    // through wires and resistors, not through a rail, a source, or a strip
+    // wired to one (a divider and a load sharing a grounded strip).
+    const feedbackStops = new Set([...supply].flatMap(n => [...reach(n, wireEdges)]));
+    for (const o of solved && solved.parts ? halves : []) {
+      const res = solved.parts[labelOf(o.i)];
+      const mode = res && res.m && res.m[`mode${o.k + 1}`];
+      if ((mode !== 'high' && mode !== 'low') || unused.has(o) || !reach(o.out, steady, feedbackStops).has(o.ctrl[1])) continue;
+      found.push(`${labelOf(o.i)}'s ${named(o, o.pins.out)} is clipped at the rail although it has negative feedback to ${named(o, o.pins.minus)}: check the gain (Rf/Rin) and the input.`);
+    }
+    return found;
+  }
+  if (fullRebuild) problems.push(...opampProblems());
+
   problems.push(...findStackedHoles(actions));
   return problems;
 }
@@ -1376,19 +1487,23 @@ function fromLastDeleteAll(actions) {
 // A rebuild's problems as sentences the model can act on: the checker's,
 // then the simulator's. Board.apply errors are not problems (the live board
 // accepts older pin forms), and a simulator that throws leaves just the
-// checker's list.
+// checker's list. The checker gets the solve too, for an op-amp clipped
+// although it has negative feedback (#10).
 function rebuildProblems(build) {
-  const problems = findCircuitProblems(build, { labelForm: true });
+  let r = null;
   try {
     const { components, wires } = Board.toSim(Board.apply(Board.empty(), build).board);
-    const r = Sim.analyze(components, wires);
+    r = Sim.analyze(components, wires);
+  } catch { r = null; /* the checker's problems stand alone */ }
+  const problems = findCircuitProblems(build, { labelForm: true, solved: r && r.status === 'ok' ? r : null });
+  if (r) {
     if (r.status === 'unsolvable') problems.push('The simulator cannot solve this circuit. Check that every part sits between power and ground.');
     if (r.status === 'unsettled')  problems.push('The simulator could not settle this circuit, so it has no readings.');
     if (r.shorted) problems.push('The battery is shorted: current reaches ground with nothing to limit it.');
     for (const [label, part] of Object.entries(r.parts || {})) {
-      for (const w of (part && part.warnings) || []) problems.push(`${label}: ${w}`);
+      for (const w of (part && Array.isArray(part.warnings) && part.warnings) || []) problems.push(`${label}: ${w}`);
     }
-  } catch { /* the checker's problems stand alone */ }
+  }
   return [...new Set(problems)];
 }
 
