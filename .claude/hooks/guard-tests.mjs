@@ -4,7 +4,8 @@
 //   node guard-tests.mjs only-tests  → test-writer may edit test files only
 //   node guard-tests.mjs no-tests    → builder may not edit test files
 // A test file is anything under a test/ or e2e/ folder, or named *.test.* /
-// *.spec.*. Exit code 2 blocks the edit and tells the agent why.
+// *.spec.*. Windows backslash paths are normalised to "/" before matching.
+// Exit code 2 blocks the edit and tells the agent why.
 import { readFileSync } from "node:fs";
 
 const mode = process.argv[2];
@@ -16,7 +17,8 @@ try {
 }
 if (!file) process.exit(0);
 
-const isTestFile = /(^|\/)(test|e2e)\//.test(file) || /\.(test|spec)\.[cm]?[jt]sx?$/.test(file);
+const p = file.replaceAll("\\", "/");
+const isTestFile = /(^|\/)(test|e2e)\//.test(p) || /\.(test|spec)\.[cm]?[jt]sx?$/.test(p);
 
 if (mode === "only-tests" && !isTestFile) {
   process.stderr.write(

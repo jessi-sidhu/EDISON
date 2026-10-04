@@ -1,0 +1,5 @@
+# LF everywhere: Windows CRLF checkouts break the golden prompt tests and session-start.sh.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.mp4 binary

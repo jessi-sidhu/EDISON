@@ -1,6 +1,6 @@
 # Phase 3: "See the circuit" (design)
 
-*Status: draft, 2026-09-30. Aarmen agreed the design in chat; it needs one more teammate's OK before it stands (AGENTS.md "Deciding"). Author: Aarmen with Claude Code.*
+*Status: approved by Aarmen, 2026-09-30. Thandi checks the physics before the matching issues land: the ¼ W resistor rating, the multimeter model (10 MΩ V mode, 0.1 Ω A mode, the FUSE limit, Ω mode's test current) and what the mistake checker flags. Author: Aarmen with Claude Code.*
 
 ## Goal
 Make circuits visible and measurable, so Plugged is a teacher and not just a builder. A student should be able to see KVL and KCL on their own board, measure anything the way they would in the lab, and find out why a circuit doesn't work, without leaving the page.
@@ -45,7 +45,7 @@ Multimeter = a registry part (probes in holes; a V / A / Ω control)
 - **The tools only read `Readings`.** Each is its own small module and issue, so the two lanes rarely touch the same file.
 - **The multimeter** is a registry part (`parts/multimeter.js`): two probe pins, a `mode` control, and elements that depend on the mode (V: R 10 MΩ; A: R 0.1 Ω, with an over-current "FUSE" state above about 10 A; Ω: power-off only, a small `I` test current, reading V/I). It stays **out of the AI's tools** (hand-placed only), so it adds nothing to the prompt budget (see Risks).
 
-## Contract change (needs one teammate's OK)
+## Contract change
 Add a **"Readings"** section to `docs/API-CONTRACT.md` with the interface above (function names, return shapes, units: volts, mA and watts, the same as the results panel). It is additive: no existing interface changes. The multimeter follows the existing part-file contract. If it needs a registry flag to stay out of the AI's tools (e.g. `ai: false`), that one flag goes in the same contract edit.
 
 ## Build order and lanes

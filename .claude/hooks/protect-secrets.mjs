@@ -19,9 +19,9 @@ const isSecretFile = p => {
   return /^\.env(\..+)?$/.test(name) && name !== ".env.example";
 };
 
-// A .env path inside a shell command: ".env", "backend/.env", ".env.local",
-// but not ".env.example" and not a name that merely contains "env".
-const SECRET_IN_COMMAND = /(^|[\s'"=\/<>|;&(])\.env(?!\.example\b)(\.[A-Za-z0-9_.-]+)?(?=$|[\s'";|&)>])/;
+// A .env path inside a shell command: ".env", "backend/.env", "backend\.env",
+// ".env.local", but not ".env.example" and not a name that merely contains "env".
+const SECRET_IN_COMMAND = /(^|[\s'"=\/\\<>|;&(])\.env(?!\.example\b)(\.[A-Za-z0-9_.-]+)?(?=$|[\s'";|&)>])/;
 
 let blocked = false;
 if (tool === "Bash") blocked = SECRET_IN_COMMAND.test(String(args.command || ""));

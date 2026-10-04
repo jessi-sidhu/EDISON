@@ -2,9 +2,30 @@
 
 ## Setup (5 min)
 
-1. Install [Claude Code](https://code.claude.com) and the GitHub CLI (`brew install gh`). Then run `gh auth login` and `gh auth setup-git`.
-2. Clone this repo and run `claude` inside it. **Trust the folder** and **approve the project plugins and MCP servers** when asked.
-3. Personal tweaks go in `.claude/settings.local.json` (gitignored), never `.claude/settings.json`.
+**Mac**
+
+1. `brew install git node@20 gh`, then install [Claude Code](https://code.claude.com).
+
+**Windows**
+
+1. `winget install Git.Git OpenJS.NodeJS.LTS GitHub.cli`, then install [Claude Code](https://code.claude.com). Claude Code runs its shell through Git Bash (part of Git for Windows), so use the **Git Bash** terminal for every command below.
+
+**Both**
+
+2. `gh auth login`, then `gh auth setup-git`.
+3. Clone this repo, then `cd Plugged && npm ci && npx playwright install chromium`.
+4. Get `Plugged/backend/.env` from Aarmen. Never commit it.
+5. Run `claude` in the repo. **Trust the folder** and **approve the project plugins and MCP servers** when asked.
+6. Personal tweaks go in `.claude/settings.local.json` (gitignored), never `.claude/settings.json`.
+
+**Windows only**
+
+- The MCP servers need `cmd /c npx` on Windows. Add them again at local scope, which overrides `.mcp.json` on your machine only. Run these from **PowerShell or cmd, inside the cloned repo** (local scope is saved per project folder, and Git Bash would rewrite `/c` into `C:/`):
+  ```
+  claude mcp add --scope local context7 -- cmd /c npx -y @upstash/context7-mcp@latest
+  claude mcp add --scope local playwright -- cmd /c npx -y @playwright/mcp@latest
+  ```
+- Cloned before `.gitattributes` landed? Your files may have CRLF line endings, which break the golden tests and hooks. Re-clone, or, with no uncommitted changes (commit or stash first), run `git rm --cached -r . && git reset --hard` once.
 
 ## How we work
 
