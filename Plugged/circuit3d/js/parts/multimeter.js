@@ -10,7 +10,7 @@
 //       ammeter wired in parallel (across the battery) blows it
 //    Ω  nothing: the main solve doesn't read ohms. ohms() does, on a copy
 //       of the board, and only with the probes' circuit unpowered.
-//  ai: false: the AI is never sent a tool or a prompt line for it.
+//  The AI places it (#123): its tool goes when a request names a meter.
 //
 //  The definition half is pure: no THREE, no page. The view half
 //  (view.build) runs only in the browser; tools/meter-display.js (#97)
@@ -164,7 +164,27 @@
     report:   (r, m) => `${m.mode} mode, reading ${shown(m)}`,
     headline,
 
-    ai: false,
+    ai: {
+      about:    'A multimeter beside the board. V mode reads the voltage across a part, A mode the current ' +
+                'through it (in series), Ω mode its resistance with the power off.',
+      keywords: ['multimeter', 'meter', 'voltmeter', 'ammeter', 'measure', 'probe'],
+      listed:   'in-play',
+      values:   ['mode'],
+      guide:    'The probes are wire ends, MM1.red and MM1.black. V (default): keep the circuit and add_wire ' +
+                "MM1.red to a free hole in the column of the part's + side, MM1.black to one in its − side. " +
+                'A: in series, never straight across a source. Ω: power off. A divider to measure is two ' +
+                'place_resistor in series (see the recipe).',
+      recipe:   {
+        name:  'V mode across R2 of a 1 kΩ / 1 kΩ divider on 9 V: MM1.red on the + side of R2 (column 6), MM1.black on its − side (column 10): reads 4.50 V',
+        parts: [{ type: 'battery', label: 'BAT1' },
+                { type: 'resistor', label: 'R1', holes: ['b2', 'b6'], values: { resistance: 1000 } },
+                { type: 'resistor', label: 'R2', holes: ['c6', 'c10'], values: { resistance: 1000 } },
+                { type: 'multimeter', label: 'MM1', values: { mode: 'V' } }],
+        wires: [['BAT1.0', 'tp_63'], ['BAT1.1', 'tn_63'], ['tp_2', 'a2'], ['a10', 'tn_10'],
+                ['MM1.red', 'd6'], ['MM1.black', 'd10']],
+        expect: { MM1: { mode: 'V', reading: [4.49, 4.51], fuse: false } },
+      },
+    },
 
     view: { build },
 

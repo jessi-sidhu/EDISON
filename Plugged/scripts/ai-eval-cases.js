@@ -19,6 +19,9 @@
 //  `states: [{ name, after, checks }]` grade the same built board in another
 //  state (the button released, the switch clicked), each with its own
 //  `after` and checks; their failures read '<name>.<check>'.
+//  A case or state may carry `t` (and optionally `dt`, default 1 ms): its
+//  board is solved as one time step at t seconds, so a wave source reads
+//  its value then, not just its offset (#120).
 //  Readings are the ones a correct build gives (test/ai-eval.test.js proves
 //  each against one). What code can't see (the preview, hover and scroll,
 //  3D glow, reply wording, console errors) stays with /qa-pass.
@@ -253,5 +256,37 @@ module.exports = [
     message: 'Make the resistor 1k.', board: ONE_LED.board, markdown: ONE_LED.markdown,
     checks: { noHeadsUp: true, noDeleteAll: true, keep: { parts: { ...KEEP_R1, LED1: ['c8', 'c6'] }, wires: WIRES },
               parts: { resistor: 1, led: 1 }, expect: { LED1: { on: true, current: [6.8, 7.2] } }, status: 'ok' },
+  },
+
+  // ── Part cases: one part the AI places, from a fresh board (#123) ──────
+  {
+    // The meter's recipe: a 1 kΩ / 1 kΩ divider on 9 V, the meter in V mode
+    // across R2, 4.50 V. Other resistor values read something else.
+    id: 'PART-meter', tags: ['parts'],
+    message: 'Build a divider of two 1 kΩ resistors on the 9 V battery and measure the voltage across R2 with a multimeter.',
+    checks: { noHeadsUp: true, parts: { multimeter: 1, resistor: 2 },
+              expect: { MM1: { mode: 'V', reading: [4.4, 4.6], fuse: false } }, status: 'ok' },
+  },
+  {
+    // Settled in a plain solve: 9 V across the capacitor (reversed reads
+    // −9 V), and ½CV² of 1000 µF at 9 V is 40.5 mJ (40,500 µJ).
+    id: 'PART-capacitor', tags: ['parts'],
+    message: 'Add a 1000 µF capacitor that charges through a 1 kΩ resistor.',
+    checks: { noHeadsUp: true, parts: { capacitor: 1, resistor: 1 },
+              expect: { C1: { V: [8.9, 9.1], energy: [40000, 41000] } }, status: 'ok' },
+  },
+  {
+    // #120: graded at two moments of the sine (a plain solve reads only the
+    // offset), with the frequency pinned to 1 Hz whatever the AI picked:
+    // lit on the peak (t = 0.25 s; the recipe's 0–10 V into 470 Ω is
+    // 15.4 mA) and dark on the trough (t = 0.75 s). A flat output stays lit,
+    // a sine around 0 V never lights, a backwards LED never lights.
+    id: 'PART-generator', tags: ['parts'],
+    message: 'Make an LED fade in and out with a function generator',
+    after: [{ tool: 'set_value', part: 'FG1', frequency: 1 }], t: 0.25,
+    checks: { noHeadsUp: true, parts: { function_generator: 1, led: 1 },
+              expectAll: { led: { on: true, current: [5, 20] } }, status: 'ok' },
+    states: [{ name: 'trough', after: [{ tool: 'set_value', part: 'FG1', frequency: 1 }], t: 0.75,
+               checks: { expectAll: { led: { on: false } }, status: 'ok' } }],
   },
 ];

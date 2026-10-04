@@ -3,7 +3,7 @@
 //
 // Contract these tests are written against (circuit3d/js/parts/multimeter.js):
 // - type 'multimeter', category 'Instruments', pins ['red', 'black'],
-//   values.mode a choice of V, A and Ω (default V); `ai: false`.
+//   values.mode a choice of V, A and Ω (default V); an ai block (#123).
 // - Placement: off the board, like the battery. Each probe is a wire end,
 //   "MM1.red" and "MM1.black", so a probe goes in any hole.
 // - elements by mode: V → one R of 10 MΩ red–black; A → one R of 0.1 Ω;
@@ -19,8 +19,9 @@
 //   label): solves a copy of the board with a 1 mA test current between the
 //   probes → { reading: ohms, unit: 'Ω' }; when a source is connected to the
 //   probes' circuit → { reading: '--', unit: 'Ω', why: '…turn the power off…' }.
-// - ai: false: Parts.all() keeps the part, the registry accepts it, and the
-//   server sends no tool and no prompt line for it.
+// - The AI places it (#123; it was ai: false in #96): place_multimeter is
+//   sent for a request that names a meter, with mode in set_value, and not
+//   for the demo LED request. test/ai-placement-meter-cap.test.js has the pack.
 //
 // Every number was hand-computed and checked against the real simulator
 // (Board.toSim → Sim.analyze); no mocks.
@@ -87,14 +88,14 @@ function near(got, want, tol, what) {
 
 // ── The part ──────────────────────────────────────────────────
 
-test('the multimeter is registered: Instruments, pins red and black, mode V / A / Ω defaulting to V, ai false', () => {
+test('the multimeter is registered: Instruments, pins red and black, mode V / A / Ω defaulting to V, an ai block', () => {
   const def = meterDef();
   assert.equal(def.category, 'Instruments');
   assert.deepStrictEqual([...def.pins], ['red', 'black']);
   assert.ok(def.values && def.values.mode && def.values.mode.choices, 'values.mode must be a choice');
   assert.deepStrictEqual(Object.keys(def.values.mode.choices).sort(), ['A', 'V', 'Ω'].sort());
   assert.equal(def.values.mode.default, 'V');
-  assert.strictEqual(def.ai, false);
+  assert.ok(def.ai && typeof def.ai === 'object', `the AI places the multimeter (#123), so it has an ai block; got ai: ${JSON.stringify(def.ai)}`);
   assert.ok(Parts.all().includes(def), 'Parts.all() keeps the multimeter');
 });
 
@@ -216,42 +217,33 @@ test('Ω mode across a powered resistor: the board still solves, R1 is unchanged
   near(Readings.from(result, board).part('R1').I, 19.149, 0.01, 'R1 current (mA) with the Ω meter across it');
 });
 
-// ── 6. ai: false — the AI never sees the meter ────────────────
+// ── 6. The AI places the meter (#123; was ai: false) ──────────
 
 const DEMO_REQUEST = 'Build a single LED circuit with a current-limiting resistor.';
 const toolName = def => (def.ai && def.ai.tool) || 'place_' + def.type;
-const aiParts = () => Parts.all().filter(def => def.ai !== false);
 const mentionsMeter = s => /multimeter/i.test(s);
 
-test('ai false: no tool in CIRCUIT_TOOLS places or names the multimeter', () => {
+test('every-tool path (Gemini / claude): CIRCUIT_TOOLS has place_multimeter, set_value offers mode, SYSTEM_PROMPT names the meter', () => {
   const def = meterDef();
   const decls = Server.CIRCUIT_TOOLS[0].function_declarations;
-  assert.ok(!decls.some(d => d.name === toolName(def)), `CIRCUIT_TOOLS has ${toolName(def)}`);
-  const naming = decls.filter(d => mentionsMeter(JSON.stringify(d))).map(d => d.name);
-  assert.deepStrictEqual(naming, [], 'tools that mention the multimeter');
+  assert.ok(decls.some(d => d.name === toolName(def)), `CIRCUIT_TOOLS has no ${toolName(def)}: ${decls.map(d => d.name).join(', ')}`);
+  const props = decls.find(d => d.name === 'set_value').parameters.properties;
+  assert.ok(props.mode, `set_value offers no mode: ${Object.keys(props).join(', ')}`);
+  assert.ok(mentionsMeter(Server.SYSTEM_PROMPT), 'SYSTEM_PROMPT never names the multimeter');
 });
 
-test('ai false: set_value offers no key that only the multimeter has (its mode)', () => {
-  meterDef();
-  const aiKeys = new Set(aiParts().flatMap(d => (d.ai.values || Object.keys(d.values || {}))));
-  const props = Server.CIRCUIT_TOOLS[0].function_declarations.find(d => d.name === 'set_value').parameters.properties;
-  if (!aiKeys.has('mode')) assert.equal(props.mode, undefined, 'set_value offers the meter\'s mode');
-});
-
-test('ai false: the system prompt never names the multimeter', () => {
-  meterDef();
-  assert.ok(!mentionsMeter(Server.SYSTEM_PROMPT), 'SYSTEM_PROMPT mentions the multimeter');
-});
-
-test('ai false: selectTools sends no multimeter tool, for the demo request or one that asks for a meter', () => {
+test('selectTools sends place_multimeter, with mode in set_value, when a meter is named or on the board; the demo request sends nothing about it', () => {
   const def = meterDef();
-  const cases = [[DEMO_REQUEST, []], ['measure the voltage across R2 with a multimeter', ['multimeter']]];
-  for (const [message, board] of cases) {
-    const names = Server.selectTools(message, board).map(t => t.name);
-    assert.ok(!names.includes(toolName(def)), `"${message}" sends ${toolName(def)}: ${names.join(', ')}`);
-    const naming = Server.selectTools(message, board).filter(t => mentionsMeter(JSON.stringify(t))).map(t => t.name);
-    assert.deepStrictEqual(naming, [], `"${message}": tools that mention the multimeter`);
+  const named = [['Measure the voltage across R2 with a multimeter.', []], ['switch it to amps', ['multimeter']]];
+  for (const [message, board] of named) {
+    const tools = Server.selectTools(message, board);
+    assert.ok(tools.some(t => t.name === toolName(def)), `"${message}" (board: ${board}) does not send ${toolName(def)}: ${tools.map(t => t.name).join(', ')}`);
+    const sv = tools.find(t => t.name === 'set_value').parameters.properties;
+    assert.ok(sv.mode, `"${message}": set_value offers no mode: ${Object.keys(sv).join(', ')}`);
   }
+  const demo = Server.selectTools(DEMO_REQUEST, []);
+  assert.deepStrictEqual(demo.filter(t => t.name === toolName(def) || mentionsMeter(JSON.stringify(t))).map(t => t.name), [],
+    'demo tools that place or mention the multimeter');
 });
 
 // Last: registers a test-only part.

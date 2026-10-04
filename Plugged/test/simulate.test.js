@@ -1937,8 +1937,8 @@ test('summary of the known answer: solved, measured from the current source (nev
   needIsrc();
   const { components, wires } = knownAnswerCircuit();
   const lines = summary(components, wires);
-  assert.match(lines[0], /^Status: solved\. Voltages are measured from IS1\b/, show(lines));
-  assert.doesNotMatch(lines[0], /battery/i, `the status line calls the current source a battery:${show(lines)}`);
+  // Exact since #120: every non-battery source names its ref pin by index and role.
+  assert.equal(lines[0], "Status: solved. Voltages are measured from IS1.0 (FROM, the current source's ground).", show(lines));
   assertLine(lines, /^- IS1: 10 mA · 10\.0 V across$/, 'the source’s report');
   assertLine(lines, /^ {2}- IS1 pin 0 \(b2, from\): 0\.00 V$/, '`from` by role');
   assertLine(lines, /^ {2}- IS1 pin 1 \(b5, to\): 10\.00 V$/, '`to` by role');

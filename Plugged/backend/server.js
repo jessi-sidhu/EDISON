@@ -543,9 +543,10 @@ const valueLines   = d => aiValues(d).map(key => {
     : `- ${toolName(d)} ${key}: ${rangeOf(spec)}, in ${UNIT_WORDS[spec.unit] || spec.unit} (default ${Parts.withUnit(spec.default, spec.unit)})`;
 });
 
-// The catalogue, labels and wiredBy lines name every part, except one with
-// ai.listed 'in-play' (the op-amp, #118), named only when its tool is sent,
-// so adding it leaves the other requests' prompts as they were. The pin
+// The catalogue, labels and wiredBy lines name every part, except those with
+// ai.listed 'in-play' (the op-amp, the multimeter, the capacitor: #118, #123),
+// named only when their tool is sent, so adding one leaves the other
+// requests' prompts as they were. The pin
 // roles, values and sizing are the packs of the parts in play (the tools sent).
 const listed = (tools, defs = PARTS) => {
   const names = new Set(tools.map(t => t.name));
@@ -890,9 +891,18 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   for (const e of ends) { const p = sourcePin(e); if (p) sources.set(`${p.def.type}|${p.n}`, { def: p.def, n: p.n }); }
   const byOrder = (x, y) => SOURCES.indexOf(x.def) - SOURCES.indexOf(y.def) || x.n - y.n;
 
-  // A source's terminal pairs: [plus, minus] of each of its V elements.
-  const pairsOf = (def, n) => elementsOf(def).filter(el => el.kind === 'V')
-    .map(el => el.pins.map(pin => def.pins.indexOf(pin)));
+  // A source's terminal pairs: [plus, minus] of each of its V elements, as
+  // pin indexes. A V end on an internal node ('#src') is followed through
+  // the R that joins it to an outer pin (a generator's 50 Ω to OUT).
+  const pairsOf = (def, n) => {
+    const els = elementsOf(def);
+    const outer = pin => {
+      if (def.pins.includes(pin)) return pin;
+      const r = els.find(el => el.kind === 'R' && el.pins.includes(pin) && el.pins.some(p => def.pins.includes(p)));
+      return r ? r.pins.find(p => def.pins.includes(p)) : pin;
+    };
+    return els.filter(el => el.kind === 'V').map(el => el.pins.map(pin => def.pins.indexOf(outer(pin))));
+  };
   const srcPin = (def, n, k) => (isBattery(def) ? pinName(n, k) : `${def.prefix}${n + 1}.${k}`);
 
   const pos = new Set(), neg = new Set();

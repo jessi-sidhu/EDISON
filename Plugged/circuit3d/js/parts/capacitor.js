@@ -8,7 +8,7 @@
 //  charged capacitor reads a positive V. Reversed by more than 1 V it
 //  says "backwards"; past 25 V either way it is over. Readings turns
 //  both into the mistake checker's rows and the smoke.
-//  ai: false: the AI is never sent a tool or a prompt line for it.
+//  The AI places it (#123): its tool goes when a request names it.
 //
 //  The definition half is pure: no THREE, no page. The view half
 //  (view.build) runs only in the browser and draws through ctx.
@@ -156,7 +156,25 @@
     line,
     report,
 
-    ai: false,
+    ai: {
+      about:    'A polarised electrolytic capacitor, rated 25 V: the + lead in holeA, the − (striped) lead in holeB. ' +
+                'It charges and discharges in a time run.',
+      keywords: ['capacitor', 'electrolytic', 'rc', 'time constant'],
+      listed:   'in-play',
+      values:   ['capacitance'],
+      guide:    'Polarised: holeA is the + lead, holeB the − (striped) lead. The + lead goes toward the + voltage, ' +
+                'the − lead toward ground (tn_N); reversed, it is in backwards. Keep it at 25 V or less. To charge ' +
+                'it through a resistor (RC), put place_resistor between the + rail and its + lead. In a plain solve ' +
+                'it is open; it charges in a time run.',
+      recipe:   {
+        name:  '9 V → 1 kΩ → 1000 µF: the + lead (holeA) on the resistor, the − lead (holeB) to ground; it charges to 9 V',
+        parts: [{ type: 'battery', label: 'BAT1' },
+                { type: 'resistor', label: 'R1', holes: ['b2', 'b6'], values: { resistance: 1000 } },
+                { type: 'capacitor', label: 'C1', holes: ['c6', 'c9'], values: { capacitance: '1000µF' } }],   // plus c6, minus c9
+        wires: [['BAT1.0', 'tp_63'], ['BAT1.1', 'tn_63'], ['tp_2', 'a2'], ['a9', 'tn_9']],
+        expect: { C1: { V: [8.99, 9.01], I: [-0.01, 0.01], energy: [40400, 40600] } },
+      },
+    },
 
     view: { build },
 

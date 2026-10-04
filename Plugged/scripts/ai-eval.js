@@ -60,8 +60,10 @@ function checkKeep(board, keep, start, fail) {
 }
 
 // One board's checks (see ai-eval-cases.js), each failure passed to fail().
-// `start` is the case's starting board, for checks.keep.
-function checkBoard(board, checks, reply, fail, start) {
+// `start` is the case's starting board, for checks.keep. `at` ({ t, dt },
+// optional): solve one time step at t seconds (a wave source's value then),
+// not a plain solve (which reads a wave's offset).
+function checkBoard(board, checks, reply, fail, start, at) {
   if (checks.keep) checkKeep(board, checks.keep, start || Board.empty(), fail);
   // An edit, not a rebuild: a delete_all anywhere fails, even one that puts
   // every part and wire back under the same ids (keep can't see that).
@@ -78,7 +80,9 @@ function checkBoard(board, checks, reply, fail, start) {
   let r = null;
   try {
     const { components, wires } = Board.toSim(board);
-    r = Sim.analyze(components, wires);
+    const timed = at && Number.isFinite(at.t);
+    r = timed ? Sim.analyze(components, wires, { dt: at.dt || 1e-3, state: {}, t: at.t })
+              : Sim.analyze(components, wires);
   } catch {
     fail('simulate');
   }
@@ -108,7 +112,8 @@ function checkBoard(board, checks, reply, fail, start) {
 // The case graded against one reply → { pass, failed: [check names] }.
 // The reply's actions build one board; the main checks see it plus the
 // case's `after`, each state sees it plus the state's own `after`, its
-// failures named '<state>.<check>'.
+// failures named '<state>.<check>'. A case or state with `t` (and
+// optionally `dt`) is solved at that moment of the clock.
 function grade(testCase, reply) {
   const failed = [];
   const failer = prefix => name => { const n = prefix + name; if (!failed.includes(n)) failed.push(n); };
@@ -117,18 +122,18 @@ function grade(testCase, reply) {
   const built = Board.apply(start, (reply && reply.actions) || []);
   if (built.errors.length) failer('')('apply');
 
-  const gradeState = (after, checks, fail) => {
+  const gradeState = (after, checks, fail, at) => {
     let board = built.board;
     if (after && after.length) {
       const then = Board.apply(board, after);
       if (then.errors.length) fail('apply');
       board = then.board;
     }
-    checkBoard(board, checks || {}, reply, fail, start);
+    checkBoard(board, checks || {}, reply, fail, start, at);
   };
 
-  gradeState(testCase.after, testCase.checks, failer(''));
-  for (const st of testCase.states || []) gradeState(st.after, st.checks, failer(st.name + '.'));
+  gradeState(testCase.after, testCase.checks, failer(''), testCase);
+  for (const st of testCase.states || []) gradeState(st.after, st.checks, failer(st.name + '.'), st);
 
   return { pass: failed.length === 0, failed };
 }

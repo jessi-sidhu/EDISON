@@ -919,8 +919,11 @@
 
     const src0 = components.find(c => { const d = partDef(c.type); return d && d.ref !== undefined; });
     const def0 = partDef(src0.type), ref = def0.ref;
-    // An off-board 2-pin source reads as today's battery; others name the ref pin by index.
-    const from = def0.pins.length === 2 && def0.place.kind === 'offboard' ? `${labelOf(components, src0)}.${ref} (the first battery's − terminal)`
+    // An off-board 2-pin source with unnamed pins ("0", "1": the battery)
+    // reads as it always has; others (named pins, e.g. a generator's COM)
+    // name the ref pin by index and the source.
+    const asBattery = def0.pins.length === 2 && def0.place.kind === 'offboard' && /^\d+$/.test(ref);
+    const from = asBattery ? `${labelOf(components, src0)}.${ref} (the first battery's − terminal)`
       : `${labelOf(components, src0)}.${def0.pins.indexOf(ref)} (${ref.toUpperCase()}, the ${def0.name.toLowerCase()}'s ground)`;
     const out  = [`Status: ${r.shorted ? 'short circuit' : 'solved'}. Voltages are measured from ${from}.`];
     if (!results) return out.concat(messages);   // a source shorted by a wire solves nothing

@@ -76,6 +76,8 @@
 .mistake-labels { color: var(--text-primary); font-weight: 600; }
 .mistake-why    { color: #b45309; padding-left: 18px; }
 .mistake-none   { color: #15803d; font-weight: 600; }
+.mistake-info .mistake-icon { color: #2563eb; font-style: italic; }   /* info, not a mistake (#126) */
+.mistake-info .mistake-why  { color: #475569; }
 
 /* csv export (#101) */
 #csv-export-btn { color: var(--text-primary); }

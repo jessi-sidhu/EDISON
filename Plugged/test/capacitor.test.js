@@ -2,7 +2,8 @@
 // on the real time-stepping simulator (#102), reads V, I and the stored
 // energy ½CV², and is flagged backwards (reversed by more than 1 V) or over
 // (|V| above its 25 V rating) through Readings, the way the mistake checker
-// (#95) and the smoke (#99) read every part. It stays out of the AI's tools.
+// (#95) and the smoke (#99) read every part. The AI places it (#123): its
+// tool goes when a request names it, never for the demo LED request.
 //
 // Run with:  npm test
 //
@@ -172,10 +173,10 @@ const charge = (volts, t, tau) => volts * (1 - Math.exp(-t / tau));
 
 // ── 1. The part ───────────────────────────────────────────────
 
-test('the capacitor is registered: one polarised C element rated 25 V, ai false', () => {
+test('the capacitor is registered: one polarised C element rated 25 V, an ai block', () => {
   const def = capDef();
   assert.ok(Parts.all().includes(def), 'Parts.all() keeps the capacitor');
-  assert.strictEqual(def.ai, false, 'ai: false, like the multimeter');
+  assert.ok(def.ai && typeof def.ai === 'object', `the AI places the capacitor (#123), so it has an ai block; got ai: ${JSON.stringify(def.ai)}`);
   const c = cElements(def);
   assert.equal(c.length, 1, `one C element; got ${JSON.stringify(def.elements(merged(def), {}))}`);
   assert.strictEqual(c[0].polarised, true, 'the C element is polarised');
@@ -337,26 +338,29 @@ test('hover card: a capacitor\'s card shows V and its stored energy (12,500 µJ 
   within(Number(m[1].replace(/,/g, '')) * scale, 12500, 1, `energy on the card (${m[0]}) in µJ`);
 });
 
-// ── 7. ai: false — the AI never sees the capacitor ────────────
+// ── 7. The AI places the capacitor (#123; was ai: false) ──────
 
 const DEMO_REQUEST = 'Build a single LED circuit with a current-limiting resistor.';
 const CAP_REQUEST  = 'Build an RC circuit: charge a 1000 µF capacitor through a 1 kΩ resistor from the battery.';
 const mentionsCap = s => /capacitor/i.test(s);
+const capTool = def => (def.ai && def.ai.tool) || 'place_' + def.type;
 
-test('ai false: no tool in CIRCUIT_TOOLS places or names the capacitor, and the system prompt never does', () => {
+test('every-tool path (Gemini / claude): CIRCUIT_TOOLS has place_capacitor, set_value offers capacitance, SYSTEM_PROMPT names the capacitor', () => {
   const def = capDef();
   const decls = Server.CIRCUIT_TOOLS[0].function_declarations;
-  assert.ok(!decls.some(d => d.name === 'place_' + def.type), 'CIRCUIT_TOOLS has place_capacitor');
-  assert.deepStrictEqual(decls.filter(d => mentionsCap(JSON.stringify(d))).map(d => d.name), [], 'tools that mention the capacitor');
-  assert.ok(!mentionsCap(Server.SYSTEM_PROMPT), 'SYSTEM_PROMPT mentions the capacitor');
+  assert.ok(decls.some(d => d.name === capTool(def)), `CIRCUIT_TOOLS has no ${capTool(def)}: ${decls.map(d => d.name).join(', ')}`);
+  const props = decls.find(d => d.name === 'set_value').parameters.properties;
+  assert.ok(props.capacitance, `set_value offers no capacitance: ${Object.keys(props).join(', ')}`);
+  assert.ok(mentionsCap(Server.SYSTEM_PROMPT), 'SYSTEM_PROMPT never names the capacitor');
 });
 
-test('ai false: selectTools sends no capacitor tool, for the demo request or one that asks for a capacitor', () => {
+test('selectTools sends place_capacitor, with capacitance in set_value, for a request that asks for one; the demo request sends nothing about it', () => {
   const def = capDef();
-  for (const message of [DEMO_REQUEST, CAP_REQUEST]) {
-    const tools = Server.selectTools(message, []);
-    assert.ok(!tools.some(t => t.name === 'place_' + def.type), `"${message}" sends place_capacitor`);
-    assert.deepStrictEqual(tools.filter(t => mentionsCap(JSON.stringify(t))).map(t => t.name), [],
-      `"${message}": tools that mention the capacitor`);
-  }
+  const tools = Server.selectTools(CAP_REQUEST, []);
+  assert.ok(tools.some(t => t.name === capTool(def)), `"${CAP_REQUEST}" does not send ${capTool(def)}: ${tools.map(t => t.name).join(', ')}`);
+  const sv = tools.find(t => t.name === 'set_value').parameters.properties;
+  assert.ok(sv.capacitance, `set_value offers no capacitance: ${Object.keys(sv).join(', ')}`);
+  const demo = Server.selectTools(DEMO_REQUEST, []);
+  assert.deepStrictEqual(demo.filter(t => t.name === capTool(def) || mentionsCap(JSON.stringify(t))).map(t => t.name), [],
+    'demo tools that place or mention the capacitor');
 });

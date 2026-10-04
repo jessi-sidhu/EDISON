@@ -5,6 +5,8 @@
 //  just under the results panel (#sim-results): one .mistake-row per
 //  problem (kind icon, labels, why), or "No problems found". Clicking a
 //  row selects the first part it names, which outlines it on the board.
+//  An info: true row (issue #126) is shown as information, not a mistake:
+//  .mistake-info, an "i" icon, and it doesn't count as a problem.
 //  plugged:sim-stop hides the panel. Reads Readings only, never the solver.
 //
 //  LOADING
@@ -35,10 +37,10 @@
 
   function row(p) {
     const el = document.createElement('div');
-    el.className = 'mistake-row';
+    el.className = p.info ? 'mistake-row mistake-info' : 'mistake-row';
     const icon = document.createElement('span');
     icon.className = 'mistake-icon';
-    icon.textContent = ICONS[p.kind] || '!';
+    icon.textContent = p.info ? 'i' : ICONS[p.kind] || '!';
     const labels = document.createElement('span');
     labels.className = 'mistake-labels';
     labels.textContent = p.labels.join(', ');
@@ -54,14 +56,14 @@
     const list = readings && readings.problems ? readings.problems() : [];
     const el = panel();
     el.replaceChildren();
-    if (!list.length) {
+    // Info rows aren't problems, so they show alongside "No problems found".
+    if (!list.filter(p => !p.info).length) {
       const none = document.createElement('div');
       none.className = 'mistake-none';
       none.textContent = 'No problems found';
       el.append(none);
-    } else {
-      list.forEach(p => el.append(row(p)));
     }
+    list.forEach(p => el.append(row(p)));
     // Directly under the results panel, whose height changes with each solve.
     const results = document.getElementById('sim-results');
     const below = results && results.offsetParent ? results.offsetTop + results.offsetHeight + 8 : 50;

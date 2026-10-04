@@ -286,6 +286,8 @@ const CORRECT_BUILD = {
   'AI-21': recipeOf('current_source'),
   'AI-22': recipeOf('rgb_led'),
   'AI-23': recipeOf('bench_supply'),
+  'PART-meter':     recipeOf('multimeter'),
+  'PART-capacitor': recipeOf('capacitor'),
 };
 
 test('every gradable case passes a correct build of it (no case asks for more than a right answer gives)', () => {
@@ -297,6 +299,37 @@ test('every gradable case passes a correct build of it (no case asks for more th
     if (!got.pass) bad.push(`${id}: ${JSON.stringify(got.failed)}`);
   }
   assert.deepStrictEqual(bad, []);
+});
+
+// ── #123: the meter and capacitor cases fail a wrong build ─────────────────
+// A part's recipe with one of its parts changed (holes or a wire end swapped).
+function recipeWith(type, change) {
+  const r = JSON.parse(JSON.stringify(Parts.get(type).ai.recipe));
+  change(r);
+  return recipeActions(r);
+}
+
+test('PART-capacitor fails the capacitor reversed (+ lead to ground: it reads −9 V), on expect.C1.V', () => {
+  const c = caseById('PART-capacitor');
+  assert.ok(c, 'PART-capacitor is not in the cases file');
+  const reversed = recipeWith('capacitor', r => {
+    const cap = r.parts.find(p => p.type === 'capacitor');
+    cap.holes = [cap.holes[1], cap.holes[0]];
+  });
+  const got = Eval.grade(c, reply(reversed));
+  assert.strictEqual(got.pass, false, `a reversed capacitor passes PART-capacitor: ${JSON.stringify(got)}`);
+  assert.ok(got.failed.includes('expect.C1.V'), `expected expect.C1.V among the failures, got ${JSON.stringify(got.failed)}`);
+});
+
+test('PART-meter fails the meter\'s probes swapped (red on the − side: it reads −4.5 V), on expect.MM1.reading', () => {
+  const c = caseById('PART-meter');
+  assert.ok(c, 'PART-meter is not in the cases file');
+  const swapped = recipeWith('multimeter', r => {
+    r.wires = r.wires.map(([a, b]) => [a === 'MM1.red' ? 'MM1.black' : a === 'MM1.black' ? 'MM1.red' : a, b]);
+  });
+  const got = Eval.grade(c, reply(swapped));
+  assert.strictEqual(got.pass, false, `a meter with swapped probes passes PART-meter: ${JSON.stringify(got)}`);
+  assert.ok(got.failed.includes('expect.MM1.reading'), `expected expect.MM1.reading among the failures, got ${JSON.stringify(got.failed)}`);
 });
 
 // ── Review follow-ups (#82): states, AI-13, describeError, no server on require ──

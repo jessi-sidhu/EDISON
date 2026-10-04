@@ -74,7 +74,7 @@ Exactly one of these three kinds:
 
 ### `ValueSpec`
 ```js
-{ unit: 'Ω'|'V'|'A'|'F'|'H'|'%'|'°C'|'lux', default: number, min: number, max: number, series?: 'E12'|'E24' }
+{ unit: 'Ω'|'V'|'A'|'F'|'H'|'%'|'°C'|'lux'|'Hz', default: number, min: number, max: number, series?: 'E12'|'E24' }
 //   Any number in [min, max] is allowed. `series` only powers the "closest kit value" hint.
 { choices: { [name]: { ...overrides } }, default: name }
 //   e.g. LED colour: { red: { vf: 2.0 }, green: { vf: 2.2 }, ... }. A choice may set other values.
@@ -154,7 +154,8 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
                                //   is sent (default: always named); SYSTEM_PROMPT (every tool) still names it (#118)
 }
 ```
-- `ai: false` instead of an object: the part is never offered to the AI as a tool or listed in the prompt (e.g. the multimeter, the capacitor).
+- `ai: false` instead of an object: the part is never offered to the AI as a tool or listed in the prompt (no part uses it today). The multimeter, the capacitor, the TL072 and the function generator are AI parts with `listed: 'in-play'`, named in the prompt only when their tool is sent (#123, #120).
+- **The ai-eval cases** (`scripts/ai-eval-cases.js`, graded by `scripts/ai-eval.js`): a case or one of its `states` may carry `t` (seconds) and optionally `dt` (default 1 ms). Its board is then solved as one time step, `Sim.analyze(components, wires, { dt, state: {}, t })`, so a wave source reads its value at `t`, not only its offset (#120).
 
 ### `ViewSpec` (browser only)
 ```js
@@ -254,6 +255,14 @@ The example is `Plugged/circuit3d/js/parts/bench_supply.js` (#34), the first off
 - **Pin refs are `LABEL.k`**, `k` = the pin's index: `PS1.0` (+), `PS1.1` (COM), `PS1.2` (−). The i-th `place_<type>` in a build is `PREFIX<i+1>`. The battery's old `battery_n_pinK` form stays battery-only.
 - **Board markdown:** a 2-pin off-board part prints as the battery always has. A 3+-pin one lists every pin, `off-board pos → wire ref: PS1.0`, and its wiring cheat-sheet line (`- **PS1**: …`) names every ref.
 - **A limit that only warns:** `measure` gives each rail's mA and an over flag; `warnings` says `+ rail would current-limit: …`, and `view.update` lights a mesh named `limit-light`. There is no constant-current mode.
+
+### Pattern: off-board wave source
+The example is `Plugged/circuit3d/js/parts/function_generator.js` (#120), a sine generator beside the board.
+- **Pins and ref:** `pins: ['out', 'com']`, `ref: 'com'`, `place: { kind: 'offboard' }`; prefix `FG`, so `FG1.0` is OUT and `FG1.1` is COM.
+- **Values:** `amplitude` (V, peak) 0–10, default 1; `frequency` (Hz) 0.1–100, default 1; `offset` (V) −10 to +10, default 0.
+- **Elements:** one `V` from an internal node `'#src'` to `com` with `wave: { kind: 'sine', amp: amplitude, freq: frequency, offset }` (`volts` = offset), and an `R` of 50 Ω from `'#src'` to `out`, the output resistance. `backend/server.js` follows a `V` end on an internal node through the `R` joining it to an outer pin, so its terminal pair is (out, com).
+- **Measure:** `{ vout }`, the present output `V(out) − V(com)`, `null` when unconnected. The headline reads `Function generator 1: sine 5.00 Vp at 1.0 Hz, offset 5.00 V · output 7.14 V`.
+- **The view:** a mesh named `readout` whose `userData.text` is the panel's first row, `SINE 1.00 Vp · 1.0 Hz`; a value change redraws the part.
 
 ### Pattern: multi-element straddling part
 The example is `Plugged/circuit3d/js/parts/seven_segment.js` (#43), the first part made of many elements that sits across the centre gap. DIP chips copy it.

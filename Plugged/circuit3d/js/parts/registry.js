@@ -18,7 +18,7 @@
 })(typeof window !== 'undefined' ? window : null, function () {
 
   const CATEGORIES = ['Passives', 'Sources', 'Semiconductors', 'I/O', 'Instruments'];
-  const UNITS      = ['Ω', 'V', 'A', 'F', 'H', '%', '°C', 'lux'];
+  const UNITS      = ['Ω', 'V', 'A', 'F', 'H', '%', '°C', 'lux', 'Hz'];
   const FIELDS     = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'ref', 'place', 'values',
                       'controls', 'gestures', 'elements', 'measure', 'warnings', 'report', 'headline', 'line',
                       'ai', 'view', 'examples'];

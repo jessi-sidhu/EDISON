@@ -9,6 +9,16 @@
 // LED1 cathode c9 / anode c7 → SW1 b12–b15 → tn), pressing its button by
 // clicking the cap as a person does. /api/ask is stubbed; no AI is called.
 // Guest only.
+//
+// Info rows (issue #126): readings.problems() marks some rows info: true (a
+// TL072 comparator clipping at its rail). Shapes the last case assumes:
+// - An info row is still a .mistake-row (clickable as any row) and also
+//   carries the class .mistake-info; a real problem's row never does.
+// - An info row's .mistake-icon is "i" (or "ℹ"), never "!", and is drawn in
+//   a different colour from a real problem's icon.
+// - The panel only counts real problems: with nothing but info rows it still
+//   says "No problems found" (.mistake-none) above them; with a real problem
+//   it doesn't.
 const { test, expect } = require('@playwright/test');
 
 function watchErrors(page) {
@@ -120,5 +130,95 @@ test('the demo as loaded: "No problems found" under the results, released and pr
   expect(results && box, 'both panels are on screen').toBeTruthy();
   expect(box.y, `the mistakes panel (top ${box.y}) starts below the results (bottom ${results.y + results.height})`)
     .toBeGreaterThanOrEqual(results.y + results.height - 1);
+  expect(errors).toEqual([]);
+});
+
+// A TL072 comparator on ±12 V (the comparator() board of test/tl072.test.js):
+// chip at f30 (OUT1 f30, IN1− f31, IN1+ f32, V− f33, IN2+ e33, IN2− e32,
+// OUT2 e31, V+ e30). PS1: + → tp_1, COM → tn_1, − → bn_1; tp_30 → a30 (V+),
+// bn_33 → j33 (V−). IN1+ from 1k/1k (a40–a45 / b40–b35) = 6 V, IN1− from
+// 7k/5k (a50–a57 / b50–b53) = 5 V, OUT1 open: high, clipped at +10.5 V.
+// Half 2 parked as a follower with IN2+ on COM. Returns the chip's label and
+// the V+ pin's hole (row a), for the wire the second half of the case removes.
+async function buildComparator(page) {
+  return page.evaluate(() => {
+    const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
+    const endAt = s => {
+      const m = /^([A-Z]+\d+)\.(\d+)$/.exec(s);
+      if (m) {
+        const pm = App.state.components.find(c => c.label === m[1]).pinMeshes[Number(m[2])];
+        return { world: pm.userData.world.clone(), holeRef: null, pinMesh: pm };
+      }
+      const h = hole(s);
+      return { world: h.world.clone(), holeRef: { col: h.col, row: h.row }, pinMesh: null };
+    };
+    const wire = (a, b) => { App.state.wireStart = endAt(a); App.finishWire(endAt(b)); };
+    const legs = ['f30', 'e30'].map(a => Parts.footprintLegs('tl072', a, 0))
+      .find(ls => ls && ls.every(l => l.row === 'e' || l.row === 'f'));
+    // The i-th hole away from the gap in pin k's column (1-based column numbers).
+    const away = (k, i) => (legs[k].row === 'f' ? 'fghij' : 'edcba')[i] + legs[k].hole.slice(1);
+    const col = k => legs[k].hole.slice(1);
+    const [, IN1N, IN1P, VNEG, IN2P, IN2N, OUT2, VPOS] = [0, 1, 2, 3, 4, 5, 6, 7];
+
+    App.placePart('bench_supply', App.batterySpot(), { voltage: 12 });
+    const chip = App.placePart('tl072', legs.map(l => hole(l.hole)));
+    const res = (a, b, ohms) => App.placePart('resistor', [hole(a), hole(b)], { resistance: ohms });
+    res('a40', 'a45', 1000); res('b40', 'b35', 1000);
+    res('a50', 'a57', 7000); res('b50', 'b53', 5000);
+    for (const [a, b] of [['PS1.0', 'tp_1'], ['PS1.1', 'tn_1'], ['PS1.2', 'bn_1'],
+                          ['tp_' + col(VPOS), away(VPOS, 4)], ['bn_' + col(VNEG), away(VNEG, 4)],
+                          ['tp_45', 'c45'], ['c35', 'tn_35'], ['tp_57', 'c57'], ['c53', 'tn_53'],
+                          ['d40', away(IN1P, 4)], ['d50', away(IN1N, 4)],
+                          [away(IN2P, 1), 'tn_' + col(IN2P)], [away(IN2N, 1), away(OUT2, 1)]]) {
+      wire(a, b);
+    }
+    return { chip: chip.label, vpos: away(VPOS, 4) };
+  });
+}
+
+// Each row's icon, its colour, whether it is an info row, and its text.
+const rowsSeen = page => page.evaluate(() => [...document.querySelectorAll('#mistakes-panel .mistake-row')].map(r => {
+  const icon = r.querySelector('.mistake-icon');
+  return { info: r.classList.contains('mistake-info'), icon: icon && icon.textContent.trim(),
+           colour: icon && getComputedStyle(icon).color, text: r.textContent };
+}));
+
+test('a TL072 comparator clipping at +10.5 V: its row is info ("i", .mistake-info, not the error colour) and the panel still says "No problems found"; with V+ unwired, no-supply is an error row', async ({ page }) => {
+  test.setTimeout(90_000);   // slow runner (software WebGL)
+  const errors = watchErrors(page);
+  await page.route('**/api/ask', route => route.fulfill({ json: { reply: '', actions: [] } }));
+  await page.goto('/circuit3d/index.html');
+  await page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
+  const { chip, vpos } = await buildComparator(page);
+  expect(await page.evaluate(() => App.state.components.length), 'PS1, the chip and 4 resistors').toBe(6);
+
+  await page.locator('#sim-run-btn').click();
+  await expect.poll(() => page.locator('#sim-results').textContent(), { message: 'the results say OUT1 is clipped at +10.5 V' })
+    .toMatch(/clipped at \+10\.5 V/);
+
+  const clipRow = rows(page).filter({ hasText: chip }).filter({ hasText: /clip/i });
+  await expect(clipRow, `a row names ${chip} and says it clipped`).toHaveCount(1);
+  const seen = await rowsSeen(page);
+  const clip = seen.find(r => /clip/i.test(r.text));
+  expect(clip.info, `the clipped row carries .mistake-info: ${JSON.stringify(seen)}`).toBe(true);
+  expect(clip.icon, 'the clipped row\'s icon is an info "i", not "!"').toMatch(/^(i|ℹ️?)$/);
+  expect(seen.filter(r => !r.info), `a comparator clipping is not a problem, so no error rows: ${JSON.stringify(seen)}`).toEqual([]);
+  await expect(panel(page).locator('.mistake-none'), 'with only info rows the panel still says "No problems found"')
+    .toHaveText('No problems found');
+
+  // Unwire V+: the chip has no supply, a real problem.
+  await page.evaluate(v => {
+    const w = App.state.wires.find(x => [x.startHole, x.endHole].some(h => h && App.formatHole(h) === v));
+    App.deleteWire(w);
+  }, vpos);
+  await expect.poll(async () => (await rowsSeen(page)).some(r => /no supply/i.test(r.text)),
+    { message: `a no-supply row for ${chip} once V+ is unwired` }).toBe(true);
+  const after = await rowsSeen(page);
+  const noSupply = after.find(r => /no supply/i.test(r.text));
+  expect(noSupply.info, `no-supply is an error row, not .mistake-info: ${JSON.stringify(after)}`).toBe(false);
+  expect(noSupply.icon, 'an error row keeps an error icon, not the info "i"').not.toMatch(/^(i|ℹ️?)$/);
+  expect(noSupply.colour, 'an error row\'s icon stays the error red (pin)').toBe('rgb(220, 38, 38)');
+  expect(clip.colour, 'the info icon is not drawn in the error red').not.toBe(noSupply.colour);
+  await expect(panel(page), 'with a real problem the panel doesn\'t say "No problems found"').not.toContainText('No problems found');
   expect(errors).toEqual([]);
 });

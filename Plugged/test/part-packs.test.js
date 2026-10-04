@@ -196,8 +196,11 @@ test('demo: every pack line in the prompt belongs to a part whose tool is sent',
 // #118: the op-amp is listed only in requests that have it in play, so the
 // demo prompt (demo-led.txt) stays byte-identical. SYSTEM_PROMPT (every tool)
 // lists it, so the demo's three core lines are SYSTEM_PROMPT's with only the
-// op-amp's entry taken out.
-const LISTED_ONLY_IN_PLAY = ['tl072'];
+// in-play-only parts' entries taken out. #123 adds the multimeter and the
+// capacitor (ai.listed 'in-play'), so the demo golden stays unchanged; #120
+// the function generator.
+// Written out, not derived from ai.listed, so a part that loses the flag fails.
+const LISTED_ONLY_IN_PLAY = ['tl072', 'multimeter', 'capacitor', 'function_generator'];
 function dropEntry(line, entry) {
   if (line.includes(`, ${entry}`)) return line.replace(`, ${entry}`, '');
   if (line.includes(`${entry}, `)) return line.replace(`${entry}, `, '');
@@ -216,7 +219,7 @@ function withoutInPlayOnly(line) {
   return out;
 }
 
-test('pin: demo: the catalogue, label prefixes and wiredBy line name every part but the op-amp (listed only when in play, #118)', () => {
+test('demo: the catalogue, label prefixes and wiredBy line name every part but the op-amp, multimeter, capacitor and function generator (listed only when in play, #118, #123, #120)', () => {
   const lines = linesOf(sent.demo);
   for (const l of [CATALOGUE, LABELS, WIRED_BY]) {
     assert.ok(l, 'SYSTEM_PROMPT has the core line');
