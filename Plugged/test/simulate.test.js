@@ -1,6 +1,6 @@
 // Golden tests for the simulate.js solver.
 //
-// Run with:  node --test
+// Run with:  npm test
 // No dependencies: node's built-in test runner only.
 //
 // Tests marked WRONG TODAY assert the behaviour the engine currently has,
@@ -8,7 +8,6 @@
 // paired with a skipped test holding the analytically correct answer and
 // the issue that will unskip it.
 
-const test   = require('node:test');
 const assert = require('node:assert');
 
 const Sim = require('../circuit3d/js/simulate.js');
@@ -85,7 +84,7 @@ test('parallel LEDs behind one resistor: WRONG TODAY, full current in both (#8)'
   assert.equal(r.ledsOn.length, 2);
 });
 
-test('parallel LEDs behind one resistor: KCL holds, 15.9 mA each (#8)', { skip: 'blocked on the solver replacement, issue #8' }, () => {
+test.skip('parallel LEDs behind one resistor: KCL holds, 15.9 mA each (#8)', () => {
   const { components, wires } = parallelSharedResistor();
   const r = Sim.analyze(components, wires);
 
@@ -118,7 +117,7 @@ test('voltage divider: loop current is right, node voltage is absent (#9)', () =
   assert.equal(r.nodeVoltages, undefined, 'no node voltage is computed today');
 });
 
-test('voltage divider: V(midpoint) = 4.5 V (#9)', { skip: 'blocked on the solver replacement, issue #9' }, () => {
+test.skip('voltage divider: V(midpoint) = 4.5 V (#9)', () => {
   const { components, wires, midNode } = divider();
   const r = Sim.analyze(components, wires);
 
@@ -201,7 +200,7 @@ test('two 9V batteries in series: WRONG TODAY, same current as one (#11)', () =>
   });
 });
 
-test('two 9V batteries in series: 18 V drives 72.7 mA (#11)', { skip: 'blocked on the solver replacement, issue #11' }, () => {
+test.skip('two 9V batteries in series: 18 V drives 72.7 mA (#11)', () => {
   const { components, wires } = twoInSeries();
   const r = Sim.analyze(components, wires);
 
