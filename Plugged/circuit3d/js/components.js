@@ -1,17 +1,22 @@
 // ─────────────────────────────────────────────────────────────
-//  components.js — 3D models for Resistor, LED, Battery
-//                  + ghost (transparent preview) versions
+//  components.js — 3D models for LED, Battery, Buzzer, Button
+//                  + ghost (transparent preview) versions,
+//                  and the shared helpers registry parts draw with
 //
-//  Placement builders (buildResistor / buildLED / buildBattery):
+//  Placement builders (buildLED / buildBattery / ...):
 //    Accept hole objects {x, z} and return { group, pins }.
 //    pins[i] is the world Vector3 of the i-th electrical pin.
+//
+//  Registry parts (parts/*.js) draw themselves in view.build(ctx, ...):
+//    App.partCtx({ ghost })  → ctx: { THREE, lead, mat, holeWorld, boardGeometry }
+//    App.buildPart(type, legs, values, { ghost }) → { group, pinPositions }
 //
 //  Preview builder (buildPreview):
 //    Returns a transparent ghost Group centred at (0,0,0).
 //    Caller repositions it each frame.
 //
-//  Exports: App.buildResistor, App.buildLED,
-//           App.buildBattery, App.buildPreview,
+//  Exports: App.buildLED, App.buildBattery, App.buildBuzzer,
+//           App.buildButton, App.buildPreview, App.partCtx, App.buildPart,
 //           App.componentValues, App.formatValue, App.ledHex
 // ─────────────────────────────────────────────────────────────
 
@@ -24,12 +29,25 @@
   //  browser, so there is exactly one table. A component copies them at
   //  placement time and carries its own values from then on.
 
+  //  A registry part's defaults come from its ValueSpecs instead.
+
+  function registryDef(type) {
+    return (window.Parts && window.Parts.get(type)) || null;
+  }
+
   function defaultValues(type) {
+    const def = registryDef(type);
+    if (def) {
+      const out = {};
+      for (const [key, spec] of Object.entries(def.values || {})) {
+        out[key] = spec.default;
+        if (spec.choices && spec.choices[spec.default]) Object.assign(out, spec.choices[spec.default]);
+      }
+      return out;
+    }
     const base = (App.PROPS && App.PROPS[type]) || {};
     return type === "led" ? Object.assign({ color: "red" }, base) : Object.assign({}, base);
   }
-
-  function defaultResistance() { return defaultValues("resistor").resistance || 220; }
 
   // Dome colour and typical forward voltage for each LED colour.
   const LED_TYPES = {
@@ -69,32 +87,6 @@
     return '';
   }
 
-  // ─── Resistor colour code ────────────────────────────────────
-  // Bands are digit, digit, decimal multiplier, tolerance.
-
-  const DIGIT_COLORS = [
-    0x1a1a1a, 0x7b3f00, 0xd62828, 0xf77f00, 0xfcbf49,
-    0x2a9d3f, 0x1d4ed8, 0x7c3aed, 0x9ca3af, 0xf5f5f5,
-  ];
-  const GOLD = 0xd4af37, SILVER = 0xc0c0c0;
-
-  function multiplierColor(exp) {
-    if (exp === -1) return GOLD;
-    if (exp === -2) return SILVER;
-    return DIGIT_COLORS[exp] ?? DIGIT_COLORS[0];
-  }
-
-  // 220 Ω → red, red, brown, gold
-  function resistorBands(ohms) {
-    let sig = Number(ohms), exp = 0;
-    if (!(sig > 0)) return [DIGIT_COLORS[0], DIGIT_COLORS[0], DIGIT_COLORS[0], GOLD];
-    while (sig >= 100) { sig /= 10; exp++; }
-    while (sig < 10)   { sig *= 10; exp--; }
-    sig = Math.round(sig);
-    if (sig === 100) { sig = 10; exp++; }   // rounding carried, e.g. 99.6 Ω
-    return [DIGIT_COLORS[Math.floor(sig / 10)], DIGIT_COLORS[sig % 10], multiplierColor(exp), GOLD];
-  }
-
   // ─── Helpers ─────────────────────────────────────────────────
 
   function ghostMat(hexColor, opacity = 0.42) {
@@ -109,108 +101,6 @@
 
   function box(w, h, d, mat) {
     return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  }
-
-  // ─────────────────────────────────────────────────────────────
-  //  RESISTOR
-  //
-  //  holeA / holeB: hole objects from holeData, { x, z }
-  //  The resistor arcs horizontally (or vertically) between them.
-  //  Thinner body than before.
-  // ─────────────────────────────────────────────────────────────
-  function buildResistor(holeA, holeB, resistance) {
-    const group = new THREE.Group();
-    const ax = holeA.x, az = holeA.z;
-    const bx = holeB.x, bz = holeB.z;
-    const midX = (ax + bx) / 2;
-    const midZ = (az + bz) / 2;
-
-    // Determine orientation: horizontal (same z) or vertical (same x)
-    const isHoriz = Math.abs(az - bz) < 0.01;
-    const LEAD_H  = 0.72;
-    const BODY_R  = 0.10;  // thinner than before
-
-    // Body length = distance minus a bit so it doesn't reach the hole edges
-    const bodyLen = Math.max(0.4,
-      isHoriz ? Math.abs(bx - ax) * 0.56 : Math.abs(bz - az) * 0.56
-    );
-
-    // Vertical leads from holes up to body height
-    const vLGeo = new THREE.CylinderGeometry(0.022, 0.022, LEAD_H, 7);
-    [{ x: ax, z: az }, { x: bx, z: bz }].forEach(({ x, z }) => {
-      const l = new THREE.Mesh(vLGeo, LEAD_MAT());
-      l.position.set(x, LEAD_H / 2, z);
-      group.add(l);
-    });
-
-    // Horizontal lead stubs connecting vertical tops to body
-    const hOff = bodyLen / 2 + 0.01;
-    const lMat = LEAD_MAT();
-    if (isHoriz) {
-      const spanL = Math.abs(ax - (midX - hOff));
-      const spanR = Math.abs(bx - (midX + hOff));
-      if (spanL > 0.01) {
-        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, spanL, 7), lMat);
-        m.rotation.z = Math.PI / 2;
-        m.position.set((ax + midX - hOff) / 2, LEAD_H, midZ);
-        group.add(m);
-      }
-      if (spanR > 0.01) {
-        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, spanR, 7), lMat);
-        m.rotation.z = Math.PI / 2;
-        m.position.set((bx + midX + hOff) / 2, LEAD_H, midZ);
-        group.add(m);
-      }
-    } else {
-      const spanT = Math.abs(az - (midZ - hOff));
-      const spanB = Math.abs(bz - (midZ + hOff));
-      if (spanT > 0.01) {
-        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, spanT, 7), lMat);
-        m.rotation.x = Math.PI / 2;
-        m.position.set(midX, LEAD_H, (az + midZ - hOff) / 2);
-        group.add(m);
-      }
-      if (spanB > 0.01) {
-        const m = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, spanB, 7), lMat);
-        m.rotation.x = Math.PI / 2;
-        m.position.set(midX, LEAD_H, (bz + midZ + hOff) / 2);
-        group.add(m);
-      }
-    }
-
-    // Body
-    const bodyGeo = new THREE.CylinderGeometry(BODY_R, BODY_R, bodyLen, 14);
-    const bodyMat = new THREE.MeshLambertMaterial({ color: 0xd4a96a });
-    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    bodyMesh.castShadow = true;
-    if (isHoriz) bodyMesh.rotation.z = Math.PI / 2;
-    else         bodyMesh.rotation.x = Math.PI / 2;
-    bodyMesh.position.set(midX, LEAD_H, midZ);
-    group.add(bodyMesh);
-
-    // Colour bands — the real 4-band code for this resistor's value
-    const bands    = resistorBands(resistance ?? defaultResistance());
-    const numBands = bands.length;
-    const bSpace   = bodyLen / (numBands + 1);
-    for (let i = 0; i < numBands; i++) {
-      const bGeo = new THREE.CylinderGeometry(BODY_R + 0.004, BODY_R + 0.004, bodyLen * 0.1, 14);
-      const bMat = new THREE.MeshLambertMaterial({ color: bands[i] });
-      const band = new THREE.Mesh(bGeo, bMat);
-      if (isHoriz) {
-        band.rotation.z = Math.PI / 2;
-        band.position.set(midX - bodyLen / 2 + bSpace * (i + 1), LEAD_H, midZ);
-      } else {
-        band.rotation.x = Math.PI / 2;
-        band.position.set(midX, LEAD_H, midZ - bodyLen / 2 + bSpace * (i + 1));
-      }
-      group.add(band);
-    }
-
-    const pins = [
-      new THREE.Vector3(ax, 0, az),
-      new THREE.Vector3(bx, 0, bz),
-    ];
-    return { group, pins };
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -623,49 +513,26 @@
   //  The group is centred at (0, 0, 0).  Caller sets .position
   //  and .rotation.y to move it on screen.
   //
-  //  type:     'resistor' | 'led' | 'battery'
+  //  type:     a registry part, or 'led' | 'buzzer' | 'button' | 'battery'
   //  span:     number of holes the component spans
   //  hs:       hole spacing (HOLE_SPACING from breadboard)
   //  rotation: 0 (horizontal) or 1 (vertical)
-  //  values:   optional part values: resistance (resistor bands),
-  //            color (LED dome); defaults when absent
+  //  values:   optional part values, e.g. color (LED dome); defaults
+  //            when absent
+  //
+  //  A registry part's ghost is its own view.build in ghost materials.
   // ─────────────────────────────────────────────────────────────
   function buildPreview(type, span, hs, rotation, values) {
+    const def = registryDef(type);
+    if (def && def.place.kind === 'span') {
+      const ghost = spanGhost(def, span, rotation, values);
+      if (rotation === 1) ghost.rotation.y = Math.PI / 2;
+      return ghost;
+    }
     values = values || {};
     const group  = new THREE.Group();
     const alpha  = 0.45;
     const half   = (span * hs) / 2;
-
-    if (type === 'resistor') {
-      const LEAD_H = 0.72;
-      const BODY_R = 0.10;
-      const bodyLen = span * hs * 0.56;
-
-      // leads
-      const lMat = ghostMat(0xcccccc, alpha);
-      [-half, half].forEach(offset => {
-        const l = cylinder(0.022, LEAD_H, 7, lMat.clone());
-        l.position.set(offset, LEAD_H / 2, 0);
-        group.add(l);
-      });
-
-      // body
-      const body = cylinder(BODY_R, bodyLen, 14, ghostMat(0xd4a96a, alpha));
-      body.rotation.z = Math.PI / 2;
-      body.position.y = LEAD_H;
-      group.add(body);
-
-      // bands
-      const bands = resistorBands(values.resistance ?? defaultResistance());
-      const bw = bodyLen * 0.1;
-      const bs = bodyLen / 5;
-      for (let i = 0; i < bands.length; i++) {
-        const b = cylinder(BODY_R + 0.004, bw, 12, ghostMat(bands[i], alpha));
-        b.rotation.z = Math.PI / 2;
-        b.position.set(-bodyLen / 2 + bs * (i + 1), LEAD_H, 0);
-        group.add(b);
-      }
-    }
 
     if (type === 'led') {
       const LEAD_H   = 0.88;
@@ -826,8 +693,88 @@
     return group;
   }
 
+  // ─────────────────────────────────────────────────────────────
+  //  REGISTRY PARTS
+  //
+  //  ctx is everything a part's view.build may draw with. The ghost
+  //  ctx swaps every material for a see-through one.
+  // ─────────────────────────────────────────────────────────────
+  const GHOST_ALPHA = 0.45;
+
+  function partCtx(opts) {
+    const ghost = !!(opts && opts.ghost);
+    const G = App.BOARD_GEOMETRY;
+    const solid = (hex, extra) => new THREE.MeshLambertMaterial(Object.assign({ color: hex }, extra));
+    const mat = {
+      body:  hex => (ghost ? ghostMat(hex, GHOST_ALPHA) : solid(hex)),
+      metal: ()  => (ghost ? ghostMat(0xcccccc, GHOST_ALPHA) : LEAD_MAT()),
+      glass: (hex, opacity) => (ghost ? ghostMat(hex, GHOST_ALPHA * 0.85)
+                                      : solid(hex, { transparent: true, opacity: opacity ?? 0.88 })),
+      label: hex => (ghost ? ghostMat(hex, 0.8) : solid(hex)),
+    };
+
+    // A straight metal lead from one point to another (Vector3s).
+    function lead(from, to, radius) {
+      const r   = radius || 0.022;
+      const dir = new THREE.Vector3().subVectors(to, from);
+      const len = dir.length();
+      const m   = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 7), mat.metal());
+      m.position.addVectors(from, to).multiplyScalar(0.5);
+      if (len > 0) m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+      return m;
+    }
+
+    // A hole's centre on the board surface, as breadboard.js lays it out.
+    function holeWorld(col, row) {
+      return new THREE.Vector3((col - (G.COLS - 1) / 2) * G.HS, 0, G.ROW_Z[row]);
+    }
+
+    return { THREE, lead, mat, holeWorld, boardGeometry: G };
+  }
+
+  // legs: one { col, row } per pin, in pin order (Parts.legsOf gives them).
+  function buildPart(type, legs, values, opts) {
+    const def = registryDef(type);
+    if (!def) return null;
+    return drawPart(def, partCtx(opts), legs, values, opts);
+  }
+
+  function drawPart(def, ctx, legs, values, opts) {
+    const controls = {};
+    for (const [key, c] of Object.entries(def.controls || {})) controls[key] = c.default;
+    const out = def.view.build(ctx, componentValues(def.type, values), controls, legs);
+    if (opts && opts.ghost) out.group.traverse(o => { o.castShadow = false; });
+    return out;
+  }
+
+  // The ghost of a 2-lead registry part, centred on (0,0,0). Like every
+  // other ghost it is turned with .rotation.y = π/2 for rotation 1, by
+  // buildPreview and again by interaction.js on hover. A vertical part's
+  // legs sit down a column across the centre channel (wider than a hole
+  // pitch), so that ghost is drawn along z inside a -π/2 wrapper that the
+  // outer turn cancels. Rotation 0: legs `span` holes apart along a row.
+  function spanGhost(def, span, rotation, values) {
+    const rows  = App.BOARD_GEOMETRY.BODY_ROWS;
+    const start = Math.max(0, rows.length / 2 - Math.ceil(span / 2));
+    const down  = rotation === 1 && rows[start + span];
+    const legs  = down
+      ? [{ col: 0, row: rows[start] }, { col: 0, row: rows[start + span] }]
+      : [{ col: 0, row: rows[0] }, { col: span, row: rows[0] }];
+    legs.forEach((leg, i) => { leg.pin = def.pins[i]; });
+    const base = partCtx({ ghost: true });
+    const mid  = base.holeWorld(legs[0].col, legs[0].row).add(base.holeWorld(legs[1].col, legs[1].row)).multiplyScalar(0.5);
+    const ctx  = Object.assign({}, base, { holeWorld: (col, row) => base.holeWorld(col, row).sub(mid) });
+    const model = drawPart(def, ctx, legs, values, { ghost: true }).group;
+    if (!down) return model;
+    model.rotation.y = -Math.PI / 2;
+    const group = new THREE.Group();
+    group.add(model);
+    return group;
+  }
+
   // ── Exports ────────────────────────────────────────────────
-  App.buildResistor = buildResistor;
+  App.partCtx       = partCtx;
+  App.buildPart     = buildPart;
   App.buildLED      = buildLED;
   App.buildBattery  = buildBattery;
   App.buildBuzzer   = buildBuzzer;

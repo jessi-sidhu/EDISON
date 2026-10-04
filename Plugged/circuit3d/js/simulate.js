@@ -55,10 +55,38 @@
     buzzer:   { resistance: 42,      thresholdCurrent: 0.001 },
   };
 
+  // ── Registry parts ──────────────────────────────────────────
+  //  Parts defined in parts/*.js simulate from their elements(). Under Node
+  //  this module loads the registry itself; the page loads it before this file.
+  const Parts = typeof module === 'object' && module.exports ? require('./parts') : null;
+  function partDef(type) {
+    const P = Parts || (typeof window !== 'undefined' ? window.Parts : null);
+    return P ? P.get(type) : null;
+  }
+
+  // A registry part's values: its defaults (a choice's overrides beside the
+  // choice's name), then the record's own.
+  function partValues(def, comp) {
+    const out = {};
+    for (const [key, spec] of Object.entries(def.values || {})) {
+      out[key] = spec.default;
+      if (spec.choices && spec.choices[spec.default]) Object.assign(out, spec.choices[spec.default]);
+    }
+    return Object.assign(out, comp.values || {});
+  }
+
+  function partControls(def, comp) {
+    const out = {};
+    for (const [key, c] of Object.entries(def.controls || {})) out[key] = c.default;
+    return Object.assign(out, comp.controls || {});
+  }
+
   // A placed component carries its own values. PROPS is the default for parts
   // built before instance values existed, and is what keeps this module
   // loadable without a browser.
   function propsOf(comp) {
+    const def = partDef(comp.type);
+    if (def) return partValues(def, comp);
     return comp.values || PROPS[comp.type] || {};
   }
 
@@ -160,11 +188,20 @@
     });
 
     // 4. Resolve each pin to its root
-    const graph = components.map((comp, ci) => ({
-      comp,
+    const graph = components.map((comp, ci) => {
       // nodes[pi] = root node of pin pi
-      nodes: comp.pins.map((_, pi) => uf.find(pinNode[ci][pi])),
-    }));
+      const g = { comp, nodes: comp.pins.map((_, pi) => uf.find(pinNode[ci][pi])) };
+      // A registry part also carries its elements, each pin resolved to a
+      // node: a part pin by name, or an internal "#name" private to the part.
+      const def = partDef(comp.type);
+      if (def) {
+        const values = partValues(def, comp), controls = partControls(def, comp);
+        const els = def.elements(values, controls);
+        const node = p => (p[0] === '#' ? `int_${ci}_${p.slice(1)}` : g.nodes[def.pins.indexOf(p)]);
+        g.part = { def, values, controls, els: els.map(el => ({ el, nodes: (el.pins || []).map(node) })) };
+      }
+      return g;
+    });
     // nodeOf({ col, row }) = root node of any breadboard hole, pin or not.
     graph.nodeOf = hole => uf.find(bbNodeId(hole.col, hole.row));
     return graph;
@@ -212,9 +249,11 @@
   function solveMNA(graph, bats, ledOn) {
     const ref   = bats[0].nodes[1];
     const index = new Map();
-    graph.forEach(g => g.nodes.forEach(n => {
-      if (n !== ref && !index.has(n)) index.set(n, index.size);
-    }));
+    const add = n => { if (n != null && n !== ref && !index.has(n)) index.set(n, index.size); };
+    graph.forEach(g => {
+      g.nodes.forEach(add);
+      if (g.part) g.part.els.forEach(e => e.nodes.forEach(add));
+    });
     const N = index.size, size = N + bats.length;
     const A = Array.from({ length: size }, () => new Array(size).fill(0));
     const b = new Array(size).fill(0);
@@ -233,7 +272,13 @@
     graph.forEach(g => {
       const { comp, nodes } = g;
       const p = propsOf(comp);
-      if (comp.type === 'resistor' || comp.type === 'buzzer') {
+      if (g.part) {
+        // Only R is stamped so far; the other element kinds arrive with the
+        // parts that first need them.
+        g.part.els.forEach(({ el, nodes: [a, b] }) => {
+          if (el.kind === 'R' && el.ohms > 0) conductance(a, b, 1 / el.ohms);
+        });
+      } else if (comp.type === 'buzzer') {
         if (p.resistance > 0) conductance(nodes[0], nodes[1], 1 / p.resistance);
       } else if (comp.type === 'led' && ledOn.get(comp)) {
         const anode = nodes[LED_ANODE_PIN], cathode = nodes[1 - LED_ANODE_PIN];
@@ -255,6 +300,28 @@
     if (!x) return null;
     const batteryCurrent = new Map(bats.map((bat, k) => [bat.comp, x[N + k]]));
     return { v: n => (n === ref ? 0 : x[index.get(n)]), batteryCurrent };
+  }
+
+  // Amps through one of a registry part's elements, + in its pin order.
+  function elementAmps({ el, nodes: [a, b] }, sol) {
+    if (el.kind === 'R' && el.ohms > 0) return (sol.v(a) - sol.v(b)) / el.ohms;
+    return 0;
+  }
+
+  // parts[label] = { r: PartResult, m: measured, warnings } for every
+  // labelled registry part. PartResult currents are mA; floating pins null.
+  function partResults(graph, sol, live) {
+    const parts = {};
+    graph.forEach(({ comp, nodes, part }) => {
+      if (!part || comp.label == null) return;
+      const { def, values, controls, els } = part;
+      const r = { label: comp.label, values, controls, pins: {}, current: {}, modes: {} };
+      def.pins.forEach((pin, k) => { r.pins[pin] = live.has(nodes[k]) ? sol.v(nodes[k]) : null; });
+      els.forEach((e, k) => { r.current[e.el.id !== undefined ? e.el.id : k] = elementAmps(e, sol) * 1000; });
+      const m = def.measure ? def.measure(r) : {};
+      parts[comp.label] = { r, m, warnings: def.warnings ? def.warnings(r, m) : [] };
+    });
+    return parts;
   }
 
   function forwardCurrent(led, sol, on) {
@@ -333,10 +400,26 @@
   //                  reference as nodeVoltages; null when the hole's node is
   //                  not connected to the first battery through wires or
   //                  parts, or nothing was solved
+  //    parts         { [label]: { r, m, warnings } } for labelled registry
+  //                  parts (docs/API-CONTRACT.md → PartResult); {} when
+  //                  nothing was solved
   //
+  //  A part loaded from an old file that breaks a placement rule carries
+  //  comp.flag ("R1: <reason>", board-io.js flagPlacements). Each flag adds
+  //  one warning line, and goes into that part's warnings.
   function analyze(components, wires) {
+    const r = analyzeCircuit(components, wires);
+    for (const c of components) {
+      if (!c || !c.flag) continue;
+      r.lines.push({ text: '  ⚠ ' + c.flag, cls: 'sim-warn' });
+      if (r.parts && r.parts[c.label]) r.parts[c.label].warnings.push(c.flag);
+    }
+    return r;
+  }
+
+  function analyzeCircuit(components, wires) {
     const blank = { lines: [], ledsOn: [], buzzersOn: [], nodeVoltages: {}, currents: [], shorted: false,
-                    voltageAt: () => null };
+                    voltageAt: () => null, parts: {} };
 
     if (!components.length) {
       return Object.assign({}, blank, {
@@ -387,6 +470,7 @@
 
     const currents = graph.map(g => {
       const { comp, nodes } = g;
+      if (g.part) return g.part.els.length ? elementAmps(g.part.els[0], sol) : 0;
       if (comp.type === 'battery') return sol.batteryCurrent.get(comp);
       if (comp.type === 'button')  return comp.pressed ? null : 0;
       if (comp.type === 'led')     return -forwardCurrent(g, sol, ledOn.get(comp));
@@ -449,7 +533,8 @@
       lines.push({ text: '  No output components in circuit path.', cls: 'sim-info' });
     }
 
-    return { status: 'ok', lines, ledsOn, buzzersOn, nodeVoltages, currents, shorted: false, voltageAt };
+    const parts = partResults(graph, sol, live);
+    return { status: 'ok', lines, ledsOn, buzzersOn, nodeVoltages, currents, shorted: false, voltageAt, parts };
   }
 
   // ── Pure: simulationSummary ──────────────────────────────────

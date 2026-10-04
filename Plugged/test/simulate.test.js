@@ -380,12 +380,12 @@ test('voltageAt exists and returns null when analyze returns early (#4)', () => 
   }
 });
 
-test('analyze keeps its existing result fields and adds voltageAt (#4)', () => {
+test('analyze keeps its existing result fields and adds voltageAt (#4) and parts (#23)', () => {
   const { components, wires } = seriesLedCircuit();
   const r = Sim.analyze(components, wires);
 
   assert.deepEqual(Object.keys(r).sort(),
-    ['buzzersOn', 'currents', 'ledsOn', 'lines', 'nodeVoltages', 'shorted', 'status', 'voltageAt']);
+    ['buzzersOn', 'currents', 'ledsOn', 'lines', 'nodeVoltages', 'parts', 'shorted', 'status', 'voltageAt']);
   assert.equal(r.status, 'ok');
   assert.equal(r.ledsOn.length, 1);
   assert.equal(r.shorted, false);
@@ -693,4 +693,125 @@ test('not shorted, the series summary still gives each part its current (#20 gua
   assertLine(lines, /- LED1: LED ON \(lit\), 14\.9 mA$/, 'LED1 current');
   assertLine(lines, /- R1: 470 ohm resistor, 14\.9 mA$/, 'R1 current');
   assertLine(lines, /- BAT1: 9\.00 V battery, supplying 14\.9 mA$/, 'BAT1 current');
+});
+
+// ── Registry parts in the simulator, issue #23 ───────────────────
+//  The resistor is the first registry part: the simulator stamps its
+//  elements() (one R, ohms = resistance) instead of the old per-type code,
+//  and analyze() adds parts: { [label]: { r: PartResult, m, warnings } } for
+//  registry parts. Every test above runs unchanged on the registry resistor.
+//
+//  Keying: parts is keyed by comp.label. A registry part with no label is
+//  simulated as usual but left out of parts (never an "undefined" key).
+//  Parts not yet in the registry (battery, LED, buzzer, button until issues
+//  B and C) are not in parts.
+
+const Parts = () => require('../circuit3d/js/parts');
+const partsOf = r => {
+  assert.ok(r.parts && typeof r.parts === 'object' && !Array.isArray(r.parts),
+    `analyze() should return parts as an object keyed by label; got ${JSON.stringify(r.parts)}`);
+  return r.parts;
+};
+
+test('the series circuit on the registry resistor: LED ON 14.9 mA, parts.R1 reads 14.9 mA with no warnings (#23)', () => {
+  const { components, wires } = labelledSeries();
+  const r = Sim.analyze(components, wires);
+
+  assert.equal(r.status, 'ok');
+  assert.ok(hasLine(r, 'LED ON  (14.9 mA)'), texts(r).join(' | '));
+  assert.ok(Math.abs(mA(r.currents[1]) - 14.894) < 0.01, `currents[] stays in amps: ${r.currents[1]}`);
+
+  const R1 = partsOf(r).R1;
+  assert.ok(R1, `parts should have R1; got ${JSON.stringify(Object.keys(r.parts))}`);
+  assert.ok(Math.abs(R1.m.current - 14.894) < 0.01, `parts.R1.m.current: ${R1.m.current}`);
+  assert.deepStrictEqual(R1.warnings, []);
+});
+
+test('parts.R1.r is the PartResult: label, values, pin volts by name, element current in mA (#23)', () => {
+  const { components, wires } = labelledSeries();
+  const { r } = partsOf(Sim.analyze(components, wires)).R1 || {};
+  assert.ok(r, 'parts.R1.r');
+  const [top, bottom] = Parts().get('resistor').pins;
+
+  assert.equal(r.label, 'R1');
+  assert.equal(r.values.resistance, 470);
+  nearV(r.pins[top], 9, `R1.${top} (a6, wired to +)`);
+  assert.ok(Math.abs(r.pins[bottom] - 2.0) < 0.01, `R1.${bottom} (a11, the LED anode): ${r.pins[bottom]}`);
+  const I = Object.values(r.current);
+  assert.equal(I.length, 1, `one element current; got ${JSON.stringify(r.current)}`);
+  assert.ok(Math.abs(I[0] - 14.894) < 0.01, `+ from pin 0 to pin 1, in mA: ${I[0]}`);
+});
+
+test("a registry resistor's own value is what the simulator stamps: 1 kΩ gives (9-2)/1000 = 7.0 mA (#23)", () => {
+  const { components, wires } = labelledSeries();
+  components[1].values = { resistance: 1000 };
+  const r = Sim.analyze(components, wires);
+
+  assert.ok(hasLine(r, 'LED ON  (7.0 mA)'), texts(r).join(' | '));
+  const R1 = partsOf(r).R1;
+  assert.ok(R1, 'parts.R1');
+  assert.equal(R1.r.values.resistance, 1000);
+  assert.ok(Math.abs(R1.m.current - 6.999) < 0.01, `parts.R1.m.current: ${R1.m.current}`);
+});
+
+test('parts holds registry parts only, each under its label (#23)', () => {
+  const { components, wires } = labelledSeries();
+  components.push(comp('resistor', [h(20, 'a'), h(25, 'a')], { label: 'R2' }));
+  const parts = partsOf(Sim.analyze(components, wires));
+
+  assert.ok(parts.R1 && parts.R2, `R1 and R2; got ${JSON.stringify(Object.keys(parts))}`);
+  for (const label of Object.keys(parts)) {
+    const c = components.find(x => x.label === label);
+    assert.ok(c, `parts.${label} names no component`);
+    assert.ok(Parts().get(c.type), `parts.${label} is a ${c.type}, which is not a registry part`);
+  }
+});
+
+test('a loose registry resistor: floating pins read null, no current (#23)', () => {
+  const { components, wires } = labelledSeries();
+  components.push(comp('resistor', [h(20, 'a'), h(25, 'a')], { label: 'R2' }));
+  const R2 = partsOf(Sim.analyze(components, wires)).R2;
+  assert.ok(R2, 'parts.R2');
+
+  assert.deepStrictEqual(Object.values(R2.r.pins), [null, null], `floating pins: ${JSON.stringify(R2.r.pins)}`);
+  assert.ok(Math.abs(R2.m.current) < 0.001, `no current: ${R2.m.current}`);
+  assert.ok(Math.abs(partsOf(Sim.analyze(components, wires)).R1.m.current - 14.894) < 0.01, 'R1 unchanged');
+});
+
+test('an unlabelled registry part simulates but gets no "undefined" key in parts (#23)', () => {
+  const { components, wires } = seriesLedCircuit();   // no labels
+  const r = Sim.analyze(components, wires);
+  assert.equal(r.ledsOn.length, 1);
+  assert.ok(!Object.keys(partsOf(r)).includes('undefined'), JSON.stringify(Object.keys(r.parts)));
+});
+
+test('parts is {} when analyze returns before solving (#23)', () => {
+  const R1 = () => comp('resistor', [h(5, 'a'), h(10, 'a')], { label: 'R1' });
+  const early = {
+    empty:        Sim.analyze([], []),
+    'no-battery': Sim.analyze([R1()], []),
+    'wire short': Sim.analyze([battery(), R1()], [wire(h(4, 'tp'), h(4, 'tn'))]),
+    unsolvable:   Sim.analyze([battery(), comp('battery', [h(9, 'tp'), h(9, 'tn')], { values: { voltage: 6 } }), R1()], []),
+  };
+  for (const [name, r] of Object.entries(early)) {
+    assert.deepStrictEqual(r.parts, {}, `${name}: parts`);
+  }
+});
+
+// simulate.js loads the parts registry itself under Node (as it loads
+// ids.js), so the server and any test that requires only simulate.js see
+// the registry resistor. Checked in a fresh Node process.
+test('under Node, requiring simulate.js alone is enough for registry parts (#23)', () => {
+  const { execFileSync } = require('node:child_process');
+  const code = `
+    const Sim = require('./circuit3d/js/simulate.js');
+    const bat = { type: 'battery', label: 'BAT1', pins: [{}, {}], holeRefs: [{ col: 1, row: 'tp' }, { col: 1, row: 'tn' }] };
+    const res = { type: 'resistor', label: 'R1', pins: [{}, {}], holeRefs: [{ col: 5, row: 'a' }, { col: 9, row: 'a' }] };
+    const w = (a, b) => ({ startHole: a, endHole: b });
+    const r = Sim.analyze([bat, res], [w({ col: 2, row: 'tp' }, { col: 5, row: 'b' }), w({ col: 9, row: 'b' }, { col: 2, row: 'tn' })]);
+    process.stdout.write(JSON.stringify(r.parts && r.parts.R1 ? r.parts.R1.m : null));`;
+  const out = execFileSync(process.execPath, ['-e', code], { cwd: require('node:path').join(__dirname, '..') }).toString();
+  const m = JSON.parse(out);
+  assert.ok(m, 'require("simulate.js") alone gives no parts.R1: simulate.js must require ./parts under Node');
+  assert.ok(Math.abs(m.current - 19.149) < 0.01, `9 V across 470 Ω: ${m.current}`);
 });

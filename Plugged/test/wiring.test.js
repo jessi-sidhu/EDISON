@@ -44,9 +44,14 @@ test('the Clear All confirmation says it can be undone, because it can', () => {
   assert.match(src, /You can undo this with Ctrl\+Z/);
 });
 
-test('the showcase viewer draws saved resistor values and LED colours', () => {
+// Issue #23: the viewer builds a saved resistor through the registry helper
+// App.buildPart (the resistor's view.build), not the old App.buildResistor.
+test('the showcase viewer draws saved resistor values (via App.buildPart) and LED colours', () => {
   const src = read('circuit3d/viewer.html');
-  assert.match(src, /App\.buildResistor\(hA, hB, c\.values\?\.resistance\)/);
+  assert.doesNotMatch(src, /App\.buildResistor\(/, 'viewer.html still builds resistors with App.buildResistor');
+  assert.match(src, /App\.buildPart\(\s*['"]resistor['"]|App\.buildPart\(\s*c\.type\b/,
+    'viewer.html should build a saved resistor with App.buildPart(type, legs, values)');
+  assert.match(src, /c\.values/, 'the saved values are passed on');
   assert.match(src, /App\.buildLED\(hA, hB, c\.values\?\.color\)/);
 });
 
@@ -220,4 +225,92 @@ test('no editor or server file says COLS: 50', () => {
     { file: 'backend/server.js',     src: read('backend/server.js') }];
   const hits = files.filter(({ src }) => /\bCOLS\s*[:=]\s*50\b/.test(src)).map(x => x.file);
   assert.deepEqual(hits, [], 'COLS: 50 still in');
+});
+
+// ── The resistor in the parts registry, issue #23 ───────────────
+//  Both 3D pages load parts/registry.js, then every part file in
+//  parts/index.js's FILES order, before components.js and the modules that
+//  read the registry. components.js keeps the shared 3D helpers (App.partCtx,
+//  App.buildPart); the resistor's own model lives in parts/resistor.js.
+
+// parts/index.js's FILES list, read from its source.
+function partFiles() {
+  const m = /const FILES\s*=\s*\[([^\]]*)\]/.exec(read('circuit3d/js/parts/index.js'));
+  assert.ok(m, 'parts/index.js must keep its FILES list');
+  return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map(x => x[1]);
+}
+
+// The source of one top-level function in a file, up to the next one.
+function functionSource(src, re) {
+  const start = src.search(re);
+  if (start < 0) return null;
+  const rest = src.slice(start + 1);
+  const next = rest.search(/\n {2}(function |App\.\w+\s*=|\/\/ ──)/);
+  return src.slice(start, next < 0 ? undefined : start + 1 + next);
+}
+
+test('both 3D pages load parts/registry.js, then every FILES entry in order, before components.js', () => {
+  const files = partFiles();
+  assert.ok(files.includes('resistor.js'), `parts/index.js FILES should list resistor.js: ${JSON.stringify(files)}`);
+  const want = ['js/parts/registry.js'].concat(files.map(f => 'js/parts/' + f));
+  for (const page of ['circuit3d/index.html', 'circuit3d/viewer.html']) {
+    const order = scriptOrder(read(page));
+    const parts = order.filter(s => s.startsWith('js/parts/') && s !== 'js/parts/index.js');
+    assert.deepEqual(parts, want, `${page} should load ${want.join(', ')}; it loads ${parts.join(', ') || 'no part scripts'}`);
+    const lastPart = Math.max(...want.map(s => order.indexOf(s)));
+    for (const after of ['js/components.js', 'js/interaction.js', 'js/simulate.js', 'js/ids.js', 'js/app.js']) {
+      const i = order.indexOf(after);
+      if (i >= 0) assert.ok(lastPart < i, `${page}: the part scripts must load before ${after}: ${order.join(', ')}`);
+    }
+    assert.ok(order.indexOf('js/components.js') >= 0, `${page} loads js/components.js`);
+  }
+});
+
+test('components.js defines the shared part helpers App.partCtx and App.buildPart', () => {
+  const src = read('circuit3d/js/components.js');
+  assert.match(src, /App\.partCtx\s*=/, 'App.partCtx({ ghost }) → ctx');
+  assert.match(src, /App\.buildPart\s*=/, 'App.buildPart(type, legs, values, { ghost })');
+});
+
+test("components.js no longer carries the resistor's model or its colour code", () => {
+  const src = read('circuit3d/js/components.js');
+  assert.doesNotMatch(src, /function buildResistor\s*\(/, 'buildResistor moved to parts/resistor.js');
+  assert.doesNotMatch(src, /resistorBands|DIGIT_COLORS/, 'the band colour code moved to parts/resistor.js');
+  assert.doesNotMatch(src, /0xd4a96a/i, "the resistor's body colour moved to parts/resistor.js");
+});
+
+test('buildPreview is still the one ghost entry point, with no resistor branch of its own', () => {
+  const src = read('circuit3d/js/components.js');
+  const preview = functionSource(src, /function buildPreview\s*\(/);
+  assert.ok(preview, 'components.js must keep function buildPreview');
+  assert.doesNotMatch(preview, /['"]resistor['"]/, 'buildPreview still has a resistor branch');
+  assert.match(src, /App\.buildPreview\s*=/);
+});
+
+test("parts/resistor.js holds the resistor's model and draws only through ctx", () => {
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'circuit3d/js/parts/resistor.js')), 'circuit3d/js/parts/resistor.js must exist');
+  const src = read('circuit3d/js/parts/resistor.js');
+  assert.match(src, /\bview\s*:/, 'a view: { build } section');
+  assert.match(src, /\bbuild\s*\(\s*ctx\b|\bbuild\s*:\s*(function\s*)?\(\s*ctx\b/, 'view.build(ctx, values, controls, legs)');
+  for (const hex of ['d4a96a', '7c3aed', 'fcbf49', 'd4af37']) {
+    assert.match(src, new RegExp(hex, 'i'), `the model's colour ${hex} (body / bands) lives here`);
+  }
+  assert.doesNotMatch(src, /\bApp\b/, 'the part file must not reach into App; use ctx');
+  assert.doesNotMatch(src, /\bdocument\b/, 'the part file must not touch document');
+});
+
+test('App.placeResistor keeps its signature and goes through the registry', () => {
+  const src = read('circuit3d/js/app.js');
+  const fn = functionSource(src, /App\.placeResistor\s*=\s*function\s*\(holeA, holeB, values, opts\)/);
+  assert.ok(fn, 'App.placeResistor = function (holeA, holeB, values, opts) must stay');
+  assert.match(fn, /checkValue\(/, 'values are checked with Parts.checkValue');
+  assert.match(fn, /buildPart\(/, 'the model is built with App.buildPart');
+  assert.doesNotMatch(fn, /buildResistor/, 'no App.buildResistor');
+});
+
+// Issue #24: the hole map (App.holeMap(), rebuilt from the records) replaces
+// breadboard.js's per-hole `occupied` flag, which nothing ever set.
+test("breadboard.js no longer carries the unused per-hole 'occupied' flag", () => {
+  const hits = read('circuit3d/js/breadboard.js').split('\n').filter(l => /\boccupied\b/.test(l)).map(l => l.trim());
+  assert.deepStrictEqual(hits, [], 'breadboard.js still mentions occupied');
 });

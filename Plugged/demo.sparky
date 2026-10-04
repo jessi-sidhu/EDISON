@@ -18,11 +18,11 @@
       "holeRefs": [
         {
           "col": 2,
-          "row": "a"
+          "row": "b"
         },
         {
           "col": 6,
-          "row": "a"
+          "row": "b"
         }
       ],
       "position": {
@@ -36,11 +36,11 @@
       "holeRefs": [
         {
           "col": 8,
-          "row": "a"
+          "row": "c"
         },
         {
           "col": 6,
-          "row": "a"
+          "row": "c"
         }
       ],
       "position": {
@@ -54,11 +54,11 @@
       "holeRefs": [
         {
           "col": 11,
-          "row": "a"
+          "row": "b"
         },
         {
           "col": 14,
-          "row": "a"
+          "row": "b"
         }
       ],
       "position": {
@@ -71,7 +71,7 @@
     {
       "startHole": null,
       "endHole": {
-        "col": 2,
+        "col": 3,
         "row": "tp"
       },
       "startCompIdx": 0,

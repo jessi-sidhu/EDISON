@@ -16,7 +16,10 @@
   if (root) root.SparkyChat = Chat;
 })(typeof window !== 'undefined' ? window : null, function () {
 
-  const Ids = typeof module === 'object' && module.exports ? require('./ids.js') : window.App;
+  const inNode   = typeof module === 'object' && module.exports;
+  const Ids      = inNode ? require('./ids.js') : window.App;
+  const Parts    = inNode ? require('./parts') : window.Parts;
+  const GEOMETRY = inNode ? require('./board-geometry.js') : window.App.BOARD_GEOMETRY;
 
   // A wire end the AI names: a component pin by label ("BAT1.0") or the old
   // form ("battery_0_pin0"), or a hole. Pin k is the same index in both.
@@ -62,10 +65,25 @@
     return key && a[key] != null ? { [key]: a[key] } : {};
   }
 
+  // A registry part's placement, checked against the board as it is now
+  // (docs/API-CONTRACT.md → Parts.checkPlacement). The refusal, or null.
+  function placementRefusal(type, hA, hB, board) {
+    if (!Parts || !Parts.get(type)) return null;   // legacy parts join as they move
+    const legs  = Parts.legsOf({ type, holeRefs: [{ col: hA.col, row: hA.row }, { col: hB.col, row: hB.row }] });
+    const map   = board.holeMap ? board.holeMap() : new Map();
+    const check = Parts.checkPlacement(type, legs, map, { cols: GEOMETRY.COLS, bodyRows: GEOMETRY.BODY_ROWS });
+    return check.ok ? null : `${Ids.nextLabel(board.components(), type)} not placed: ${check.reason}`;
+  }
+
   function applyOne(a, board) {
     if (PLACE[a.tool]) {
       const hA = holeOf(a.holeA, board), hB = holeOf(a.holeB, board);
       if (!hA || !hB) return false;
+      const refusal = placementRefusal(a.tool.slice('place_'.length), hA, hB, board);
+      if (refusal) {
+        if (board.note) board.note(refusal);
+        return false;
+      }
       board[PLACE[a.tool]](hA, hB, partValues(a));
       return true;
     }
@@ -137,6 +155,8 @@ if (typeof window !== 'undefined') (function (App, Chat) {
     placeBattery:  (x, z, v) => App.placeBattery(x, z, v),
     clearAll:      () => App.clearAll(),
     batch:         fn => App.history.batch(fn),
+    holeMap:       () => App.holeMap(),
+    note:          text => sparkyAddMsg(text, 'system'),
     addWire(from, to, hex) {
       const s = wireEnd(from), t = wireEnd(to);
       if (!s || !t) return false;

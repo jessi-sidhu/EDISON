@@ -16,10 +16,16 @@ const boardWidth = () => {
 };
 
 // Stands in for the 3D board. Records wires instead of drawing them.
+// holeMap() is App.holeMap() (issue #24): an empty board unless a test gives
+// one. note(text) shows a refusal in the chat; the fake keeps them in notes.
 function fakeBoard(parts) {
   const wires = [];
+  const notes = [];
   return {
     wires,
+    notes,
+    note: text => notes.push(text),
+    holeMap: () => new Map(),
     components: () => parts,
     batterySpot: () => spotFor(boardWidth()),   // the real board, 63 columns
     parseHole: s => {
@@ -305,4 +311,85 @@ test('the AI battery goes wherever the board says, with no spot of chat.js\'s ow
     Object.assign(board, { batch: fn => fn() }));
   assert.deepStrictEqual(board.got, [{ x: 99, z: -3.15 }]);
   assert.equal(Chat.BATTERY_SPOT, undefined, 'the hard-coded BATTERY_SPOT {x:13, z:0} must be gone');
+});
+
+// ── Placement checks on the AI apply path, issue #24 ────────────────────
+// docs/API-CONTRACT.md → "Parts.checkPlacement". Accepting an AI build runs
+// every registry part (the resistor today) through Parts.checkPlacement with
+// board.holeMap() before placing it. A refused part is not placed, counts as
+// failed (like an unresolved hole), and its reason is shown word for word
+// through board.note(text) — in the page, a system message in the chat.
+// The adapter methods this needs:
+//   board.holeMap()   → App.holeMap(): Map<'a6', { label, pin } | { wire, end }>
+//   board.note(text)  → shows text in the chat
+
+const Parts = require('../circuit3d/js/parts');
+
+// A board whose holeMap() returns the given entries, and which records what
+// it was asked to place.
+function mapBoard(entries, parts = []) {
+  const placed = [];
+  return Object.assign(fakeBoard(parts), {
+    holeMap: () => new Map(entries),
+    placeResistor: (a, b, v) => placed.push(['resistor', a, b, v]),
+    placeBattery:  () => placed.push(['battery']),
+    placed,
+  });
+}
+
+// The registry's own reason for the same placement, so the note is checked
+// word for word against it.
+const reasonFor = (holes, entries) => {
+  const legs = Parts.legsOf({ type: 'resistor', holeRefs: holes.map(s => ({ row: s[0], col: +s.slice(1) - 1 })) });
+  return Parts.checkPlacement('resistor', legs, new Map(entries), null).reason;
+};
+
+test('the AI apply path refuses a resistor at a3 to a33: not placed, counted as failed, a note saying 3–5', () => {
+  const board = mapBoard([]);
+  const out = Chat.applyActions([{ tool: 'place_resistor', holeA: 'a3', holeB: 'a33' }], board);
+  assert.deepEqual(out, { applied: 0, failed: 1 });
+  assert.equal(board.placed.length, 0, 'placeResistor was not called');
+  assert.equal(board.notes.length, 1, `one refusal note, got ${JSON.stringify(board.notes)}`);
+  assert.ok(board.notes[0].includes('3–5'), `the note gives the allowed range: "${board.notes[0]}"`);
+  assert.ok(board.notes[0].includes(reasonFor(['a3', 'a33'], [])), `the registry's reason, word for word: "${board.notes[0]}"`);
+  assert.match(board.notes[0], /\bR1\b/, 'the note names the part it would have been');
+});
+
+test('the AI apply path refuses a resistor leg on a hole R1 already holds, naming R1\'s pin', () => {
+  const taken = [['a6', { label: 'R1', pin: 'lead2' }]];
+  const board = mapBoard(taken, [{ type: 'resistor', label: 'R1' }]);
+  const out = Chat.applyActions([{ tool: 'place_resistor', holeA: 'a6', holeB: 'a10' }], board);
+  assert.deepEqual(out, { applied: 0, failed: 1 });
+  assert.equal(board.placed.length, 0, 'placeResistor was not called');
+  assert.equal(board.notes.length, 1, `one refusal note, got ${JSON.stringify(board.notes)}`);
+  assert.ok(board.notes[0].includes("a6 already holds R1's pin lead2"), `the note names the occupant: "${board.notes[0]}"`);
+  assert.ok(board.notes[0].includes(reasonFor(['a6', 'a10'], taken)), `the registry's reason, word for word: "${board.notes[0]}"`);
+});
+
+test('a resistor leg on a wire end is refused too: wire ends count as occupants', () => {
+  const board = mapBoard([['a10', { wire: 0, end: 'to' }]]);
+  const out = Chat.applyActions([{ tool: 'place_resistor', holeA: 'a6', holeB: 'a10' }], board);
+  assert.deepEqual(out, { applied: 0, failed: 1 });
+  assert.ok(board.notes.length === 1 && board.notes[0].includes('a10 already holds the end of a wire'), JSON.stringify(board.notes));
+});
+
+test('a refused part fails alone: the rest of the build still applies, in one batch', () => {
+  const board = Object.assign(mapBoard([]), { batch: fn => fn() });
+  const out = Chat.acceptBuild([
+    { tool: 'place_battery' },
+    { tool: 'place_resistor', holeA: 'a3', holeB: 'a33' },
+    { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
+  ], board);
+  assert.deepEqual(out, { applied: 2, failed: 1 });
+  assert.deepStrictEqual(board.placed.map(p => p[0] === 'resistor' ? `resistor ${p[1].row}${p[1].col + 1}-${p[2].row}${p[2].col + 1}` : p[0]),
+    ['battery', 'resistor a2-a6']);
+  assert.equal(board.notes.length, 1);
+});
+
+test('a resistor 3–5 columns apart on free holes is placed with no note', () => {
+  const board = mapBoard([['a2', { label: 'LED1', pin: '1' }]]);
+  const out = Chat.applyActions([{ tool: 'place_resistor', holeA: 'a3', holeB: 'a8' }], board);
+  assert.deepEqual(out, { applied: 1, failed: 0 });
+  assert.equal(board.placed.length, 1);
+  assert.deepEqual(board.notes, []);
 });

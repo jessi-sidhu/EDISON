@@ -321,6 +321,17 @@
         const hA = holes.holeA;
         const hB = holes.holeB;
 
+        // Registry parts are checked first; a refusal is the hint, word for word.
+        if (Parts.get(type)) {
+          const G     = App.BOARD_GEOMETRY;
+          const legs  = Parts.legsOf({ type, holeRefs: [{ col: hA.col, row: hA.row }, { col: hB.col, row: hB.row }] });
+          const check = Parts.checkPlacement(type, legs, App.holeMap(), { cols: G.COLS, bodyRows: G.BODY_ROWS });
+          if (!check.ok) {
+            App.setHint(`${App.nextLabel(state.components, type)} not placed: ${check.reason}`, 6000);
+            return;
+          }
+        }
+
         if (type === 'resistor') App.placeResistor(hA, hB);
         if (type === 'led')      App.placeLED(hA, hB);
         if (type === 'buzzer')   App.placeBuzzer(hA, hB);

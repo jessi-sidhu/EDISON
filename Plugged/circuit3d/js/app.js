@@ -168,15 +168,24 @@
     return (opts && opts.label) || App.nextLabel(state.components, type);
   }
 
+  // A thin wrapper over the parts registry (parts/resistor.js), kept for
+  // chat.js and file loading. A value the registry refuses is dropped, so
+  // the part keeps its default.
   App.placeResistor = function (holeA, holeB, values, opts) {
     pushHistory();
-    const vals = App.componentValues('resistor', values);
-    const { group, pins } = App.buildResistor(holeA, holeB, vals.resistance);
+    const given = {};
+    for (const [key, v] of Object.entries(values || {})) {
+      const check = Parts.checkValue('resistor', key, v);
+      if (check.ok) given[key] = check.value;
+      else console.warn('Resistor value ignored: ' + check.reason);
+    }
+    const vals = App.componentValues('resistor', given);
+    const holeRefs = [{ col: holeA.col, row: holeA.row },
+                      { col: holeB.col, row: holeB.row }];
+    const { group, pinPositions: pins } = App.buildPart('resistor', Parts.legsOf({ type: 'resistor', holeRefs }), vals);
     App.scene.add(group);
     const record = {
-      type: 'resistor', label: partLabel('resistor', opts), group, pins, pinMeshes: [], values: vals,
-      holeRefs: [{ col: holeA.col, row: holeA.row },
-                 { col: holeB.col, row: holeB.row }],
+      type: 'resistor', label: partLabel('resistor', opts), group, pins, pinMeshes: [], values: vals, holeRefs,
     };
     addPinMarkers(record);
     state.components.push(record);
@@ -537,7 +546,7 @@
         id:       App.componentId(state.components, c),
         label:    c.label,             // on each part, never at file level
         values:   c.values,
-        holeRefs: c.holeRefs,          // null for battery
+        holeRefs: App.saveHoleRefs(c), // with pin names; null for battery
         position: c.group
           ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) }
           : null,
@@ -602,8 +611,9 @@
       if (c.type === 'battery' && c.position) {
         App.placeBattery(c.position.x, c.position.z, c.values, opts);
       } else if (PLACE[c.type] && c.holeRefs?.length === 2) {
-        const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-        const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
+        const refs = App.loadHoleRefs(c);   // pin order: by name, or by index in older files
+        const hA = refs[0] && bb.getHole(refs[0].col, refs[0].row);
+        const hB = refs[1] && bb.getHole(refs[1].col, refs[1].row);
         if (hA && hB) PLACE[c.type](hA, hB, c.values, opts);
       }
       return state.components.length > before ? state.components[state.components.length - 1] : null;
@@ -622,22 +632,23 @@
       let startWorld = null, startHole = null, startPinMesh = null;
       let endWorld   = null, endHole   = null, endPinMesh   = null;
 
+      // A wire drawn from a pin sphere saved both the hole and the part:
+      // keep both, so the part still knows the wire is on its own pin.
+      const startPm = pinMeshOf(rebuilt, w.startCompIdx, w.startPin, w.startPinIdx);
+      const endPm   = pinMeshOf(rebuilt, w.endCompIdx,   w.endPin,   w.endPinIdx);
+
       if (w.startHole) {
         const h = bb.getHole(w.startHole.col, w.startHole.row);
-        if (h) { startWorld = h.world.clone(); startHole = { col: h.col, row: h.row }; }
-      } else if (w.startCompIdx >= 0 && rebuilt[w.startCompIdx]) {
-        const comp = rebuilt[w.startCompIdx];
-        const pm   = (comp.pinMeshes || [])[w.startPinIdx];
-        if (pm) { startWorld = pm.userData.world.clone(); startPinMesh = pm; }
+        if (h) { startWorld = h.world.clone(); startHole = { col: h.col, row: h.row }; startPinMesh = startPm; }
+      } else if (startPm) {
+        startWorld = startPm.userData.world.clone(); startPinMesh = startPm;
       }
 
       if (w.endHole) {
         const h = bb.getHole(w.endHole.col, w.endHole.row);
-        if (h) { endWorld = h.world.clone(); endHole = { col: h.col, row: h.row }; }
-      } else if (w.endCompIdx >= 0 && rebuilt[w.endCompIdx]) {
-        const comp = rebuilt[w.endCompIdx];
-        const pm   = (comp.pinMeshes || [])[w.endPinIdx];
-        if (pm) { endWorld = pm.userData.world.clone(); endPinMesh = pm; }
+        if (h) { endWorld = h.world.clone(); endHole = { col: h.col, row: h.row }; endPinMesh = endPm; }
+      } else if (endPm) {
+        endWorld = endPm.userData.world.clone(); endPinMesh = endPm;
       }
 
       if (startWorld && endWorld) {
@@ -646,6 +657,18 @@
       }
     }
     state.wireColor = savedColor;
+
+    // Parts from older files that break a placement rule load flagged: they
+    // simulate as saved and warn, and are never moved or blocked.
+    App.flagPlacements(state.components, state.wires);
+  }
+
+  // The pin sphere a saved wire end names on rebuilt[idx]: by pin name, or by
+  // index in files from before names. null when that part or pin is gone.
+  function pinMeshOf(rebuilt, idx, name, pinIdx) {
+    const comp = idx >= 0 ? rebuilt[idx] : null;
+    if (!comp || comp.unknown) return null;
+    return (comp.pinMeshes || [])[App.pinIndex(comp, name, pinIdx)] || null;
   }
 
   App.loadCircuit = function () {
@@ -782,6 +805,14 @@
     return md;
   };
 
+  // ── Hole map ───────────────────────────────────────────────
+  // Hole name → what sits in it (docs/API-CONTRACT.md → "Legs and the hole
+  // map"). Rebuilt from the records on every call, so it always follows the
+  // last place, delete, undo, load or AI apply. Never patched, never saved.
+  App.holeMap = function () {
+    return App.buildHoleMap(state.components, state.wires);
+  };
+
   // ── Export State (for AI / save-load) ────────────────────────
 
   App.exportState = function () {
@@ -875,7 +906,7 @@
         type:     c.type,
         label:    c.label,
         values:   c.values,
-        holeRefs: c.holeRefs,
+        holeRefs: App.saveHoleRefs(c),
         position: c.group ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) } : null,
       })),
       wires: wireRecords(),
@@ -885,14 +916,8 @@
   // Every wire as a saved record: the drawn ones, then the ones kept for
   // parts this build doesn't know, re-pointed at where those parts now sit.
   function wireRecords() {
-    return state.wires.map(w => ({
-      startHole:    w.startHole,
-      endHole:      w.endHole,
-      startCompIdx: w.startComp ? state.components.indexOf(w.startComp) : -1,
-      startPinIdx:  w.startPinIdx,
-      endCompIdx:   w.endComp   ? state.components.indexOf(w.endComp)   : -1,
-      endPinIdx:    w.endPinIdx,
-      color:        w.group?.children?.[0]?.material?.color?.getHex?.() ?? state.wireColor,
+    return state.wires.map(w => Object.assign(App.wireRecord(w, state.components), {
+      color: w.group?.children?.[0]?.material?.color?.getHex?.() ?? state.wireColor,
     })).concat(App.unknownWireRecords(state.unknownWires, state.components));
   }
 

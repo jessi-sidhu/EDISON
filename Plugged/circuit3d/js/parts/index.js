@@ -9,7 +9,7 @@
 
 (function () {
   // One entry per part file, e.g. 'resistor.js'. Each calls Parts.define().
-  const FILES = [];
+  const FILES = ['resistor.js'];
 
   if (typeof module === 'object' && module.exports) {
     const Parts = require('./registry.js');

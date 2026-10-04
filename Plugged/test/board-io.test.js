@@ -306,3 +306,265 @@ test('assignMissingLabels does not change the records it is given', () => {
 test('a file with no components list backfills to an empty list', () => {
   assert.deepEqual(assignMissingLabels(undefined), []);
 });
+
+// ── Pin names in the save format, issue #24 ───────────────────────────────
+// docs/API-CONTRACT.md → "Placed-part record": a registry part's holeRefs
+// each carry their pin name ({ pin: 'lead1', col, row }), and a wire end on
+// a registry part names its pin (startPin / endPin) next to the index.
+// Loading matches by name, and falls back to the index only when the name
+// is missing. Legacy parts (LED, battery, buzzer, button) stay index-only
+// until #25/#26 move them into the registry.
+//
+// Pure helpers board-io.js adds (app.js's serializeBoard / wireRecords /
+// rebuildBoard call them):
+//   saveHoleRefs(comp)            → [{ pin, col, row }] in pin order for a registry
+//                                   part; comp.holeRefs as-is (no `pin`) otherwise;
+//                                   null when the part is off the board
+//   loadHoleRefs(record)          → [{ col, row }] in the part's pin order: a named
+//                                   ref by name, an unnamed one by its index
+//   pinName(comp, idx)            → the registry pin's name, or undefined
+//   pinIndex(comp, name, idx)     → the index of pin `name` on comp; `idx` when
+//                                   name is missing (a file from before names)
+//   wireRecord(wire, components)  → { startHole, endHole, startCompIdx, startPinIdx,
+//                                   endCompIdx, endPinIdx } plus startPin / endPin
+//                                   for an end on a registry part (no colour)
+
+// A placed part as App.place* leaves it in state.components (no 3D here).
+function runtime(type, label, holeRefs, values) {
+  return { type, label, values: values || {}, holeRefs, pins: holeRefs ? holeRefs.map(() => ({})) : [{}, {}] };
+}
+// A drawn wire as App.finishWire records it.
+function drawn(startHole, endHole, startComp, startPinIdx, endComp, endPinIdx) {
+  return { startHole, endHole, startComp: startComp || null, startPinIdx: startPinIdx ?? -1,
+           endComp: endComp || null, endPinIdx: endPinIdx ?? -1 };
+}
+// place() for rebuildComponents, the way rebuildBoard will do it: a saved
+// part's holes are read through loadHoleRefs, so they come back in pin order.
+function placeByName(r) {
+  if (!KNOWN.has(r.type)) return null;
+  const holeRefs = r.holeRefs ? need('loadHoleRefs')(r) : null;
+  return runtime(r.type, r.label, holeRefs, r.values);
+}
+const cr = ref => (ref ? { col: ref.col, row: ref.row } : ref);
+
+test('saving a resistor writes each hole with its pin name, lead1 then lead2 (#24)', () => {
+  const r1 = runtime('resistor', 'R1', [h(1, 'a'), h(5, 'a')], { resistance: 470 });
+  assert.deepStrictEqual(need('saveHoleRefs')(r1), [{ pin: 'lead1', col: 1, row: 'a' }, { pin: 'lead2', col: 5, row: 'a' }]);
+});
+
+test('legacy parts stay index-only: an LED saves bare holes, a battery saves null (#24)', () => {
+  const led1 = runtime('led', 'LED1', [h(9, 'a'), h(8, 'a')]);
+  const saved = need('saveHoleRefs')(led1);
+  assert.deepStrictEqual(saved, [h(9, 'a'), h(8, 'a')]);
+  assert.ok(saved.every(ref => !('pin' in ref)), `LED holes carry no pin names yet: ${JSON.stringify(saved)}`);
+  assert.equal(need('saveHoleRefs')(runtime('battery', 'BAT1', null)), null);
+});
+
+test('a wire end on a resistor pin saves its name next to the index; legacy and hole ends save none (#24)', () => {
+  const bat = runtime('battery', 'BAT1', null);
+  const r1  = runtime('resistor', 'R1', [h(1, 'a'), h(5, 'a')]);
+  const led1 = runtime('led', 'LED1', [h(9, 'a'), h(5, 'b')]);
+  const comps = [bat, r1, led1];
+  const wireRecord = need('wireRecord');
+
+  // The AI's "BAT1.0 → R1.1": two off-hole ends.
+  const aiWire = wireRecord(drawn(null, null, bat, 0, r1, 1), comps);
+  assert.equal(aiWire.endCompIdx, 1);
+  assert.equal(aiWire.endPinIdx, 1);
+  assert.equal(aiWire.endPin, 'lead2', `the resistor end is named: ${JSON.stringify(aiWire)}`);
+  assert.ok(!('startPin' in aiWire), `a battery end stays index-only: ${JSON.stringify(aiWire)}`);
+
+  // Drawn by hand from R1's first pin sphere (hole a2 and the part) to the rail.
+  const hand = wireRecord(drawn(h(1, 'a'), h(1, 'tp'), r1, 0), comps);
+  assert.equal(hand.startPin, 'lead1');
+  assert.equal(hand.startPinIdx, 0);
+  assert.deepStrictEqual(hand.startHole, h(1, 'a'));
+  assert.ok(!('endPin' in hand), `a plain hole end has no pin name: ${JSON.stringify(hand)}`);
+
+  // From an LED pin: the LED is not a registry part yet.
+  const fromLed = wireRecord(drawn(h(9, 'a'), h(9, 'tn'), led1, 0), comps);
+  assert.ok(!('startPin' in fromLed), `LED ends stay index-only: ${JSON.stringify(fromLed)}`);
+
+  // Hole to hole.
+  const plain = wireRecord(drawn(h(2, 'tp'), h(1, 'b')), comps);
+  assert.deepStrictEqual(plain, { startHole: h(2, 'tp'), endHole: h(1, 'b'), startCompIdx: -1, startPinIdx: -1,
+                                  endCompIdx: -1, endPinIdx: -1 });
+});
+
+test('save then reload keeps the pin names: the second save is the same as the first (#24)', () => {
+  const bat = runtime('battery', 'BAT1', null, { voltage: 9 });
+  const r1  = runtime('resistor', 'R1', [h(1, 'a'), h(5, 'a')], { resistance: 470 });
+  const comps = [bat, r1];
+  const wires = [drawn(null, null, bat, 0, r1, 1), drawn(h(1, 'a'), h(1, 'tp'), r1, 0)];
+  const save = (cs, ws) => JSON.parse(JSON.stringify({
+    components: cs.map(c => ({ type: c.type, label: c.label, values: c.values, holeRefs: need('saveHoleRefs')(c) })),
+    wires: ws.map(w => need('wireRecord')(w, cs)),
+  }));
+
+  const first = save(comps, wires);
+  assert.deepStrictEqual(first.components[1].holeRefs, [{ pin: 'lead1', col: 1, row: 'a' }, { pin: 'lead2', col: 5, row: 'a' }]);
+  assert.equal(first.wires[0].endPin, 'lead2');
+  assert.equal(first.wires[1].startPin, 'lead1');
+
+  // Reload: parts through placeByName, wire ends through pinIndex.
+  const back = rebuildComponents(first.components, placeByName, knows);
+  const pinIndex = need('pinIndex');
+  const rewired = first.wires.map(w => drawn(w.startHole, w.endHole,
+    w.startCompIdx >= 0 ? back[w.startCompIdx] : null, w.startCompIdx >= 0 ? pinIndex(back[w.startCompIdx], w.startPin, w.startPinIdx) : -1,
+    w.endCompIdx >= 0 ? back[w.endCompIdx] : null, w.endCompIdx >= 0 ? pinIndex(back[w.endCompIdx], w.endPin, w.endPinIdx) : -1));
+  assert.deepStrictEqual(save(back, rewired), first);
+});
+
+test('pinName and pinIndex: names for registry pins, the index when a file has no name (#24)', () => {
+  const r1 = runtime('resistor', 'R1', [h(1, 'a'), h(5, 'a')]);
+  const led1 = runtime('led', 'LED1', [h(9, 'a'), h(8, 'a')]);
+  assert.equal(need('pinName')(r1, 0), 'lead1');
+  assert.equal(need('pinName')(r1, 1), 'lead2');
+  assert.equal(need('pinName')(led1, 1), undefined, 'the LED has no pin names until #25');
+  assert.equal(need('pinIndex')(r1, 'lead2', 0), 1, 'the name wins over a stale index');
+  assert.equal(need('pinIndex')(r1, 'lead1', 1), 0);
+  assert.equal(need('pinIndex')(r1, undefined, 1), 1, 'no name: the saved index');
+  assert.equal(need('pinIndex')(led1, undefined, 0), 0);
+});
+
+// A file written by a build whose pin list was in another order: the refs
+// are saved lead2 first, and the wire indexes are stale, but the names are
+// present. Loading must put each hole on its pin and each wire on its pin.
+test('a file with the resistor holes in another order, names present, reconnects wires to the right pins (#24)', () => {
+  const file = {
+    components: [
+      { type: 'battery',  label: 'BAT1', values: { voltage: 9 }, holeRefs: null, position: { x: -20, z: 0 } },
+      { type: 'resistor', label: 'R1', values: { resistance: 1000 },
+        holeRefs: [{ pin: 'lead2', col: 5, row: 'a' }, { pin: 'lead1', col: 1, row: 'a' }] },
+    ],
+    // BAT1 + → R1.lead2 and BAT1 − → R1.lead1, with the indexes of the old order.
+    wires: [
+      { startHole: null, endHole: null, startCompIdx: 0, startPinIdx: 0, endCompIdx: 1, endPinIdx: 0, endPin: 'lead2' },
+      { startHole: null, endHole: null, startCompIdx: 0, startPinIdx: 1, endCompIdx: 1, endPinIdx: 1, endPin: 'lead1' },
+    ],
+  };
+  need('loadHoleRefs');   // placeByName uses it; a missing export would only show as a dropped part
+  const comps = rebuildComponents(file.components, placeByName, knows);
+  const r1 = comps[1];
+  assert.deepStrictEqual(r1.holeRefs.map(cr), [h(1, 'a'), h(5, 'a')], 'holeRefs come back in pin order: lead1 a2, lead2 a6');
+
+  const pinIndex = need('pinIndex');
+  const wires = file.wires.map(w => drawn(null, null, comps[w.startCompIdx], w.startPinIdx,
+                                          comps[w.endCompIdx], pinIndex(comps[w.endCompIdx], w.endPin, w.endPinIdx)));
+  assert.equal(wires[0].endPinIdx, 1, 'BAT1 + reaches lead2');
+  assert.deepStrictEqual(cr(r1.holeRefs[wires[0].endPinIdx]), h(5, 'a'), 'lead2 is hole a6');
+  assert.equal(wires[1].endPinIdx, 0, 'BAT1 − reaches lead1');
+
+  // + on lead2: current runs lead2 → lead1, negative in pin order, 9 V / 1 kΩ.
+  const r = Sim.analyze(comps, wires);
+  assert.equal(r.status, 'ok');
+  assert.ok(Math.abs(r.currents[1] * 1000 + 9) < 0.01, `expected −9.0 mA through R1 (lead2 → lead1), got ${(r.currents[1] * 1000).toFixed(2)} mA`);
+});
+
+test('an old file with no pin names loads by index, as before (#24)', () => {
+  const old = [
+    { type: 'battery',  label: 'BAT1', values: { voltage: 9 }, holeRefs: null },
+    { type: 'resistor', label: 'R1', values: { resistance: 1000 }, holeRefs: [h(5, 'a'), h(1, 'a')] },   // lead1 a6, lead2 a2
+    { type: 'led',      label: 'LED1', values: { color: 'red' }, holeRefs: [h(9, 'b'), h(8, 'b')] },
+  ];
+  assert.deepStrictEqual(need('loadHoleRefs')(old[1]).map(cr), [h(5, 'a'), h(1, 'a')]);
+  assert.deepStrictEqual(need('loadHoleRefs')(old[2]).map(cr), [h(9, 'b'), h(8, 'b')]);
+  const comps = rebuildComponents(old, placeByName, knows);
+  assert.deepStrictEqual(comps[1].holeRefs.map(cr), [h(5, 'a'), h(1, 'a')]);
+  assert.equal(need('pinIndex')(comps[1], undefined, 1), 1, 'wire to pin 1 still reaches pin 1 (a2)');
+  assert.equal(need('pinIndex')(comps[1], null, 0), 0);
+});
+
+// ── Old files that break a placement rule load flagged, issue #24 ─────────
+// docs/API-CONTRACT.md → "Parts.checkPlacement", flagged parts: warn only.
+// A registry part loaded from an old file that breaks a rule still loads and
+// simulates as saved, is never moved or blocked, and shows one warning line
+// in the results and in the AI summary.
+//
+// How (chosen here, for the builder):
+//   flagPlacements(components, wires) in board-io.js runs Parts.checkPlacement
+//   for every registry part against the hole map of the board WITHOUT that
+//   part (its own legs, and wire ends plugged into its own pins, don't count).
+//   A part that fails gets comp.flag = "<label>: <reason>" (e.g. "R1: a
+//   resistor's leads must be 3–5 columns apart; a3 to a33 is 30."); a part
+//   that passes has no flag. Returns the flag lines. rebuildBoard calls it
+//   after a load (and undo, which reloads a snapshot).
+//   Sim.analyze adds each part's flag to `lines` (cls 'sim-warn') and to
+//   parts[label].warnings; simulationSummary then carries it like any other
+//   warning line. The flag is never saved.
+
+// 9 V straight across R1: BAT1 + → b3, BAT1 − → b33, R1 at a3–a33 (30 apart).
+function stretchedFile() {
+  return {
+    components: [
+      { type: 'battery',  label: 'BAT1', values: { voltage: 9 }, holeRefs: null, position: { x: -20, z: 0 } },
+      { type: 'resistor', label: 'R1', values: { resistance: 470 }, holeRefs: [h(2, 'a'), h(32, 'a')], position: { x: 0, z: 0 } },
+    ],
+    wires: [
+      { startHole: null, endHole: h(2, 'b'),  startCompIdx: 0, startPinIdx: 0, endCompIdx: -1, endPinIdx: -1, color: 0xef4444 },
+      { startHole: null, endHole: h(32, 'b'), startCompIdx: 0, startPinIdx: 1, endCompIdx: -1, endPinIdx: -1, color: 0x111111 },
+    ],
+  };
+}
+
+function loadFile(file) {
+  need('loadHoleRefs');
+  const comps = rebuildComponents(file.components, placeByName, knows);
+  const wires = file.wires.map(w => drawn(w.startHole, w.endHole,
+    w.startCompIdx >= 0 ? comps[w.startCompIdx] : null, w.startPinIdx,
+    w.endCompIdx >= 0 ? comps[w.endCompIdx] : null, w.endPinIdx));
+  return { comps, wires };
+}
+
+const isStretchWarning = s => typeof s === 'string' && /\bR1\b/.test(s) && s.includes('3–5') && /\b30\b/.test(s);
+
+test('an old file with a resistor 30 columns wide loads flagged, not moved or dropped (#24)', () => {
+  const { comps, wires } = loadFile(stretchedFile());
+  assert.equal(comps.length, 2);
+  assert.equal(comps[1].type, 'resistor', 'the stretched resistor still loads');
+  const lines = need('flagPlacements')(comps, wires);
+  assert.equal(lines.length, 1, `one warning line: ${JSON.stringify(lines)}`);
+  assert.ok(isStretchWarning(lines[0]), `the line names R1, the allowed 3–5 and the 30 it is: "${lines[0]}"`);
+  assert.equal(comps[1].flag, lines[0], 'the flag rides on the part');
+  assert.deepStrictEqual(comps[1].holeRefs.map(cr), [h(2, 'a'), h(32, 'a')], 'never auto-fixed');
+  assert.deepStrictEqual(need('saveHoleRefs')(comps[1]), [{ pin: 'lead1', col: 2, row: 'a' }, { pin: 'lead2', col: 32, row: 'a' }],
+    'saving keeps it as it is');
+});
+
+test('the flagged resistor still simulates, and its warning is in the results and the AI summary (#24)', () => {
+  const { comps, wires } = loadFile(stretchedFile());
+  need('flagPlacements')(comps, wires);
+  const r = Sim.analyze(comps, wires);
+  assert.equal(r.status, 'ok');
+  assert.ok(r.parts.R1, 'R1 has a result');
+  assert.ok(Math.abs(r.parts.R1.m.current - 19.15) < 0.05, `9 V / 470 Ω ≈ 19.1 mA, got ${r.parts.R1.m.current}`);
+  const line = r.lines.find(l => isStretchWarning(l.text));
+  assert.ok(line, `a results line warns about R1: ${r.lines.map(l => l.text).join(' | ')}`);
+  assert.equal(line.cls, 'sim-warn');
+  assert.ok(r.parts.R1.warnings.some(isStretchWarning), `parts.R1.warnings: ${JSON.stringify(r.parts.R1.warnings)}`);
+  const summary = Sim.simulationSummary(comps, wires, (list, c) => c.label);
+  assert.ok(summary.some(isStretchWarning), `simulationSummary:\n${summary.join('\n')}`);
+});
+
+// The part being checked must not see itself: its own legs are in the map,
+// and so is the end of a wire drawn from its own pin (a hand-drawn wire from
+// a pin sphere records the part's hole and the part). Neither is a clash.
+test('a valid file flags nothing: a part never clashes with its own legs or wires on its own pins (#24)', () => {
+  const file = {
+    components: [
+      { type: 'battery',  label: 'BAT1', values: { voltage: 9 }, holeRefs: null },
+      { type: 'resistor', label: 'R1', values: { resistance: 470 }, holeRefs: [{ pin: 'lead1', col: 2, row: 'a' }, { pin: 'lead2', col: 6, row: 'a' }] },
+    ],
+    wires: [
+      { startHole: null, endHole: h(2, 'tp'), startCompIdx: 0, startPinIdx: 0, endCompIdx: -1, endPinIdx: -1 },
+      { startHole: h(2, 'a'), endHole: h(3, 'tp'), startCompIdx: 1, startPinIdx: 0, startPin: 'lead1', endCompIdx: -1, endPinIdx: -1 },
+      { startHole: h(6, 'b'), endHole: h(6, 'tn'), startCompIdx: -1, startPinIdx: -1, endCompIdx: -1, endPinIdx: -1 },
+      { startHole: null, endHole: h(7, 'tn'), startCompIdx: 0, startPinIdx: 1, endCompIdx: -1, endPinIdx: -1 },
+    ],
+  };
+  const { comps, wires } = loadFile(file);
+  assert.deepStrictEqual(need('flagPlacements')(comps, wires), []);
+  assert.ok(!comps[1].flag, `R1 should carry no flag, got "${comps[1].flag}"`);
+  const r = Sim.analyze(comps, wires);
+  assert.ok(!r.lines.some(l => /\bR1\b/.test(l.text) && l.cls === 'sim-warn'), r.lines.map(l => l.text).join(' | '));
+});

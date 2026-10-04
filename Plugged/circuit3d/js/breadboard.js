@@ -296,7 +296,7 @@
         dummy.updateMatrix();
         holesMesh.setMatrixAt(idx, dummy.matrix);
         holeData.push({ idx, col, row, x, z,
-          world: new THREE.Vector3(x, 0, z), occupied: false });
+          world: new THREE.Vector3(x, 0, z) });
         idx++;
       }
     });

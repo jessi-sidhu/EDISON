@@ -20,6 +20,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
+  <!-- Parts registry, then every file in js/parts/index.js FILES -->
+  <script src="js/parts/registry.js"></script>
+  <script src="js/parts/resistor.js"></script>
+
   <!-- Reuse scene, breadboard, and component builders -->
   <script src="js/scene.js"></script>
   <script src="js/board-geometry.js"></script>
@@ -75,10 +79,14 @@
         // Place components
         for (const c of (data.components || [])) {
           let result = null;
-          if (c.type === 'resistor' && c.holeRefs?.length === 2) {
-            const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-            const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-            if (hA && hB) result = App.buildResistor(hA, hB, c.values?.resistance);
+          const def = window.Parts && Parts.get(c.type);
+          if (def && def.place.kind === 'span' && c.holeRefs?.length === 2) {
+            // A registry part draws itself; a saved part with no values gets its defaults.
+            const legs = Parts.legsOf(c);
+            if (legs.every(l => bb.getHole(l.col, l.row))) {
+              const built = App.buildPart(c.type, legs, c.values);
+              result = { group: built.group, pins: built.pinPositions };
+            }
           } else if (c.type === 'led' && c.holeRefs?.length === 2) {
             const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
             const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
