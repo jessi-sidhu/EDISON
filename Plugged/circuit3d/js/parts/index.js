@@ -1,0 +1,19 @@
+// ─────────────────────────────────────────────────────────────
+//  parts/index.js — the list of part files.
+//
+//  Node (backend/server.js, Vitest): require('circuit3d/js/parts') loads
+//  the registry, requires every part file below, and returns Parts.
+//  Browser: each part file has its own <script> tag in index.html and
+//  viewer.html, after parts/registry.js; this file does nothing there.
+// ─────────────────────────────────────────────────────────────
+
+(function () {
+  // One entry per part file, e.g. 'resistor.js'. Each calls Parts.define().
+  const FILES = [];
+
+  if (typeof module === 'object' && module.exports) {
+    const Parts = require('./registry.js');
+    for (const file of FILES) require('./' + file);
+    module.exports = Parts;
+  }
+})();

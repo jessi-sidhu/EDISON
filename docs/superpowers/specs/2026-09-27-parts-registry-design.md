@@ -1,6 +1,6 @@
 # Parts registry: design
 
-*2026-09-27. Status: **draft for review** (Aarmen approved the design in conversation; Manav to OK as the second teammate). The contract itself is in `docs/API-CONTRACT.md` → "Part file contract". This note records why, what it costs, and the build order.*
+*2026-09-27. Status: **approved by Aarmen**; Manav to OK as the second teammate. The contract itself is in `docs/API-CONTRACT.md` → "Part file contract". This note records why, what it costs, and the build order.*
 
 ## Goal
 Adding a part means writing **one file**: `Plugged/circuit3d/js/parts/<type>.js`. Today a part type is known in 10+ places:
@@ -26,8 +26,9 @@ Phase 2 adds about 15 parts, mostly written by Manav and by Claude Code agents f
 | 4 | **Live controls through both a 3D gesture and an inspector slider.** | Inspector only loses "click the button". Gestures only are awkward for sensors, and hard to test. |
 | 5 | **One on/off loop for every mode block** (diode, Zener, clamped source, relay contact), with anti-cycling, reporting `'unsettled'` instead of wrong numbers. | Keeping the LED special case and adding more beside it. |
 | 6 | **A closed switch is 1 mΩ, never an ideal short.** | 0 V source: two closed switches in parallel make the maths unsolvable. Union-find merge (today's button): it gives no current reading. |
-| 7 | **Every leg's column and row is stored per pin**, and a **hole map is rebuilt from the records after every change**. | Storing anchor + rotation and working the legs out each time. Updating the hole map as things change, which can drift out of sync with the parts. |
-| 8 | **2-lead parts have `span: {min, max, default}`.** Placement outside the range is refused everywhere, and the message states the range. | Fixed spans (today's "exactly 4 columns"). Unlimited spans, e.g. a resistor stretched 30 columns. |
+| 6b | **One ground per connected circuit:** the `ref` pin of the earliest-placed source in that circuit. | One global ground: a second, separate circuit would float. "First by label": ambiguous across prefixes. |
+| 7 | **Every leg's column and row is stored per pin, with the pin's name**, and wires save pin names too. A **hole map is rebuilt from the records after every change**. | Storing anchor + rotation and working the legs out each time. Relying on pin order in files: reordering would silently break old circuits. Updating the hole map as things change, which can drift out of sync with the parts. |
+| 8 | **2-lead parts have `span: {min, max, default}` on one row**: resistor 3–5, LED 1–3, buzzer 2, button 3 (fixed). Vertical placement only to cross the centre gap. Placement outside the rules is refused everywhere, and the message states the range. **Old files that break a rule: warn only** (never auto-fix, never block). | Fixed spans (today's "exactly 4 columns"). Unlimited spans, e.g. a resistor stretched 30 columns. Auto-fixing old files: silently changes a student's circuit. Blocking: old files feel broken. |
 | 9 | **AI tools are generated from the registry. Per request, `selectTools` sends only what's needed (≤ 12)**, plus a parts catalogue and `use_parts` for anything missed. Parts carry an optional `guide` and `recipe`, and recipes are tested in the simulator. | Sending every tool on every request (about 20 at the end of Phase 2). One generic `place_part` tool: kept as the fallback if DeepSeek struggles. |
 | 10 | **A strict vocabulary and hard limits**, rejected at registration. | Open-ended fields: they give "degrees of freedom that are too wide". |
 
@@ -40,8 +41,9 @@ Phase 2 adds about 15 parts, mostly written by Manav and by Claude Code agents f
   
   Some simulator tests, browser tests and QA prompts need updating in issues B, C and D.
 - **During the migration there are two simulator paths**, the old per-type code and the registry, until issue C deletes the old one. If C slips, the duplication lingers.
+- **`App.place*` and `chat.js`'s `PLACE` survive A–C as thin wrappers** so today's AI tools keep working overnight. D deletes them. Every foundation issue must keep the AI demo path working.
 - **Rebuilding the five existing models may shift how they look slightly.** The browser tests catch breakage; someone has to eyeball them.
-- **Scroll-over-pot turns the knob instead of zooming.** It could surprise people, and it's one line to switch to drag.
+- **Scroll-over-pot turns the knob instead of zooming.** It could surprise people, and it's one line to switch to drag. The core throttles re-simulation to one run per 100 ms (plus one when the gesture stops), and a gesture is one undo step.
 - **The overlap and span checks change hand placement.** You can't stack leads or over-stretch parts any more. Old files still load, flagged.
 - **Tool selection makes AI behaviour depend on which tools were sent.** The server logs the tool list per request. Keyword misses cost one `use_parts` round, a second or two.
 - **Generated prompt wording shifts AI behaviour.** Re-run QA AI-06 to AI-08 and the demo path after D.
@@ -54,8 +56,8 @@ Phase 2 adds about 15 parts, mostly written by Manav and by Claude Code agents f
 | **G** | 63-column board. The prompt's "Columns 1–N" is generated. | none | everything |
 | **A** | Registry core (`Parts.define`, validation, browser + Node loading, `checkValue`, `nearestKit`, `checkPlacement` span rules, `legsOf`, `App.holeMap`). Simulator blocks `R`, `V`, `SW`. **The resistor moved over end to end.** Tests 1–4, 6 and 7, plus the browser loop (8). | contract | G |
 | **B** | LED: the `D` block, the generic on/off loop with anti-cycling, and the LED's `measure`/`warnings`/`report`/glow. | A | C, E, F |
-| **C** | Battery (off-board, `ref`), buzzer and button (controls + gestures). **Deletes the old per-type code paths.** | A | B, E, F |
-| **D** | AI: generated tools and prompt sections, `set_value`/`set_control`/`delete_part`/`use_parts`, `selectTools`, server checks from blocks, and `viewer.html` on the registry. | B, C | E, F |
+| **C** | Battery (off-board, `ref`, one ground per circuit), buzzer and button (controls + gestures + throttle). **Deletes the old per-type internals, but keeps `App.place*` and `chat.js` `PLACE` as wrappers over the registry.** | A | B, E, F |
+| **D** | AI: generated tools and prompt sections, `set_value`/`set_control`/`delete_part`/`use_parts`, `selectTools`, server checks from blocks, and `viewer.html` on the registry. **Deletes the `App.place*` / `PLACE` wrappers.** | B, C | E, F |
 | **E** | Footprint placement, rotation, edge and straddle rules, and the overlap check for hand and AI placement, tested with a 3-pin test-only part. | A | B, C, D, F |
 | **F** | Inspector (values, kit hint, controls, undo) and a generated sidebar (categories, search, icons). | A | B–E |
 
@@ -80,4 +82,4 @@ Phase 2 adds about 15 parts, mostly written by Manav and by Claude Code agents f
 ## Success criteria
 - Adding a Phase 2 part touches exactly one new file (plus its QA case), and the automatic tests cover it without anyone writing new test scaffolding.
 - No per-type table exists outside `parts/` once C and D land. Test: a source check finds no `'resistor'`, `'led'`, `'battery'`, `'buzzer'` or `'button'` string literals in `app.js`, `interaction.js`, `simulate.js`, `chat.js` or `server.js`.
-- The demo path and every existing browser test pass after each issue.
+- The demo path (**including the AI build**) and every existing browser test pass after each issue. No issue may leave the AI unable to build.

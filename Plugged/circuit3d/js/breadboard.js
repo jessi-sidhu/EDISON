@@ -70,7 +70,7 @@
     if (!ref || !ALL_ROWS.includes(ref.row) || !(ref.col >= 0 && ref.col < COLS)) {
       throw new Error('formatHole: not a board hole: ' + JSON.stringify(ref));
     }
-    return ref.row + (RAIL_ROWS.includes(ref.row) ? '_' : '') + (ref.col + 1);
+    return App.holeName(ref);   // ids.js, loaded after this file
   }
 
   function parseHole(str) {

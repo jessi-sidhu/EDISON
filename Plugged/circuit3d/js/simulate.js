@@ -459,11 +459,10 @@
   //  analysis messages. Volts to 2 decimals, currents to 0.1 mA, so the
   //  prompt stays short. labelOf(components, comp) names a part ("R1").
 
-  // Hole address as App.formatHole writes it: "a11", "tp_2" (1-based column).
-  function holeName(ref) {
-    const rail = !TOP_BODY.has(ref.row) && !BOT_BODY.has(ref.row);
-    return ref.row + (rail ? '_' : '') + (ref.col + 1);
-  }
+  // Hole address as App.formatHole writes it: "a11", "tp_2", from ids.js.
+  // The page loads ids.js after this file, so App is read at call time.
+  const Ids = typeof module === 'object' && module.exports ? require('./ids.js') : null;
+  const holeName = ref => (Ids || App).holeName(ref);
 
   const volts = v => (Math.abs(v) < 0.005 ? 0 : v).toFixed(2) + ' V';
   const milliamps = a => (Math.abs(a) < 0.00005 ? 0 : a * 1000).toFixed(1) + ' mA';
@@ -495,20 +494,22 @@
       components.forEach((c, i) => {
         const label = labelOf(components, c);
         const p = propsOf(c), I = r.currents[i];
+        // A short solves to tens of amps, not a reading worth showing.
+        const mA = a => (r.shorted ? '' : ', ' + milliamps(a));
         if (c.type === 'battery') {
-          out.push(`- ${label}: ${volts(p.voltage || 0)} battery, supplying ${milliamps(Math.abs(I || 0))}`);
+          out.push(`- ${label}: ${volts(p.voltage || 0)} battery` + (r.shorted ? '' : `, supplying ${milliamps(Math.abs(I || 0))}`));
         } else if (c.type === 'resistor') {
-          out.push(`- ${label}: ${p.resistance} ohm resistor, ${milliamps(Math.abs(I))}`);
+          out.push(`- ${label}: ${p.resistance} ohm resistor${mA(Math.abs(I))}`);
         } else if (c.type === 'led') {
           const state = r.ledsOn.includes(c) ? 'ON (lit)' : 'OFF (dark)';
-          out.push(`- ${label}: LED ${state}, ${milliamps(Math.max(0, -I))}`);
+          out.push(`- ${label}: LED ${state}${mA(Math.max(0, -I))}`);
         } else if (c.type === 'buzzer') {
           const state = r.buzzersOn.includes(c) ? 'ON (sounding)' : 'OFF (silent)';
-          out.push(`- ${label}: buzzer ${state}, ${milliamps(Math.abs(I))}`);
+          out.push(`- ${label}: buzzer ${state}${mA(Math.abs(I))}`);
         } else if (c.type === 'button') {
-          out.push(`- ${label}: button ${c.pressed ? 'pressed (closed)' : 'released (open), 0.0 mA'}`);
+          out.push(`- ${label}: button ${c.pressed ? 'pressed (closed)' : 'released (open)' + mA(0)}`);
         } else {
-          out.push(`- ${label}: ${c.type}` + (typeof I === 'number' ? `, ${milliamps(Math.abs(I))}` : ''));
+          out.push(`- ${label}: ${c.type}` + (typeof I === 'number' ? mA(Math.abs(I)) : ''));
         }
         c.pins.forEach((_, k) => {
           const v = pinVoltage(i, k);

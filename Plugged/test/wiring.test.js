@@ -141,3 +141,44 @@ test('part spans are one App.SPANS table in app.js; the old names read from it',
 test('App.exportState stays: e2e tests and debugging use it (issue #6, step 3 dropped)', () => {
   assert.match(read('circuit3d/js/app.js'), /App\.exportState\s*=\s*function/);
 });
+
+// ── Issue #20 follow-ups ─────────────────────────────────────────
+
+// Loads playwright.config.js fresh with E2E_PORT set (or unset).
+function e2eConfig(port) {
+  const file = path.join(__dirname, '..', 'playwright.config.js');
+  const saved = process.env.E2E_PORT;
+  if (port == null) delete process.env.E2E_PORT; else process.env.E2E_PORT = String(port);
+  try {
+    delete require.cache[require.resolve(file)];
+    return require(file);
+  } finally {
+    if (saved == null) delete process.env.E2E_PORT; else process.env.E2E_PORT = saved;
+    delete require.cache[require.resolve(file)];
+  }
+}
+
+test('browser tests use E2E_PORT when set, so two worktrees can run them side by side', () => {
+  const cfg = e2eConfig(5091);
+  assert.equal(cfg.use.baseURL, 'http://localhost:5091');
+  assert.equal(cfg.webServer.url, 'http://localhost:5091/api/health');
+  assert.equal(cfg.webServer.env.PORT, '5091');
+});
+
+test('browser tests still default to port 5090, written once', () => {
+  const cfg = e2eConfig(null);
+  assert.equal(cfg.use.baseURL, 'http://localhost:5090');
+  assert.equal(cfg.webServer.url, 'http://localhost:5090/api/health');
+  assert.equal(cfg.webServer.env.PORT, '5090');
+  const src = read('playwright.config.js');
+  assert.match(src, /const PORT = Number\(process\.env\.E2E_PORT\) \|\| 5090;/);
+  assert.equal((src.match(/5090/g) || []).length - (src.match(/port 5090/gi) || []).length, 1,
+    'the 5090 default should appear once in code (comments aside)');
+});
+
+test('the code guide names parts by label (BAT1), not battery_0', () => {
+  const guide = read('AGENTS.md');
+  assert.doesNotMatch(guide, /battery_0/, 'AGENTS.md still says battery_0');
+  assert.match(guide, /\bBAT1\b/, 'AGENTS.md should name the battery BAT1');
+  assert.match(guide, /\bBAT1\.0\b/, 'AGENTS.md should give battery pins as BAT1.0 / BAT1.1');
+});

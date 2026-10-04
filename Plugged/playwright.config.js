@@ -4,7 +4,7 @@
 // Google sign-in stays a manual QA case.
 const { defineConfig, devices } = require('@playwright/test');
 
-const PORT = 5090;
+const PORT = Number(process.env.E2E_PORT) || 5090;   // E2E_PORT=5091 for a second worktree
 
 module.exports = defineConfig({
   testDir: 'e2e',

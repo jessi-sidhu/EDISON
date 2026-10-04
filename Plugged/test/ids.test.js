@@ -122,3 +122,68 @@ test('componentId falls back to type_n for a part with no label', () => {
   assert.equal(Ids.componentId(parts, parts[0]), 'BAT1');
   assert.equal(Ids.componentId(parts, parts[2]), 'resistor_1');
 });
+
+// ── One hole-name formula, issue #20 ──────────────────────────────────────
+// holeName({ col, row }) is the pure address formula: row, "_" for a rail
+// row (tp/tn/bn/bp), then the 1-based column. It is not called formatHole:
+// ids.js copies its exports onto window.App after breadboard.js loads, so a
+// formatHole export would replace the validating App.formatHole.
+
+const fs   = require('node:fs');
+const path = require('node:path');
+const JS   = path.join(__dirname, '..', 'circuit3d', 'js');
+const readJs = f => fs.readFileSync(path.join(JS, f), 'utf8');
+
+// Fails on an assertion (not a TypeError) while holeName is missing.
+function holeName(ref) {
+  assert.equal(typeof Ids.holeName, 'function', 'ids.js should export holeName({ col, row })');
+  return Ids.holeName(ref);
+}
+
+test('holeName writes a body hole as <row><col + 1>: col 13 row e is e14', () => {
+  assert.equal(holeName({ col: 13, row: 'e' }), 'e14');
+  assert.equal(holeName({ col: 0, row: 'a' }), 'a1');
+  assert.equal(holeName({ col: 29, row: 'j' }), 'j30');
+});
+
+test('holeName puts an underscore after a rail row: tp_14, bn_14', () => {
+  assert.equal(holeName({ col: 13, row: 'tp' }), 'tp_14');
+  assert.equal(holeName({ col: 13, row: 'bn' }), 'bn_14');
+  assert.equal(holeName({ col: 0, row: 'tn' }), 'tn_1');
+  assert.equal(holeName({ col: 0, row: 'bp' }), 'bp_1');
+});
+
+test('ids.js does not export formatHole, so it cannot overwrite the validating App.formatHole', () => {
+  assert.ok(!('formatHole' in Ids), 'ids.js must not export formatHole (it is Object.assign-ed onto App after breadboard.js)');
+});
+
+test('the (col + 1) hole formula is written once across the editor, in ids.js', () => {
+  // "(col + 1)" or "(ref.col + 1)" in parentheses: the hole-address formula.
+  // interaction.js's "Col ${h.col + 1}" hover label is display text, not a hole name.
+  const re = /\(\s*(?:\w+\.)?col\s*\+\s*1\s*\)/g;
+  const hits = fs.readdirSync(JS).filter(f => f.endsWith('.js'))
+    .map(f => ({ f, n: (readJs(f).match(re) || []).length }))
+    .filter(x => x.n > 0);
+  const where = hits.map(x => `${x.f} x${x.n}`).join(', ') || 'nowhere';
+  assert.equal(hits.reduce((s, x) => s + x.n, 0), 1, '(col + 1) hole formula found in: ' + where);
+  assert.equal(hits[0].f, 'ids.js', '(col + 1) hole formula found in: ' + where);
+});
+
+test('simulate.js has no holeName of its own and reaches ids.js for it', () => {
+  const src = readJs('simulate.js');
+  assert.doesNotMatch(src, /function\s+holeName\b/, 'simulate.js still defines its own holeName');
+  assert.doesNotMatch(src, /col\s*\+\s*1\b/, 'simulate.js still carries its own (col + 1) formula');
+  assert.match(src, /require\(\s*['"]\.\/ids\.js['"]\s*\)/, 'simulate.js should require ./ids.js under Node');
+  assert.match(src, /\bholeName\(/, 'simulate.js should still call holeName');
+});
+
+test('breadboard.js formatHole keeps its board check and returns App.holeName(ref)', () => {
+  const src = readJs('breadboard.js');
+  const fn = /function formatHole\s*\([^)]*\)\s*\{[\s\S]*?\n {2}\}/.exec(src);
+  assert.ok(fn, 'function formatHole not found in breadboard.js');
+  assert.match(fn[0], /throw new Error\(/, 'formatHole must still throw for a hole off the board');
+  assert.match(fn[0], /ALL_ROWS\.includes\(ref\.row\)/, 'formatHole must still check the row');
+  assert.match(fn[0], /ref\.col\s*<\s*COLS/, 'formatHole must still check the column');
+  assert.match(fn[0], /App\.holeName\(\s*ref\s*\)/, 'formatHole should return App.holeName(ref), read at call time');
+  assert.doesNotMatch(fn[0], /col\s*\+\s*1/, 'formatHole should not carry its own copy of the formula');
+});

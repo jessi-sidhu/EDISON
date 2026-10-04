@@ -634,3 +634,63 @@ test('summary is pure: same input, same lines, and the parts are not changed (#5
   assert.deepEqual(second, first);
   assert.equal(JSON.stringify(components.map(c => ({ ...c, pins: c.pins.length }))), before);
 });
+
+// ── No absurd currents when shorted, issue #20 ───────────────────
+//  A short solves to tens of amps (70000.0 mA), which is not a reading the
+//  AI should see. When shorted, the summary keeps the status, each part's
+//  state and the short-circuit message, but drops every per-part current.
+//  Pin voltages may stay.
+
+// Every "<n> mA" reading in the summary, as numbers.
+const readingsMA = lines => [...lines.join('\n').matchAll(/(-?\d+(?:\.\d+)?) mA\b/g)].map(m => +m[1]);
+function assertNoAbsurdCurrent(lines) {
+  readingsMA(lines).forEach(n =>
+    assert.ok(Math.abs(n) <= 1000, `a ${n} mA reading is not a real current; drop currents when shorted${show(lines)}`));
+}
+
+// The real board's battery, wired to the rails at column 2 (tp_2 / tn_2).
+function wiredBattery() {
+  const bat = offBoardBattery('BAT1');
+  return { bat, wires: [batWire(bat, 0, h(1, 'tp')), batWire(bat, 1, h(1, 'tn'))] };
+}
+
+test('shorted by a wire straight across the battery: "short circuit", no reading above 1000 mA (#20)', () => {
+  const { bat, wires } = wiredBattery();
+  const lines = summary([bat], wires.concat([wire(h(4, 'tp'), h(4, 'tn'))]));
+
+  assertLine(lines, /short circuit/i, 'short-circuit status or message');
+  assertNoAbsurdCurrent(lines);
+});
+
+test('an LED straight across the battery: "short circuit", no reading above 1000 mA (#20)', () => {
+  const { bat, wires } = wiredBattery();
+  const led = comp('led', [h(3, 'a'), h(1, 'a')], { label: 'LED1' }); // cathode a4, anode a2
+  const lines = summary([bat, led], wires.concat([wire(h(2, 'tp'), h(1, 'a')), wire(h(3, 'a'), h(2, 'tn'))]));
+
+  assertLine(lines, /^Status: short circuit\b/i, 'status line');
+  assertLine(lines, /Short circuit\. The LED sits straight across the battery/, 'short-circuit message');
+  assertNoAbsurdCurrent(lines);
+});
+
+test('when shorted, each part still has its state line, just without a current (#20)', () => {
+  const { bat, wires } = wiredBattery();
+  const led = comp('led', [h(3, 'a'), h(1, 'a')], { label: 'LED1' });
+  const lines = summary([bat, led], wires.concat([wire(h(2, 'tp'), h(1, 'a')), wire(h(3, 'a'), h(2, 'tn'))]));
+
+  assertLine(lines, /\bLED1: LED (ON|OFF)\b/, 'LED1 state line');
+  assertLine(lines, /\bBAT1: 9\.00 V battery\b/, 'BAT1 state line');
+  for (const label of ['LED1', 'BAT1']) {
+    const state = lines.filter(l => new RegExp(`\\b${label}:`).test(l));
+    state.forEach(l => assert.doesNotMatch(l, /\d mA\b/, `${label}'s state line should carry no current when shorted${show(lines)}`));
+  }
+  assertLine(lines, /LED1 pin 1 \(a2\b[^)]*\): \d+\.\d\d V/, 'pin voltages may stay');
+});
+
+test('not shorted, the series summary still gives each part its current (#20 guard)', () => {
+  const { components, wires } = labelledSeries();
+  const lines = summary(components, wires);
+  assertLine(lines, /^Status: solved\b/, 'status line');
+  assertLine(lines, /- LED1: LED ON \(lit\), 14\.9 mA$/, 'LED1 current');
+  assertLine(lines, /- R1: 470 ohm resistor, 14\.9 mA$/, 'R1 current');
+  assertLine(lines, /- BAT1: 9\.00 V battery, supplying 14\.9 mA$/, 'BAT1 current');
+});

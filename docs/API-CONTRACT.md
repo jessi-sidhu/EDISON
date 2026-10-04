@@ -36,12 +36,12 @@ Passed to `Parts.define()`. **Required** fields are marked ●. Anything not lis
 | ● `category` | enum | `Passives`, `Sources`, `Semiconductors`, `I/O` or `Instruments`. |
 | ● `icon` | string | Inline `<svg>` markup, ≤ 2 KB. |
 | ● `prefix` | string | Label prefix, `/^[A-Z]{1,3}$/`, unique (`R` → R1, R2…). |
-| ● `pins` | string[] | 2–16 names, unique, `/^[A-Za-z0-9]+$/`, e.g. `['cathode','anode']`. **The order is saved to disk: never reorder, only append.** `LED1.anode` and `LED1.1` both refer to a pin. |
-| `ref` | pin name | Only for sources: this pin is 0 V (ground). The first part by label that has `ref` wins. |
+| ● `pins` | string[] | 2–16 names, unique, `/^[A-Za-z0-9]+$/`, e.g. `['cathode','anode']`. **Files save the pin *name* with every hole and wire end**, so reordering is safe; **renaming a pin is not** (treat names like `type`). Only files saved before names were added rely on order. `LED1.anode` and `LED1.1` both refer to a pin. |
+| `ref` | pin name | Only for sources: this pin can be ground (0 V). **Exactly one ground per connected circuit:** the `ref` pin of the *earliest-placed* source in that circuit (lowest index in `state.components`). Two separate circuits each get their own ground. A circuit with no `ref` pin is `'no-source'` and its voltages are `null`. |
 | ● `place` | `Placement` | See below. |
 | `values` | `{ [key]: ValueSpec }` | Editable settings, saved. |
 | `controls` | `{ [key]: ControlSpec }` | Live settings (knob, switch). |
-| `gestures` | `{ click?: key, scroll?: key }` | Map 3D gestures onto a control key. |
+| `gestures` | `{ click?: key, scroll?: key }` | Map 3D gestures onto a control key. The core (not the part) throttles: while a gesture continues, re-simulate **at most every 100 ms**, plus one final run when it stops. **One gesture = one undo step**; a scroll ends after 300 ms without a tick. |
 | ● `elements` | `(values, controls) → Element[]` | The simulator's building blocks. Pure function. |
 | `measure` | `(r: PartResult) → object` | Flat, JSON-safe outputs, e.g. `{ on: true, current: 14.9 }`. Drives visuals and results. |
 | `warnings` | `(r, m) → string[]` | Advice, e.g. `"LED1 is backwards"`. Each ≤ 120 chars. |
@@ -55,9 +55,12 @@ Exactly one of these three kinds:
 
 ```js
 { kind: 'span', span: { min, max, default }, rotations: ['h'] | ['h','v'] }
-//   2-lead parts. span counts holes along the placement direction (a3→a7 = 4).
-//   min ≤ default ≤ max. A fixed size is min = max = default (the button is {3,3,3}).
+//   2-lead parts. 'h': both legs on the SAME ROW; span = columns apart (a3→a7 = 4).
+//   min ≤ default ≤ max. A fixed size is min = max = default.
 //   The ghost and hand placement use `default`; the AI may use anything in range.
+//   'v' is allowed ONLY to cross the centre gap: same column, one leg in rows a–e and one in f–j.
+//   Vertical inside one half is refused (both legs would be the same node). Span limits apply to 'h' only.
+//   Phase 1 spans: resistor {3,5,4} · LED {1,3,2} · buzzer {2,2,2} · button {3,3,3} (fixed).
 
 { kind: 'footprint', legs: [[dCol, dRow], ...], straddle?: boolean, rotations: [0, 180] | [0, 90, 180, 270] }
 //   3+ lead parts. One offset per pin, in pin order, from the anchor (pin 0).
@@ -152,10 +155,13 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
 // runtime (state.components[i])
 { type, label, values, controls, holeRefs: [{col,row}|null per pin], position?: {x,z}, group, pinMeshes, ... }
 
-// saved (file, autosave, undo): unchanged shape, plus `controls` (saved ones only)
-{ type, label, values, controls?, holeRefs, position }
-// holeRefs has ONE entry per pin, in pin order (2-lead parts: unchanged from today).
-// Off-board parts: holeRefs null, position set. Unknown types are kept as-is (#3).
+// saved (file, autosave, undo): today's shape, plus `controls` (saved ones only) and pin names
+{ type, label, values, controls?, holeRefs: [{ pin: 'cathode', col, row }, ...], position }
+// ONE holeRef per pin, each carrying its pin name. Off-board parts: holeRefs null, position set.
+// Saved wires name the pin at each end:  { ..., startPin: 'anode', endPin: '0' }  alongside today's
+//   startPinIdx/endPinIdx (kept for older builds). Loading matches by NAME; only when a name is
+//   missing (files from before this change) does it fall back to the index.
+// Unknown types are kept as-is (#3).
 ```
 
 ### Legs and the hole map
@@ -200,18 +206,27 @@ App.holeMap() → Map<'b6', { label: 'LED1', pin: 'anode' } | { wire: 3, end: 'f
 
 ### `Parts.checkPlacement(type, legs, holeMap, board)`
 - **Called by:** hand placement (`interaction.js`), the AI apply path (`chat.js`), the server (`finishAIReply`, inside the AI's tool loop), and file loading, where it only flags, never blocks.
+- **Flagged parts (loaded from an old file, breaking a rule): warn only.**
+  - They load and simulate as saved, and show one warning line each in the results and the AI summary (`"R1: leads 30 columns apart; allowed 3–5"`).
+  - They are **never auto-fixed and never block** editing anything else.
+  - Moving a flagged part is a *new* placement, so it must land somewhere valid, which clears the flag.
+  - Saving keeps it as-is.
 - **Output:** `{ ok: true }` or `{ ok: false, reason }`
 - **Errors:** `reason` always names the rule and the allowed range:
-  - Span: `"R1 not placed: a resistor's leads must be 3–8 columns apart; a3 to a33 is 30."`
+  - Span: `"R1 not placed: a resistor's leads must be 3–5 columns apart; a3 to a33 is 30."`
   - Overlap: `"LED1 not placed: b6 already holds R1's pin 2. A hole holds one lead; use another hole in column 6."`
   - Edge: `"U1 not placed: an 8-pin chip at column 62 would run past column 63."`
   - Straddle: `"U1 not placed: a chip must sit across the centre gap (rows e and f)."`
+  - Vertical: `"R1 not placed: a part placed vertically must cross the centre gap (one leg in a–e, one in f–j)."`
 
 ### `Sim.analyze(components, wires)` (changed)
 - **Output:** as today (`status, lines, nodeVoltages, currents, shorted, voltageAt`), plus:
   - `status` can also be `'unsettled'` or `'no-source'`
   - `parts: { [label]: { r: PartResult, m: measured, warnings: string[] } }`
 - `ledsOn` and `buzzersOn` stay until issue C removes the last caller.
+
+### Legacy entry points (kept until issue D)
+`App.placeResistor/placeLED/placeBuzzer/placeButton/placeBattery` and `chat.js`'s `PLACE` map stay working through issues A–C as **thin wrappers over the registry**. They're how today's hand-written AI tools reach the app. Issue D replaces them with generated tools and deletes the wrappers. **Every foundation issue must keep the AI demo path working** ("Build a single LED circuit…" → preview → Accept → lit).
 
 ### AI tools (generated by `server.js` from the registry)
 - **`span` parts:** `place_<type> { holeA, holeB, ...values }`. Existing names are unchanged.
@@ -229,7 +244,7 @@ App.holeMap() → Map<'b6', { label: 'LED1', pin: 'anode' } | { wire: 3, end: 'f
   4. if nothing else matched, the everyday set (resistor, LED, button, buzzer)
 
   It sends **at most 12 tools**. The prompt always carries a one-line catalogue of every part.
-- **Generated prompt sections:** label prefixes, sizing lines built from `span`/`legs` (e.g. `"resistor: 3–8 columns apart (4 is typical)"`), pin names, and the guides of the tools being sent. Recipes stay hand-written.
+- **Generated prompt sections:** label prefixes, sizing lines built from `span`/`legs` (e.g. `"resistor: 3–5 columns apart on one row (4 is typical)"`), pin names, and the guides of the tools being sent. Recipes stay hand-written.
 - **The server's circuit checks** read `elements`: `R` and `SW` conduct, and `D` conducts one way. Placement goes through `Parts.checkPlacement`.
 
 ## Testing contract (a part is done when all of these pass)
@@ -238,7 +253,7 @@ App.holeMap() → Map<'b6', { label: 'LED1', pin: 'anode' } | { wire: 3, end: 'f
 3. **Round trip**, automatic for every part: place → save → load gives back the same type, label, values, saved controls and legs.
 4. **AI:** its generated tool is valid, and `selectTools` returns it for its keywords.
 5. **Recipe**, if present: simulates to its `expect`, uses no hole twice, and passes `findCircuitProblems`.
-6. **Placement**, for every 2-lead part: default span OK, `max + 1` and `min − 1` refused with the range in the message. For the resistor specifically: **a3→a33 is refused, and the message contains "3–8"**. For footprint parts: an edge placement is refused.
+6. **Placement**, for every 2-lead part: default span OK, `max + 1` and `min − 1` refused with the range in the message. For the resistor specifically: **a3→a33 is refused, and the message contains "3–5"**. A vertical placement inside one half (a3→c3) is refused; e3→f3 is allowed. For footprint parts: an edge placement is refused.
 7. **Hole map:** after place, delete, undo and reload, `App.holeMap()` equals a fresh rebuild. Every part has one leg per pin.
 8. **Browser**, one Playwright spec looping over `Parts.all()`: place from the sidebar, see the ghost, simulate, no console errors. The viewer page loads a circuit that uses every part.
 9. **QA:** a `docs/QA.md` case with a real AI prompt that uses the part.

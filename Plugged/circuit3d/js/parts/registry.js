@@ -1,0 +1,586 @@
+// ─────────────────────────────────────────────────────────────
+//  parts/registry.js — the parts registry. Every part file calls
+//  Parts.define({...}); everything else reads parts from here.
+//  The rules are docs/API-CONTRACT.md → "Part file contract".
+//
+//  Pure: no THREE, no document, no App.
+//
+//  EXPORTS
+//  ───────
+//  Browser: window.Parts
+//  Node:    module.exports (require('circuit3d/js/parts') gives the same object)
+// ─────────────────────────────────────────────────────────────
+
+(function (root, factory) {
+  const Parts = factory();
+  if (typeof module === 'object' && module.exports) module.exports = Parts;
+  if (root) root.Parts = Parts;
+})(typeof window !== 'undefined' ? window : null, function () {
+
+  const CATEGORIES = ['Passives', 'Sources', 'Semiconductors', 'I/O', 'Instruments'];
+  const UNITS      = ['Ω', 'V', 'A', 'F', 'H', '%', '°C', 'lux'];
+  const FIELDS     = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'ref', 'place', 'values',
+                      'controls', 'gestures', 'elements', 'measure', 'warnings', 'report', 'ai', 'view', 'examples'];
+  const REQUIRED   = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'place',
+                      'elements', 'report', 'ai', 'view', 'examples'];
+  const TYPE_RE    = /^[a-z][a-z0-9_]*$/;
+  const PREFIX_RE  = /^[A-Z]{1,3}$/;
+  const PIN_RE     = /^[A-Za-z0-9]+$/;
+  const ICON_BYTES = 2048;
+  const BODY_ROWS  = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
+  const RAIL_ROWS  = ['tp', 'tn', 'bp', 'bn'];
+
+  // Element kinds: which fields name pins, which must be numbers.
+  const ELEMENTS = {
+    R:  { pins: ['pins'],        nums: ['ohms'] },
+    V:  { pins: ['pins'],        nums: ['volts'] },
+    I:  { pins: ['pins'],        nums: ['amps'] },
+    SW: { pins: ['pins'],        nums: [] },
+    D:  { pins: ['pins'],        nums: ['vf', 'ron'] },
+    E:  { pins: ['out', 'ctrl'], nums: ['gain'] },
+    G:  { pins: ['out', 'ctrl'], nums: ['gain'] },
+  };
+  const RESERVED = ['C', 'L'];
+
+  const SERIES = {
+    E12: [1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2],
+    E24: [1.0, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0,
+          3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1],
+  };
+
+  class PartDefinitionError extends Error {
+    constructor(message, problems) {
+      super(message);
+      this.name = 'PartDefinitionError';
+      this.problems = problems || [];
+    }
+  }
+
+  const registry = new Map();   // type → frozen definition
+
+  // ── Small helpers ────────────────────────────────────────────────────────
+
+  const isObj   = o => o !== null && typeof o === 'object' && !Array.isArray(o);
+  const list    = a => (Array.isArray(a) ? a.join(', ') : String(a));
+  const sameSet = (a, b) => Array.isArray(a) && a.length === b.length && b.every(x => a.includes(x));
+  const toolOf  = def => (def.ai && def.ai.tool) || 'place_' + def.type;
+
+  function utf8Bytes(s) {
+    let n = 0;
+    for (const ch of s) {
+      const cp = ch.codePointAt(0);
+      n += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+    }
+    return n;
+  }
+
+  function unknownFields(obj, allowed, at, bad) {
+    for (const k of Object.keys(obj)) if (!allowed.includes(k)) bad(`unknown field "${at ? at + '.' : ''}${k}"`);
+  }
+
+  function text(obj, key, max, at, bad, required) {
+    const s = obj[key];
+    if (s === undefined) { if (required) bad(`${at} is required`); return; }
+    if (typeof s !== 'string' || !s) bad(`${at} must be a non-empty string`);
+    else if (s.length > max) bad(`${at} must be at most ${max} characters; got ${s.length}`);
+  }
+
+  function deepFreeze(o) {
+    if (o === null || typeof o !== 'object' || Object.isFrozen(o)) return o;
+    Object.freeze(o);
+    for (const k of Object.getOwnPropertyNames(o)) deepFreeze(o[k]);
+    return o;
+  }
+
+  // A number as text, with a real minus sign: -5 → "−5".
+  function plain(n) {
+    return (n < 0 ? '−' : '') + String(Number(Math.abs(n).toPrecision(12)));
+  }
+
+  // A value with its unit, SI-prefixed for Ω V A F H: 1200 Ω → "1.2 kΩ".
+  const SI = [[1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p']];
+  function withUnit(n, unit) {
+    const sep = unit === '%' ? '' : ' ';
+    if (!['Ω', 'V', 'A', 'F', 'H'].includes(unit) || n === 0) return plain(n) + sep + unit;
+    const a = Math.abs(n);
+    const [f, p] = SI.find(([f]) => a >= f) || SI[SI.length - 1];
+    return (n < 0 ? '−' : '') + String(Number((a / f).toPrecision(3))) + ' ' + p + unit;
+  }
+
+  // Defaults as a part's elements() receives them. A choice's overrides
+  // (e.g. { vf: 2.0 }) are merged in beside the choice's name.
+  function defaultValues(values) {
+    const out = {};
+    for (const [key, spec] of Object.entries(isObj(values) ? values : {})) {
+      if (!isObj(spec)) continue;
+      out[key] = spec.default;
+      if (isObj(spec.choices) && isObj(spec.choices[spec.default])) Object.assign(out, spec.choices[spec.default]);
+    }
+    return out;
+  }
+
+  function defaultControls(controls) {
+    const out = {};
+    for (const [key, c] of Object.entries(isObj(controls) ? controls : {})) if (isObj(c)) out[key] = c.default;
+    return out;
+  }
+
+  // ── define() rules ───────────────────────────────────────────────────────
+
+  function checkPlace(place, pins, bad) {
+    if (!isObj(place)) return bad('place must be a Placement object');
+    const allowed = { span: ['kind', 'span', 'rotations'], footprint: ['kind', 'legs', 'straddle', 'rotations'],
+                      offboard: ['kind'] }[place.kind];
+    if (!allowed) return bad(`place.kind "${place.kind}" must be span, footprint or offboard`);
+    unknownFields(place, allowed, 'place', bad);
+    const rot = place.rotations;
+
+    if (place.kind === 'span') {
+      if (pins && pins.length !== 2) bad(`a span part has exactly 2 pins; got ${pins.length}`);
+      const s = place.span;
+      if (!isObj(s) || ![s.min, s.max, s.default].every(n => Number.isInteger(n) && n >= 1)) {
+        bad('place.span must be { min, max, default }, whole numbers of columns, at least 1');
+      } else {
+        unknownFields(s, ['min', 'max', 'default'], 'place.span', bad);
+        if (s.min > s.max) bad(`place.span min ${s.min} is above max ${s.max}`);
+        else if (s.default < s.min || s.default > s.max) bad(`place.span default ${s.default} must be within ${s.min}–${s.max}`);
+      }
+      if (!sameSet(rot, ['h']) && !sameSet(rot, ['h', 'v'])) bad(`place.rotations must be ['h'] or ['h', 'v']; got ${list(rot)}`);
+    }
+
+    if (place.kind === 'footprint') {
+      if (pins && pins.length < 3) bad(`a footprint part has 3 or more pins; got ${pins.length}`);
+      const legs = place.legs;
+      if (!Array.isArray(legs) || !legs.every(l => Array.isArray(l) && l.length === 2 && l.every(Number.isInteger))) {
+        bad('place.legs must be a list of [dCol, dRow] whole-number offsets');
+      } else {
+        if (pins && legs.length !== pins.length) bad(`${pins.length} pins but the footprint has ${legs.length} legs; it needs one leg per pin`);
+        if (legs.length && (legs[0][0] !== 0 || legs[0][1] !== 0)) bad('place.legs[0] must be [0, 0]: pin 0 is the anchor');
+        if (new Set(legs.map(String)).size !== legs.length) bad('place.legs has two legs at the same offset');
+      }
+      if (place.straddle !== undefined && typeof place.straddle !== 'boolean') bad('place.straddle must be true or false');
+      if (place.straddle) {
+        if (!sameSet(rot, [0, 180])) bad(`a straddle chip's place.rotations must be [0, 180]; got ${list(rot)}`);
+      } else if (!sameSet(rot, [0, 180]) && !sameSet(rot, [0, 90, 180, 270])) {
+        bad(`place.rotations must be [0, 180] or [0, 90, 180, 270]; got ${list(rot)}`);
+      }
+    }
+  }
+
+  function checkValues(values, bad) {
+    if (!isObj(values)) return bad('values must be an object of ValueSpecs');
+    for (const [key, spec] of Object.entries(values)) {
+      const at = 'values.' + key;
+      if (!isObj(spec)) { bad(`${at} must be a ValueSpec object`); continue; }
+      if ('choices' in spec) {
+        unknownFields(spec, ['choices', 'default'], at, bad);
+        const names = isObj(spec.choices) ? Object.keys(spec.choices) : [];
+        if (!names.length) { bad(`${at}.choices must name at least one choice`); continue; }
+        for (const c of names) if (!isObj(spec.choices[c])) bad(`${at}.choices.${c} must be an object of overrides`);
+        if (!names.includes(spec.default)) bad(`${at}.default "${spec.default}" is not one of its choices (${names.join(', ')})`);
+        continue;
+      }
+      unknownFields(spec, ['unit', 'default', 'min', 'max', 'series'], at, bad);
+      if (spec.unit === undefined) bad(`${at}.unit is required`);
+      else if (!UNITS.includes(spec.unit)) bad(`${at}.unit "${spec.unit}" must be one of ${UNITS.join(', ')}`);
+      if (spec.series !== undefined && !SERIES[spec.series]) bad(`${at}.series "${spec.series}" must be E12 or E24`);
+      const missing = ['default', 'min', 'max'].filter(f => !Number.isFinite(spec[f]));
+      for (const f of missing) bad(`${at}.${f} is required (a number)`);
+      if (missing.length) continue;
+      if (spec.min > spec.max) bad(`${at}.min ${spec.min} is above max ${spec.max}`);
+      else if (spec.default < spec.min || spec.default > spec.max) {
+        bad(`${at}.default ${spec.default} must be within min–max (${spec.min}–${spec.max})`);
+      }
+    }
+  }
+
+  function checkControls(controls, bad) {
+    if (!isObj(controls)) return bad('controls must be an object of ControlSpecs');
+    for (const [key, c] of Object.entries(controls)) {
+      const at = 'controls.' + key;
+      if (!isObj(c)) { bad(`${at} must be a ControlSpec object`); continue; }
+      if (c.type === 'toggle' || c.type === 'momentary') {
+        unknownFields(c, ['type', 'default', 'saved'], at, bad);
+        if (typeof c.default !== 'boolean' || typeof c.saved !== 'boolean') bad(`${at} needs default and saved, true or false`);
+        else if (c.type === 'momentary' && (c.default || c.saved)) bad(`${at}: a momentary control must have default false and saved false`);
+      } else if (c.type === 'slider') {
+        unknownFields(c, ['type', 'default', 'min', 'max', 'step', 'unit', 'saved'], at, bad);
+        const missing = ['default', 'min', 'max', 'step'].filter(f => !Number.isFinite(c[f]));
+        for (const f of missing) bad(`${at}.${f} is required (a number)`);
+        if (typeof c.saved !== 'boolean') bad(`${at}.saved must be true or false`);
+        if (c.unit !== undefined && !UNITS.includes(c.unit)) bad(`${at}.unit "${c.unit}" must be one of ${UNITS.join(', ')}`);
+        if (missing.length) continue;
+        if (c.step <= 0) bad(`${at}.step must be above 0`);
+        if (c.min > c.max) bad(`${at}.min ${c.min} is above max ${c.max}`);
+        else if (c.default < c.min || c.default > c.max) bad(`${at}.default ${c.default} must be within ${c.min}–${c.max}`);
+      } else {
+        bad(`${at}.type "${c.type}" must be toggle, momentary or slider`);
+      }
+    }
+  }
+
+  function checkGestures(gestures, controls, bad) {
+    if (!isObj(gestures)) return bad('gestures must be { click?, scroll? }');
+    for (const [g, key] of Object.entries(gestures)) {
+      if (g !== 'click' && g !== 'scroll') bad(`gestures.${g} is not a gesture; use click or scroll`);
+      else if (!isObj(controls) || !Object.hasOwn(controls, key)) bad(`gestures.${g} names control "${key}", which is not in controls`);
+    }
+  }
+
+  function checkElement(el, i, pins, bad) {
+    const at = `elements[${i}]`;
+    if (!isObj(el)) return bad(`${at} must be an Element object`);
+    if (RESERVED.includes(el.kind)) return bad(`${at}: element kind ${el.kind} is reserved (not supported until Phase 5–6)`);
+    const spec = ELEMENTS[el.kind];
+    if (!spec) return bad(`${at}.kind "${el.kind}" is not an element kind; use ${Object.keys(ELEMENTS).join(', ')}`);
+    for (const f of spec.pins) {
+      const p = el[f];
+      if (!Array.isArray(p) || p.length !== 2) { bad(`${at} (${el.kind}) ${f} must name 2 pins`); continue; }
+      for (const n of p) {
+        const ok = typeof n === 'string' && ((pins || []).includes(n) || /^#[A-Za-z0-9_]+$/.test(n));
+        if (!ok) bad(`${at} pin "${n}" is not one of the part's pins or an internal "#name"`);
+      }
+    }
+    for (const f of spec.nums) if (!Number.isFinite(el[f])) bad(`${at} (${el.kind}) ${f} must be a number`);
+    if (el.kind === 'R' && Number.isFinite(el.ohms) && el.ohms <= 0) bad(`${at} (R) ohms must be above 0; got ${el.ohms}`);
+    if (el.kind === 'SW' && typeof el.closed !== 'boolean') bad(`${at} (SW) closed must be true or false`);
+    if (el.kind === 'D' && el.vz !== undefined && !Number.isFinite(el.vz)) bad(`${at} (D) vz must be a number`);
+    if (el.kind === 'E' && el.clamp !== undefined) {
+      const c = el.clamp;
+      if (!Array.isArray(c) || c.length !== 2 || !c.every(Number.isFinite) || c[0] >= c[1]) bad(`${at} (E) clamp must be [lo, hi], lo below hi`);
+    }
+  }
+
+  function checkExample(ex, at, bad) {
+    if (!isObj(ex)) return bad(`${at} must be an Example object`);
+    unknownFields(ex, ['name', 'parts', 'wires', 'expect'], at, bad);
+    if (typeof ex.name !== 'string' || !ex.name) bad(`${at}.name is required`);
+    if (!Array.isArray(ex.parts) || !ex.parts.length) bad(`${at}.parts must list at least one part`);
+    if (!Array.isArray(ex.wires)) bad(`${at}.wires must be a list`);
+    if (!isObj(ex.expect)) bad(`${at}.expect must be an object`);
+  }
+
+  function checkAi(ai, bad) {
+    if (!isObj(ai)) return bad('ai must be an AiSpec object');
+    unknownFields(ai, ['tool', 'about', 'keywords', 'guide', 'recipe'], 'ai', bad);
+    if (ai.tool !== undefined && (typeof ai.tool !== 'string' || !TYPE_RE.test(ai.tool))) {
+      bad(`ai.tool "${ai.tool}" must be lower case letters, digits and _`);
+    }
+    text(ai, 'about', 200, 'ai.about', bad, true);
+    text(ai, 'guide', 400, 'ai.guide', bad, false);
+    const k = ai.keywords;
+    if (k === undefined) bad('ai.keywords is required');
+    else if (!Array.isArray(k)) bad('ai.keywords must be a list of words');
+    else {
+      if (k.length > 8) bad(`ai.keywords has ${k.length}; at most 8 are allowed`);
+      for (const w of k) if (typeof w !== 'string' || !w || w !== w.toLowerCase()) bad(`ai.keywords "${w}" must be lower case`);
+    }
+    if (ai.recipe !== undefined) checkExample(ai.recipe, 'ai.recipe', bad);
+  }
+
+  // Calls elements/measure/warnings/report on the defaults and a sample
+  // result, to check element kinds and pins and the text-length limits.
+  function checkBehaviour(def, pins, bad) {
+    const values = defaultValues(def.values);
+    const controls = defaultControls(def.controls);
+    let els = [];
+    if (typeof def.elements !== 'function') {
+      if (def.elements !== undefined) bad('elements must be a function (values, controls) → Element[]');
+    } else {
+      try { els = def.elements(values, controls); } catch (e) { bad(`elements() threw: ${e.message}`); els = null; }
+      if (els !== null && (!Array.isArray(els) || !els.length)) { bad('elements() must return a non-empty list of Elements'); els = null; }
+      if (els) els.forEach((el, i) => checkElement(el, i, pins, bad));
+      els = els || [];
+    }
+
+    const r = { label: (def.prefix || 'X') + '1', values, controls, pins: {}, current: {}, modes: {} };
+    for (const p of pins || []) r.pins[p] = 0;
+    els.forEach((el, i) => {
+      const id = isObj(el) && el.id !== undefined ? el.id : i;
+      r.current[id] = 0;
+      if (isObj(el) && el.kind === 'D') r.modes[id] = 'off';
+      if (isObj(el) && el.kind === 'E' && el.clamp) r.modes[id] = 'linear';
+    });
+
+    let m = {};
+    const run = (name, fn) => {
+      if (fn === undefined) return undefined;
+      if (typeof fn !== 'function') { bad(`${name} must be a function`); return undefined; }
+      try { return fn(r, m); } catch (e) { bad(`${name}() threw: ${e.message}`); return undefined; }
+    };
+    if (def.measure !== undefined) {
+      m = run('measure', def.measure);
+      if (!isObj(m)) { if (typeof def.measure === 'function') bad('measure() must return a flat object'); m = {}; }
+    }
+    const w = run('warnings', def.warnings);
+    if (def.warnings !== undefined && w !== undefined) {
+      if (!Array.isArray(w)) bad('warnings() must return a list of strings');
+      else for (const s of w) {
+        if (typeof s !== 'string') bad('warnings() must return a list of strings');
+        else if (s.length > 120) bad(`warnings() lines must be at most 120 characters; got ${s.length}`);
+      }
+    }
+    const rep = run('report', def.report);
+    if (typeof def.report === 'function' && rep !== undefined) {
+      if (typeof rep !== 'string') bad('report() must return a string');
+      else if (rep.length > 80) bad(`report() must be at most 80 characters; got ${rep.length}`);
+    }
+  }
+
+  function problemsOf(def) {
+    const problems = [];
+    const bad = msg => problems.push(msg);
+    if (!isObj(def)) return ['a part definition must be an object'];
+
+    unknownFields(def, FIELDS, '', bad);
+    for (const f of REQUIRED) if (def[f] === undefined) bad(`${f} is required`);
+
+    if (def.type !== undefined) {
+      if (typeof def.type !== 'string' || !TYPE_RE.test(def.type)) {
+        bad(`type "${def.type}" must be lower case letters, digits and _, starting with a letter`);
+      } else if (registry.has(def.type)) bad(`type "${def.type}" is already defined`);
+    }
+    text(def, 'name', 24, 'name', bad, false);
+    text(def, 'sub', 32, 'sub', bad, false);
+    if (def.category !== undefined && !CATEGORIES.includes(def.category)) {
+      bad(`category "${def.category}" must be one of ${CATEGORIES.join(', ')}`);
+    }
+    if (def.icon !== undefined) {
+      if (typeof def.icon !== 'string') bad('icon must be a string of inline <svg> markup');
+      else {
+        if (!/^\s*<svg[\s>]/i.test(def.icon)) bad('icon must be inline <svg> markup, starting with <svg');
+        const n = utf8Bytes(def.icon);
+        if (n > ICON_BYTES) bad(`icon must be at most 2 KB (${ICON_BYTES} bytes of UTF-8); got ${n} bytes`);
+      }
+    }
+    if (def.prefix !== undefined) {
+      if (typeof def.prefix !== 'string' || !PREFIX_RE.test(def.prefix)) bad(`prefix "${def.prefix}" must be 1–3 capital letters`);
+      else for (const other of registry.values()) {
+        if (other.prefix === def.prefix) bad(`prefix "${def.prefix}" is already used by ${other.type}`);
+      }
+    }
+
+    let pins = null;
+    if (def.pins !== undefined) {
+      if (!Array.isArray(def.pins)) bad('pins must be a list of pin names');
+      else {
+        pins = def.pins;
+        if (pins.length < 2 || pins.length > 16) bad(`pins must have 2–16 names; got ${pins.length}`);
+        const seen = new Set();
+        for (const p of pins) {
+          if (typeof p !== 'string' || !PIN_RE.test(p)) bad(`pin "${p}" must be letters and digits only`);
+          else if (seen.has(p)) bad(`pin "${p}" appears twice; pin names must be unique`);
+          seen.add(p);
+        }
+      }
+    }
+    if (def.ref !== undefined && !(pins || []).includes(def.ref)) {
+      bad(`ref "${def.ref}" is not one of the pins (${list(pins || [])})`);
+    }
+
+    if (def.place !== undefined) checkPlace(def.place, pins, bad);
+    if (def.values !== undefined) checkValues(def.values, bad);
+    if (def.controls !== undefined) checkControls(def.controls, bad);
+    if (def.gestures !== undefined) checkGestures(def.gestures, def.controls, bad);
+    checkBehaviour(def, pins, bad);
+
+    if (def.ai !== undefined) {
+      checkAi(def.ai, bad);
+      if (isObj(def.ai)) {
+        const tool = toolOf(def);
+        for (const other of registry.values()) {
+          if (toolOf(other) === tool && other.type !== def.type) bad(`ai.tool "${tool}" is already used by ${other.type}`);
+        }
+      }
+    }
+    if (def.view !== undefined) {
+      if (!isObj(def.view)) bad('view must be a ViewSpec object');
+      else {
+        unknownFields(def.view, ['build', 'update'], 'view', bad);
+        if (typeof def.view.build !== 'function') bad('view.build is required (a function)');
+        if (def.view.update !== undefined && typeof def.view.update !== 'function') bad('view.update must be a function');
+      }
+    }
+    if (def.examples !== undefined) {
+      if (!Array.isArray(def.examples) || !def.examples.length) bad('examples must list at least 1 known-answer circuit');
+      else def.examples.forEach((ex, i) => checkExample(ex, `examples[${i}]`, bad));
+    }
+    return problems;
+  }
+
+  // ── Interfaces ───────────────────────────────────────────────────────────
+
+  function define(def) {
+    const problems = problemsOf(def);
+    if (problems.length) {
+      const who = isObj(def) && typeof def.type === 'string' && def.type ? `"${def.type}"` : '(no type)';
+      const msg = `Part ${who} is invalid (${problems.length} problem${problems.length === 1 ? '' : 's'}):\n  - ` + problems.join('\n  - ');
+      throw new PartDefinitionError(msg, problems);
+    }
+    deepFreeze(def);
+    registry.set(def.type, def);
+    return def;
+  }
+
+  function get(type) {
+    return registry.get(type) || null;
+  }
+
+  function all() {
+    const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    return [...registry.values()].sort((a, b) =>
+      CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category) || byName(a, b));
+  }
+
+  // Tests only.
+  function reset() {
+    registry.clear();
+  }
+
+  // The nearest E-series value, across decades (by ratio). null if none.
+  function nearestKit(value, series) {
+    const base = SERIES[series];
+    if (!base || !Number.isFinite(value) || value <= 0) return null;
+    const d = Math.floor(Math.log10(value));
+    let best = null;
+    let bestErr = Infinity;
+    for (let e = d - 1; e <= d + 1; e++) {
+      for (const m of base) {
+        const v = Number((m * Math.pow(10, e)).toPrecision(12));
+        const err = Math.abs(Math.log(v / value));
+        if (err < bestErr) { best = v; bestErr = err; }
+      }
+    }
+    return best;
+  }
+
+  function checkValue(type, key, value) {
+    const def = get(type);
+    if (!def) return { ok: false, reason: `unknown part type "${type}"` };
+    const spec = def.values && Object.hasOwn(def.values, key) ? def.values[key] : null;
+    if (!spec) return { ok: false, reason: `${def.type} has no value "${key}"` };
+    if (spec.choices) {
+      const names = Object.keys(spec.choices);
+      return names.includes(value) ? { ok: true, value } : { ok: false, reason: `${key} must be one of ${names.join(', ')}` };
+    }
+    const range = `${withUnit(spec.min, spec.unit)}–${withUnit(spec.max, spec.unit)}`;
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      const got = typeof value === 'string' ? JSON.stringify(value)
+        : value !== null && typeof value === 'object' ? (Array.isArray(value) ? 'an array' : 'an object')
+        : String(value);
+      return { ok: false, reason: `${key} must be a number, ${range}; got ${got}` };
+    }
+    if (value < spec.min || value > spec.max) return { ok: false, reason: `${key} must be ${range}; got ${plain(value)}` };
+    const kit = spec.series ? nearestKit(value, spec.series) : null;
+    if (kit === null || Math.abs(kit - value) <= 1e-9 * Math.abs(value)) return { ok: true, value };
+    return { ok: true, value, hint: 'closest kit value: ' + withUnit(kit, spec.unit) };
+  }
+
+  // Today's hole address, 1-based column: body "a12", rails "tp_12".
+  function holeName(col, row) {
+    return /^[a-j]$/.test(row) ? row + (col + 1) : row + '_' + (col + 1);
+  }
+
+  // "a test span", "an LED": the part's name for placement reasons.
+  function partPhrase(def, lead) {
+    const words = String(lead ? lead + ' ' + def.name : def.name).split(' ')
+      .map(w => (/[A-Z]/.test(w) && /^[A-Z0-9-]{2,}$/.test(w) ? w : w.toLowerCase()));
+    const first = words[0];
+    const an = /^[A-Z]{2,}/.test(first) ? /^[AEFHILMNORSX]/.test(first) : /^(8|11|18)/.test(first) || /^[aeiou]/.test(first);
+    return (an ? 'an ' : 'a ') + words.join(' ');
+  }
+
+  function checkSpan(def, legs, holes, bodyRows) {
+    const [a, b] = legs;
+    const { min, max } = def.place.span;
+    const range = min === max ? String(min) : `${min}–${max}`;
+    const whose = partPhrase(def) + "'s leads";
+    if (a.row === b.row) {
+      const d = Math.abs(a.col - b.col);
+      if (d < min || d > max) return `${whose} must be ${range} columns apart; ${holes[0]} to ${holes[1]} is ${d}.`;
+      return null;
+    }
+    if (a.col === b.col) {
+      if (!def.place.rotations.includes('v')) return `${partPhrase(def)} can't be placed vertically; put both leads on one row, ${range} columns apart.`;
+      const top = bodyRows.slice(0, 5);
+      const bottom = bodyRows.slice(5);
+      const across = (top.includes(a.row) && bottom.includes(b.row)) || (top.includes(b.row) && bottom.includes(a.row));
+      if (!across) return 'a part placed vertically must cross the centre gap (one leg in a–e, one in f–j).';
+      return null;
+    }
+    return `${whose} must be on one row, ${range} columns apart, or straight across the centre gap; ${holes[0]} to ${holes[1]} is neither.`;
+  }
+
+  function checkPlacement(type, legs, holeMap, board) {
+    const def = get(type);
+    if (!def) return { ok: false, reason: `unknown part type "${type}"` };
+    if (def.place.kind === 'offboard') return { ok: true };
+    const fail = reason => ({ ok: false, reason });
+    const n = def.pins.length;
+    const cols = board && Number.isFinite(board.cols) ? board.cols : Infinity;
+    const bodyRows = (board && board.bodyRows) || BODY_ROWS;
+
+    if (!Array.isArray(legs) || legs.length !== n) return fail(`${partPhrase(def)} needs ${n} leads, one per pin.`);
+    if (legs.some(l => !l || typeof l.row !== 'string' || !Number.isInteger(l.col))) return fail(`${partPhrase(def)} needs every lead in a hole.`);
+    const holes = legs.map(l => l.hole || holeName(l.col, l.row));
+
+    const off = legs.find(l => l.col < 0 || l.col >= cols);
+    if (off) {
+      const what = def.place.kind === 'footprint' ? partPhrase(def, n + '-pin') : partPhrase(def);
+      return fail(`${what} at column ${legs[0].col + 1} would run past column ${off.col < 0 ? 1 : cols}.`);
+    }
+    const i = legs.findIndex(l => !bodyRows.includes(l.row) && !RAIL_ROWS.includes(l.row));
+    if (i >= 0) return fail(`${holes[i]} is not a hole on the board.`);
+
+    if (def.place.kind === 'span') {
+      const reason = checkSpan(def, legs, holes, bodyRows);
+      if (reason) return fail(reason);
+    }
+    if (def.place.straddle) {
+      const rows = new Set(legs.map(l => l.row));
+      const [e, f] = [bodyRows[4], bodyRows[5]];
+      if (rows.size !== 2 || !rows.has(e) || !rows.has(f)) return fail('a chip must sit across the centre gap (rows e and f).');
+    }
+
+    const seen = new Set();
+    for (let k = 0; k < legs.length; k++) {
+      const h = holes[k];
+      const where = bodyRows.includes(legs[k].row) ? `in column ${legs[k].col + 1}` : 'on that rail';
+      if (seen.has(h)) return fail(`two leads can't share ${h}. A hole holds one lead; use another hole ${where}.`);
+      seen.add(h);
+      const o = holeMap && holeMap.get(h);
+      if (!o) continue;
+      const holds = o.wire !== undefined ? 'the end of a wire' : `${o.label}'s pin ${o.pin}`;
+      return fail(`${h} already holds ${holds}. A hole holds one lead; use another hole ${where}.`);
+    }
+    return { ok: true };
+  }
+
+  // A record's legs, one per pin: [{ pin, col, row, hole }]. `col` is the
+  // record's 0-based column; `hole` is "a12" / "tp_12", or null off the board.
+  // Legs come back in the part's pins order: a holeRef matches its pin by
+  // name, or by index when it has no name. Refs naming an unknown pin go last.
+  function legsOf(comp) {
+    const def = comp && get(comp.type);
+    const pins = def ? def.pins : [];
+    const refs = comp && Array.isArray(comp.holeRefs) ? comp.holeRefs : [];
+    const named = ref => ref && ref.pin != null;
+    const leg = (pin, ref) => (ref ? { pin, col: ref.col, row: ref.row, hole: holeName(ref.col, ref.row) }
+                                   : { pin, col: null, row: null, hole: null });
+    const used = new Set();
+    const legs = pins.map((pin, i) => {
+      let k = refs.findIndex((ref, j) => !used.has(j) && named(ref) && String(ref.pin) === pin);
+      if (k < 0 && i < refs.length && !used.has(i) && !named(refs[i])) k = i;
+      if (k < 0) return leg(pin, null);
+      used.add(k);
+      return leg(pin, refs[k]);
+    });
+    refs.forEach((ref, j) => {
+      if (used.has(j) || !ref) return;
+      legs.push(leg(named(ref) ? String(ref.pin) : String(j), ref));
+    });
+    return legs;
+  }
+
+  return { PartDefinitionError, define, get, all, reset, nearestKit, checkValue, checkPlacement, legsOf };
+});

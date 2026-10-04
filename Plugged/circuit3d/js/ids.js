@@ -65,5 +65,14 @@
     return (components || []).find(c => c && c.label != null && String(c.label).toLowerCase() === want) || null;
   }
 
-  return { componentId, parsePinRef, findComponent, LABEL_PREFIX, nextLabel, findByLabel };
+  // Hole address from { col, row }: "e14", "tp_14" (1-based column, "_" after
+  // a rail row). Pure, no board check; App.formatHole adds that on top.
+  // Not named formatHole: this object is copied onto App after breadboard.js.
+  const RAIL_ROWS = ['tp', 'tn', 'bn', 'bp'];
+
+  function holeName(ref) {
+    return ref.row + (RAIL_ROWS.includes(ref.row) ? '_' : '') + (ref.col + 1);
+  }
+
+  return { componentId, parsePinRef, findComponent, LABEL_PREFIX, nextLabel, findByLabel, holeName };
 });
