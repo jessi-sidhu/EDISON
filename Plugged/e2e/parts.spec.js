@@ -11,10 +11,10 @@
 const { test, expect } = require('@playwright/test');
 const Parts = require('../circuit3d/js/parts');
 
-// The resistor (#23), the LED (#25) and the battery, buzzer and button (#26)
-// are listed even before their files exist, so this spec fails (rather than
-// running nothing) until each is registered.
-const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', ...Parts.all().map(d => d.type)])];
+// The resistor (#23), the LED (#25), the battery, buzzer and button (#26) and
+// the potentiometer (#31) are listed even before their files exist, so this
+// spec fails (rather than running nothing) until each is registered.
+const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', ...Parts.all().map(d => d.type)])];
 
 // Resistor colours, as the model has always drawn them.
 const BODY = 0xd4a96a, LEAD = 0xc0c0c0, GHOST_LEAD = 0xcccccc;
@@ -308,7 +308,10 @@ test('viewer.html opens a saved circuit with resistors: registry loaded, each dr
 
 // Testing contract item 8, issue #26: the viewer loads a circuit that uses
 // every part, each drawn by its own view.build (App.buildPart), none by the
-// old per-type builders.
+// old per-type builders. #31 adds the potentiometer (RV1 on e40/e41/e42, one
+// named holeRef per pin, its saved position). The expected lists come from
+// the circuit and the registry the page loads, so a new part doesn't break
+// this test; give EVERY_PART one of each new part to keep item 8 covered.
 const EVERY_PART = {
   version: 1, name: 'Every part',
   components: [
@@ -317,6 +320,8 @@ const EVERY_PART = {
     { type: 'led',      label: 'LED1', values: { color: 'red' }, holeRefs: [{ pin: 'cathode', ...h(7, 'c') }, { pin: 'anode', ...h(5, 'c') }] },
     { type: 'buzzer',   label: 'BZ1', holeRefs: [h(10, 'b'), h(12, 'b')] },     // saved before pin names
     { type: 'button',   label: 'SW1', holeRefs: [h(15, 'b'), h(18, 'b')] },
+    { type: 'potentiometer', label: 'RV1', values: { resistance: 10000 }, controls: { position: 50 },
+      holeRefs: [{ pin: '1', ...h(39, 'e') }, { pin: 'wiper', ...h(40, 'e') }, { pin: '3', ...h(41, 'e') }] },
   ],
   wires: [
     { startHole: null, endHole: h(62, 'tp'), startCompIdx: 0, startPinIdx: 0, endCompIdx: -1, endPinIdx: -1, color: 0xef4444 },
@@ -324,7 +329,7 @@ const EVERY_PART = {
   ],
 };
 
-test('viewer.html opens a circuit with every part: all five registered, each drawn through App.buildPart, no errors', async ({ page }) => {
+test('viewer.html opens a circuit with every part: all six registered, each drawn through App.buildPart, no errors', async ({ page }) => {
   const errors = watchErrors(page);
   await page.addInitScript(() => {
     window.__built = [];
@@ -350,8 +355,15 @@ test('viewer.html opens a circuit with every part: all five registered, each dra
   await page.waitForFunction(() => window.App && App.scene);
 
   const types = await page.evaluate(() => (window.Parts ? Parts.all().map(d => d.type).sort() : null));
-  expect(types, 'window.Parts in the viewer').toEqual(['battery', 'button', 'buzzer', 'led', 'resistor']);
+  expect(types, 'window.Parts in the viewer').not.toBeNull();
+  // At least today's six; later parts are allowed.
+  const SIX = ['battery', 'button', 'buzzer', 'led', 'potentiometer', 'resistor'];
+  expect(SIX.filter(t => !types.includes(t)), `registered in the viewer: ${JSON.stringify(types)}`).toEqual([]);
+  // Every part in the circuit is one the viewer's registry knows, and each is
+  // drawn once through App.buildPart.
+  const inCircuit = [...new Set(EVERY_PART.components.map(c => c.type))].sort();
+  expect(inCircuit.filter(t => !types.includes(t)), 'circuit parts the viewer does not register').toEqual([]);
   await expect.poll(() => page.evaluate(() => window.__built.slice().sort()), { message: 'each saved part drawn with App.buildPart' })
-    .toEqual(['battery', 'button', 'buzzer', 'led', 'resistor']);
+    .toEqual(inCircuit);
   expect(errors).toEqual([]);
 });

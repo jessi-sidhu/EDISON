@@ -551,3 +551,41 @@ describe('footprint parts in mixed circuits', () => {
     near(current(board, 'LED2'), l2, 'LED2');
   });
 });
+
+// ── findCircuitProblems sees footprint parts (#31, the #28 follow-up) ─────
+// Today findCircuitProblems skips footprint parts, so a part wired in series
+// through one is judged "not connected". It must build a footprint part's
+// pin nodes from its legs (actionLegs) and its elements, like a span part's.
+//
+// test_three at c2 facing right: in c2, gnd c3, out c4 (1 kΩ from each pin
+// to its middle node). in → + (tp_2 → a2), gnd → − (a3 → tn_3), and out
+// feeds a resistor b4–b8 and an LED (anode c8, cathode c10) to − (a10 → tn_10).
+// Every part sits on a complete path, so there are no problems.
+
+describe('findCircuitProblems with a footprint part in the path', () => {
+  const START = [
+    { tool: 'delete_all' },
+    { tool: 'place_battery' },
+    wire('BAT1.0', `tp_${N}`, 'red'),
+    wire('BAT1.1', `tn_${N}`, 'black'),
+  ];
+  const THROUGH_THREE = [
+    ...START,
+    { tool: 'place_test_three', hole: 'c2', direction: 'right' },
+    wire('tp_2', 'a2', 'red'), wire('a3', 'tn_3', 'black'),
+    { tool: 'place_resistor', holeA: 'b4', holeB: 'b8' },
+    { tool: 'place_led', holeA: 'c10', holeB: 'c8' },
+    wire('a10', 'tn_10', 'black'),
+  ];
+
+  test('a resistor and LED fed from test_three\'s out leg are not "not connected"', () => {
+    const got = Server.findCircuitProblems(THROUGH_THREE.map(a => ({ ...a })));
+    assert.deepStrictEqual(got, [], 'no problems: the resistor and LED reach + through test_three');
+  });
+
+  test('finishAIReply keeps that build as sent, with no "Heads up"', () => {
+    const out = finish(THROUGH_THREE);
+    assert.deepStrictEqual(out.actions, THROUGH_THREE);
+    assert.equal(out.reply, 'Built it.');
+  });
+});

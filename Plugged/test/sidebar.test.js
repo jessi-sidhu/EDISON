@@ -79,7 +79,10 @@ test('a part in another category gets its own group, in category order', () => {
   const gs = groups([meter, ...Parts.all(), extra], '');
   assert.deepEqual(gs.map(g => g.category), ['Passives', 'Sources', 'Semiconductors', 'I/O', 'Instruments']);
   assert.deepEqual(gs[gs.length - 1].parts.map(p => p.type), ['test_meter']);
-  assert.deepEqual(gs[0].parts.map(p => p.type), ['resistor', 'test_span'], 'given order kept within a group');
+  // Every registered Passive (the resistor, and the potentiometer since #31), then test_span last.
+  const passives = Parts.all().filter(d => d.category === 'Passives').map(d => d.type);
+  assert.ok(passives.includes('resistor'));
+  assert.deepEqual(gs[0].parts.map(p => p.type), [...passives, 'test_span'], 'given order kept within a group');
   for (const g of gs) assert.ok(CATEGORIES.includes(g.category));
 });
 
@@ -113,7 +116,8 @@ test('search matches ai.keywords: "ohm" and "limit" find the resistor, "power" t
 
 test('search matches the type of a part whose name differs', () => {
   const meter = Object.assign(testSpan(), { type: 'test_meter', name: 'Gauge', category: 'Instruments' });
-  assert.deepEqual(typesOf(groups([...Parts.all(), meter], 'meter')), ['test_meter']);
+  // "test_met", not "meter": "potentiometer" (#31) has "meter" in its name.
+  assert.deepEqual(typesOf(groups([...Parts.all(), meter], 'test_met')), ['test_meter']);
 });
 
 test('search with no match gives no groups', () => {

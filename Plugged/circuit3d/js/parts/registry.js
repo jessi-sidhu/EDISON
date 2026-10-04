@@ -261,9 +261,9 @@
     if (!isObj(ex.expect)) bad(`${at}.expect must be an object`);
   }
 
-  function checkAi(ai, values, bad) {
+  function checkAi(ai, values, pins, bad) {
     if (!isObj(ai)) return bad('ai must be an AiSpec object');
-    unknownFields(ai, ['tool', 'about', 'keywords', 'values', 'guide', 'recipe', 'everyday'], 'ai', bad);
+    unknownFields(ai, ['tool', 'about', 'keywords', 'values', 'guide', 'recipe', 'everyday', 'mustWire'], 'ai', bad);
     if (ai.tool !== undefined && (typeof ai.tool !== 'string' || !TYPE_RE.test(ai.tool))) {
       bad(`ai.tool "${ai.tool}" must be lower case letters, digits and _`);
     }
@@ -283,6 +283,14 @@
         const keys = isObj(values) ? Object.keys(values) : [];
         for (const k of ai.values) if (typeof k !== 'string' || !keys.includes(k)) bad(`ai.values "${k}" is not one of the part's values (${keys.join(', ')})`);
         if (new Set(ai.values).size !== ai.values.length) bad('ai.values names a value twice');
+      }
+    }
+    // The pins that must be wired; the server names one that goes nowhere.
+    if (ai.mustWire !== undefined) {
+      if (!Array.isArray(ai.mustWire)) bad('ai.mustWire must be a list of pin names');
+      else {
+        for (const n of ai.mustWire) if (typeof n !== 'string' || !(pins || []).includes(n)) bad(`ai.mustWire "${n}" is not one of the part's pins (${list(pins || [])})`);
+        if (new Set(ai.mustWire).size !== ai.mustWire.length) bad('ai.mustWire names a pin twice');
       }
     }
     // In the set the server sends when a message names no part.
@@ -402,7 +410,7 @@
     checkBehaviour(def, pins, bad);
 
     if (def.ai !== undefined) {
-      checkAi(def.ai, def.values, bad);
+      checkAi(def.ai, def.values, pins, bad);
       if (isObj(def.ai)) {
         const tool = toolOf(def);
         for (const other of registry.values()) {

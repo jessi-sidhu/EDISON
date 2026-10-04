@@ -328,14 +328,18 @@
     });
   }
 
-  // kind: 'click' | 'scroll'; dir: +1 / −1 for a scroll. false when comp
-  // has no control for that gesture.
+  // One scroll tick on a slider: 1/20 of its range (5 % of 0–100), on its
+  // step grid and at least one step.
+  const scrollTick = spec => Math.max(spec.step, Math.round((spec.max - spec.min) / 20 / spec.step) * spec.step);
+
+  // kind: 'click' | 'scroll'; dir: +1 / −1 for a scroll (wheel up is +).
+  // false when comp has no control for that gesture.
   App.partGesture = function (comp, kind, dir) {
     const def = comp && Parts.get(comp.type);
     const key = def && def.gestures && def.gestures[kind];
     if (!key) return false;
     controlTick(comp, key, kind, (now, spec) => (spec.type === 'slider'
-      ? Math.min(spec.max, Math.max(spec.min, now + (dir || 1) * spec.step))
+      ? Math.min(spec.max, Math.max(spec.min, now + (dir || 1) * scrollTick(spec)))
       : !now));
     if (kind === 'click') gestures.release();
     return true;

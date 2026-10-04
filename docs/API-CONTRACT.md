@@ -129,6 +129,7 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
   values?: ['color'],          // the value keys the AI may set (its tool params); default: all of them
   guide?: '≤ 400 chars',       // wiring rules, sent only when this tool is sent
   everyday?: true,             // in the set sent when a message names no part
+  mustWire?: ['wiper'],        // pins that must be wired; the server warns when one goes nowhere (optional)
   recipe?: Example,            // a worked build; must also pass the testing contract
 }
 ```
@@ -181,6 +182,14 @@ App.holeMap() → Map<'b6', { label: 'LED1', pin: 'anode' } | { wire: 3, end: 'f
 - `Parts.footprintLegs(type, anchor, rotation) → [{ pin, col, row, hole }]`, one per pin in pin order, from an anchor hole (`'e20'`, pin 0) and one of the part's `place.rotations`. Offsets turn clockwise on the board (+col right, +row toward j): `0 (dc, dr)`, `90 (−dr, dc)`, `180 (−dc, −dr)`, `270 (dr, −dc)`; the AI's direction is right = 0, down = 90, left = 180, up = 270. Off-board legs still come back (a column outside the board, or row `null` past a or j) so `checkPlacement` can refuse them; a rotation the part doesn't allow gives `null`. Hand placement, `chat.js` and the server all use it.
 - **The hole map is rebuilt from the records after every change** (place, delete, undo, load, AI apply). It is never patched as things change, and never saved. It replaces `breadboard.js`'s unused `occupied` flag.
 - **The same map feeds** the overlap check, the AI board state, the stacked-holes check, and later the multimeter and check-my-board.
+
+### Pattern: footprint + slider
+The example is `Plugged/circuit3d/js/parts/potentiometer.js` (#31). The toggle switch, slide switch, LDR, thermistor and RGB LED copy it.
+- **Footprint legs and rotation:** `place: { kind: 'footprint', legs: [[0,0],[1,0],[2,0]], rotations: [0, 90, 180, 270] }`, one leg per pin, pin 0 at the anchor. The user rotates with R; the AI sends `place_<type> { hole, direction }`, and `Parts.footprintLegs(type, anchor, rotation)` turns that into the legs. `view.build` draws from `legs` through `ctx`, so the ghost is the same model.
+- **A saved slider:** `controls: { position: { type: 'slider', default: 50, min: 0, max: 100, step: 1, unit: '%', saved: true } }`. Saved means it goes into the file and each change is one undo step. The inspector shows it as a range input (step 1).
+- **Elements from the controls:** `elements(values, controls)` is called again on every simulation with the record's current controls, so nothing is cached. The pot is two `R`s, `R(1, wiper) = max(p·R, 1 Ω)` and `R(wiper, 3) = max((1 − p)·R, 1 Ω)`, with `p = position / 100`.
+- **The scroll gesture:** `gestures: { scroll: 'position' }`. While simulating, the wheel over the part moves the control: wheel up = +, wheel down = −. One tick is 1/20 of the control's range (5 % for 0–100), clamped to min–max, for every slider. One scroll gesture is one undo step, re-simulated at most every 100 ms (#26's dispatcher).
+- **Measure from pin voltages:** `measure(r)` reads `r.controls` and `r.pins` (`wiperVolts = r.pins.wiper`, `null` when the wiper floats), and `report` gives `"50 % · 5.0 kΩ | 5.0 kΩ"`.
 
 ## Interfaces
 

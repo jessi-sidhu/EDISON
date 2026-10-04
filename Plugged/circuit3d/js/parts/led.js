@@ -158,13 +158,19 @@
   }
 
   // Glow after a simulation that lit it; dim otherwise (m is {} on Stop).
+  // A lit LED's glow follows its current: 3.5 at 15 mA, scaled by
+  // current / 15 mA and held within 0.15–1.3 of that, so a dimmer at
+  // low current looks dimmer and 14.9 mA looks as it always has.
+  const LIT_GLOW = 3.5, DARK_GLOW = 0.45, FULL_MA = 15;
+  const glowFor = mA => LIT_GLOW * Math.min(1.3, Math.max(0.15, (Number(mA) || 0) / FULL_MA));
+
   function update(obj, m) {
     const group = obj && obj.group;
     if (!group) return;
     const lit = !!(m && m.on);
     group.traverse(o => {
       if (o.userData.ledDome) {
-        o.material.emissiveIntensity = lit ? 3.5 : 0.45;
+        o.material.emissiveIntensity = lit ? glowFor(m.current) : DARK_GLOW;
         o.material.opacity = lit ? 1.0 : 0.88;
       }
       if (o.userData.ledLight) o.visible = lit;

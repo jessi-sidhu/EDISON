@@ -243,6 +243,59 @@ test('the LED has view.build and view.update (glow / dim), and at least one exam
   assert.ok(def.examples.length >= 1);
 });
 
+// ── view.update: the glow scales with current (issue #31, decision 6) ─────
+// Lit brightness = today's lit intensity × clamp(current / 15 mA, 0.15, 1.3).
+// Read here from the dome's material.emissiveIntensity (userData.ledDome):
+// today 3.5 lit and 0.45 dark. So 14.9 mA looks as it does today (×0.993),
+// 3.47 mA (a dimmer at 50 %) is about a quarter as bright, and a dark LED
+// (under the 1 mA threshold, m.on false) stays at 0.45 with the light off.
+// The update is called the way simulate.js calls it: update({ group }, m).
+
+const LIT = 3.5, DARK = 0.45;
+
+// A stand-in for the LED's group: its dome and its glow light, as build()
+// marks them, found through group.traverse.
+function fakeLed() {
+  const dome  = { userData: { ledDome: true },  material: { emissiveIntensity: DARK, opacity: 0.88 } };
+  const light = { userData: { ledLight: true }, visible: false, intensity: 8 };
+  return { dome, light, obj: { group: { traverse: fn => [dome, light].forEach(fn) } } };
+}
+function glowAt(m) {
+  const f = fakeLed();
+  led().view.update(f.obj, m);
+  return f;
+}
+const near = (got, want, what) => assert.ok(Math.abs(got - want) < 0.005, `${what}: expected ${want.toFixed(4)}, got ${got}`);
+
+test('glow: 3.47 mA (the dimmer at 50 %) glows at 3.5 × 3.47 / 15 = 0.810, lit, with the light on', () => {
+  const f = glowAt({ on: true, current: 3.4717 });
+  near(f.dome.material.emissiveIntensity, LIT * 3.4717 / 15, 'dome emissiveIntensity at 3.47 mA');
+  assert.equal(f.light.visible, true, 'a lit LED shows its glow light');
+});
+
+test('glow: 14.84 mA (the dimmer at 0 %) and 14.9 mA (the one-LED build) sit at 3.5 × I / 15, within 1 % of today', () => {
+  for (const I of [14.840, 14.890]) {
+    const f = glowAt({ on: true, current: I });
+    near(f.dome.material.emissiveIntensity, LIT * I / 15, `dome at ${I} mA`);
+    assert.ok(Math.abs(f.dome.material.emissiveIntensity - LIT) < 0.05, `${I} mA looks as today (3.5)`);
+  }
+});
+
+test('glow: brighter current is brighter, clamped to 0.15× (1.2 mA → 0.525) and 1.3× (25 mA → 4.55)', () => {
+  near(glowAt({ on: true, current: 1.2 }).dome.material.emissiveIntensity, LIT * 0.15, 'dome at 1.2 mA (floor)');
+  near(glowAt({ on: true, current: 25 }).dome.material.emissiveIntensity, LIT * 1.3, 'dome at 25 mA (cap)');
+  const order = [1.2, 3.47, 8, 14.9, 19.5].map(I => glowAt({ on: true, current: I }).dome.material.emissiveIntensity);
+  for (let i = 1; i < order.length; i++) assert.ok(order[i] > order[i - 1], `glow rises with current: ${JSON.stringify(order)}`);
+  // A dark LED (m.on false, e.g. the 10 kΩ dimmer's 0.84 mA, or Stop with
+  // m = {}) stays at 0.45 with the light off, as today: dimmer than any lit one.
+  for (const m of [{ on: false, current: 0.84 }, { on: false, current: 0 }, {}]) {
+    const f = glowAt(m);
+    assert.equal(f.dome.material.emissiveIntensity, DARK, JSON.stringify(m));
+    assert.equal(f.light.visible, false, JSON.stringify(m));
+  }
+  assert.ok(order[0] > DARK, 'the dimmest lit glow is above the dark one');
+});
+
 test('an example lights the LED at about 14.9 mA', () => {
   const def = led();
   const lit = def.examples.some(ex => Object.values(ex.expect || {}).some(e =>

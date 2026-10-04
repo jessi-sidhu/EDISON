@@ -584,3 +584,32 @@ test('viewer.html builds every saved part from the registry, with no part type o
   const hits = stringLiterals(src).filter(s => PART_TYPES.includes(s.text)).map(s => `${s.line}: ${s.text}`);
   assert.deepStrictEqual(hits, [], 'part-type literals in viewer.html');
 });
+
+// ── The potentiometer, issue #31 ──────────────────────────────────
+//  The first footprint + slider part. Both 3D pages load it through the
+//  FILES-order check above; the docs get its pattern and one QA case.
+
+test('parts/index.js lists potentiometer.js, so both 3D pages load it after registry.js', () => {
+  const files = partFiles();
+  assert.ok(files.includes('potentiometer.js'), `parts/index.js FILES should list potentiometer.js: ${JSON.stringify(files)}`);
+  for (const page of ['circuit3d/index.html', 'circuit3d/viewer.html']) {
+    assert.ok(scriptOrder(read(page)).includes('js/parts/potentiometer.js'), `${page} loads js/parts/potentiometer.js`);
+  }
+});
+
+test('docs/API-CONTRACT.md has a "Pattern: footprint + slider" section with potentiometer.js as the example', () => {
+  const doc = read('../docs/API-CONTRACT.md');
+  const m = /^(#{2,4}) Pattern: footprint \+ slider\b.*$/m.exec(doc);
+  assert.ok(m, 'a "Pattern: footprint + slider" heading in docs/API-CONTRACT.md');
+  const rest = doc.slice(m.index + m[0].length);
+  const next = rest.search(new RegExp(`^#{2,${m[1].length}} `, 'm'));
+  const section = next < 0 ? rest : rest.slice(0, next);
+  assert.match(section, /potentiometer\.js/, 'the section names potentiometer.js as its example');
+});
+
+test('docs/QA.md has an AI case for "Make an LED dimmer with a potentiometer"', () => {
+  const qa = read('../docs/QA.md');
+  const rows = qa.split('\n').filter(l => l.startsWith('|') && l.includes('Make an LED dimmer with a potentiometer'));
+  assert.equal(rows.length, 1, 'one QA row sends the dimmer prompt');
+  assert.match(rows[0], /^\| AI-\d+ \|/, 'it is an AI prompt check (AI-NN)');
+});

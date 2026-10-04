@@ -291,3 +291,36 @@ test('exportMarkdown lists all 3 holes of test_three with pin names; the resisto
   expect(after.find(l => l.startsWith('| LED1 |')), 'the LED1 row is byte-identical').toBe(led);
   expect(errors).toEqual([]);
 });
+
+// ── The footprint ghost is disposed on rebuild (#31, the #28 follow-up) ────
+// Each new anchor rebuilds the ghost from the part's view.build. The old one
+// must have its geometries (and materials) disposed, not only be removed from
+// the scene, or the GPU keeps every one. Measured through
+// App.renderer.info.memory.geometries, which counts geometries the renderer
+// has uploaded and not yet seen disposed: after 20 anchor moves it may grow
+// by at most one ghost's worth (test_three's test view: 6 geometries), where
+// today it grows by about 20 × 6.
+
+test('moving the footprint ghost over 20 anchors does not pile up geometries (old ghosts are disposed)', async ({ page }) => {
+  test.setTimeout(90_000);   // slow CI runner (software WebGL): ~0.45 s per action
+  const errors = watchErrors(page);
+  await openEditor(page);
+  await pick(page, 'test_three');
+  const frames = () => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const geometries = () => page.evaluate(() => App.renderer.info.memory.geometries);
+
+  await hover(page, 'a10');
+  await frames();
+  await hover(page, 'c10');
+  await frames();
+  const before = await geometries();
+
+  for (let i = 0; i < 20; i++) {
+    await hover(page, `${i % 2 ? 'c' : 'a'}${12 + i}`);
+    await frames();   // the ghost is drawn, so its geometries are uploaded
+  }
+  expect(await hoverLegs(page), 'still showing a ghost on the last anchor').toHaveLength(3);
+  const after = await geometries();
+  expect(after - before, `renderer geometries grew from ${before} to ${after} over 20 anchor moves`).toBeLessThanOrEqual(6);
+  expect(errors).toEqual([]);
+});

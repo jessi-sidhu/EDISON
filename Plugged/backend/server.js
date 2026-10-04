@@ -642,10 +642,13 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   const joins = wireEdges.map(([x, y]) => ({ x, y, part: -1 }));
   actions.forEach((a, i) => {
     const def = PART_BY_TOOL.get(a.tool);
-    if (!def || def.place.kind !== 'span') return;
-    const holeOf = { [def.pins[0]]: a.holeA, [def.pins[1]]: a.holeB };
+    if (!def || (def.place.kind !== 'span' && def.place.kind !== 'footprint')) return;
+    // A span part's holes are holeA / holeB; a footprint part's come from
+    // its legs (a leg off the board has no hole, so its pin joins nothing).
+    const holeOf = def.place.kind === 'span' ? { [def.pins[0]]: a.holeA, [def.pins[1]]: a.holeB } : {};
+    if (def.place.kind === 'footprint') for (const leg of actionLegs(def, a)) holeOf[leg.pin] = leg.hole;
     const node = p => (p in holeOf ? nodeKey(holeOf[p]) : `part${i}${p}`);   // "#mid" is inside the part
-    placedParts.push({ i, a, def, pinNodes: [node(def.pins[0]), node(def.pins[1])] });
+    placedParts.push({ i, a, def, holeOf, pinNodes: def.pins.map(node) });
     for (const el of elementsOf(def)) {
       if (!Array.isArray(el.pins)) continue;
       const [x, y] = el.pins;
@@ -748,7 +751,11 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // from both terminals, so orientation is undecidable there: prefer saying
   // nothing over accusing a correctly wired LED of being backwards.
   const terminals = [...batteries].map(n => [`battery_${n}_pin0`, `battery_${n}_pin1`]);
-  for (const { i, a, def, pinNodes } of fullRebuild ? placedParts : []) {
+  for (const { i, a, def, holeOf, pinNodes } of fullRebuild ? placedParts : []) {
+    if (def.place.kind === 'footprint') {
+      problems.push(...footprintProblems(i, a, def, holeOf, pinNodes));
+      continue;
+    }
     const backwards = diodes.find(d => d.i === i && d.outer
       && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode));
     if (backwards) {
@@ -769,6 +776,19 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     if (stuck) {
       problems.push(`The ${partName(def)} at ${a.holeA}/${a.holeB} has no forward path from + to −, so it cannot light. Check each diode on its path: cathode (holeA) toward −, anode (holeB) toward +.`);
     }
+  }
+
+  // A footprint part (3+ legs) must sit between power and ground through
+  // some pair of its pins. Once it does, a pin the part lists in
+  // ai.mustWire (e.g. a pot's wiper) whose hole is joined to nothing else
+  // does nothing, and is named. Other pins may be left unused.
+  function footprintProblems(i, a, def, holeOf, pinNodes) {
+    const reached = pinNodes.map(n => joined(n, i));
+    const onPath = terminals.some(([p, m]) => reached.some((x, k) => x.has(p) && reached.some((y, j) => j !== k && y.has(m))));
+    if (!onPath) return [`The ${partName(def)} at ${a.hole} is not connected between power and ground, so no current flows through it.`];
+    const must = (def.ai && def.ai.mustWire) || [];
+    return def.pins.filter((pin, k) => must.includes(pin) && holeOf[pin] && reached[k].size === 1)
+      .map(pin => `The ${partName(def)} at ${a.hole} has its ${pin} pin (${holeOf[pin]}) wired to nothing, so nothing uses it. Wire ${holeOf[pin]}'s column to the part it should feed.`);
   }
 
   problems.push(...findStackedHoles(actions));

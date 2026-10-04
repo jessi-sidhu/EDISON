@@ -191,8 +191,16 @@
       scene.add(fpGhost);
     }
 
+    // Removes the ghost and frees what it uploaded: each build makes its
+    // own geometries and materials, so nothing here is shared.
     function hideFootprintGhost() {
-      if (fpGhost) scene.remove(fpGhost);
+      if (fpGhost) {
+        scene.remove(fpGhost);
+        fpGhost.traverse(o => {
+          if (o.geometry) o.geometry.dispose();
+          for (const m of [].concat(o.material || [])) m.dispose();
+        });
+      }
       fpGhost = fpGhostKey = null;
     }
 
