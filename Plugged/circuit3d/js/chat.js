@@ -78,7 +78,12 @@
     return { applied, failed };
   }
 
-  return { resolveEndpoint, applyActions, colorHex, BATTERY_SPOT };
+  // An accepted AI build: all its actions as one undo step.
+  function acceptBuild(actions, board) {
+    return board.batch(() => applyActions(actions, board));
+  }
+
+  return { resolveEndpoint, applyActions, acceptBuild, colorHex, BATTERY_SPOT };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -98,6 +103,7 @@ if (typeof window !== 'undefined') (function (App, Chat) {
     placeButton:   (a, b) => App.placeButton(a, b),
     placeBattery:  (x, z) => App.placeBattery(x, z),
     clearAll:      () => App.clearAll(),
+    batch:         fn => App.history.batch(fn),
     addWire(from, to, hex) {
       const s = wireEnd(from), t = wireEnd(to);
       if (!s || !t) return false;
@@ -249,7 +255,7 @@ if (typeof window !== 'undefined') (function (App, Chat) {
     _pendingActions = null;
     document.getElementById('sparky-pending-bar').style.display = 'none';
 
-    const { applied, failed } = Chat.applyActions(actions, board);
+    const { applied, failed } = Chat.acceptBuild(actions, board);
     sparkyAddMsg(`✓ Applied ${applied} change${applied !== 1 ? 's' : ''} to your circuit.` +
       (failed ? ` ${failed} could not be applied.` : ''), 'system');
   }

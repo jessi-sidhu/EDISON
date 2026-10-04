@@ -24,7 +24,8 @@
   };
 
   // ── Local project storage helpers ───────────────────────────
-  const LS_KEY = 'sparky_local_projects';
+  // Whoever the dashboard last signed in, or "guest".
+  const LS_KEY = SparkyStorage.projectsKey(SparkyStorage.currentUid(localStorage));
 
   function lsProjects() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
@@ -564,29 +565,21 @@
     const bb = state.breadboard;
 
     // Rebuild components
-    const rebuilt = [];
-    for (const c of (data.components || [])) {
-      if (c.type === 'resistor' && c.holeRefs?.length === 2) {
-        const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-        const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-        if (hA && hB) App.placeResistor(hA, hB, c.values);
-      } else if (c.type === 'led' && c.holeRefs?.length === 2) {
-        const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-        const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-        if (hA && hB) App.placeLED(hA, hB, c.values);
-      } else if (c.type === 'buzzer' && c.holeRefs?.length === 2) {
-        const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-        const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-        if (hA && hB) App.placeBuzzer(hA, hB, c.values);
-      } else if (c.type === 'button' && c.holeRefs?.length === 2) {
-        const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
-        const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-        if (hA && hB) App.placeButton(hA, hB, c.values);
-      } else if (c.type === 'battery' && c.position) {
+    // One slot per saved part, null where it could not be rebuilt, so the
+    // wires below still find their parts by index.
+    const PLACE = { resistor: App.placeResistor, led: App.placeLED,
+                    buzzer: App.placeBuzzer, button: App.placeButton };
+    const rebuilt = App.rebuildComponents(data.components, c => {
+      const before = state.components.length;
+      if (c.type === 'battery' && c.position) {
         App.placeBattery(c.position.x, c.position.z, c.values);
+      } else if (PLACE[c.type] && c.holeRefs?.length === 2) {
+        const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
+        const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
+        if (hA && hB) PLACE[c.type](hA, hB, c.values);
       }
-      rebuilt.push(state.components[state.components.length - 1]);
-    }
+      return state.components.length > before ? state.components[state.components.length - 1] : null;
+    });
 
     // Rebuild wires
     const savedColor = state.wireColor;
@@ -822,8 +815,10 @@
   // once a component record has been thrown away.
 
   const HISTORY_LIMIT = 60;
-  const undoStack = [];
-  const redoStack = [];
+  const history = App.createHistory({
+    snapshot, apply: applySnapshot, limit: HISTORY_LIMIT, afterBatch: refreshCounts,
+  });
+  App.history = history;   // chat.js groups an accepted AI build into one undo step
   let _historyMuted = false;
 
   function serializeBoard() {
@@ -862,15 +857,11 @@
   }
 
   function pushHistory() {
-    if (_historyMuted) return;
-    undoStack.push(snapshot());
-    if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
-    redoStack.length = 0;
+    if (!_historyMuted) history.push();
   }
 
   function clearHistory() {
-    undoStack.length = 0;
-    redoStack.length = 0;
+    history.clear();
   }
 
   function applySnapshot(snap) {
@@ -884,16 +875,12 @@
   }
 
   App.undo = function () {
-    if (!undoStack.length) { App.setHint('Nothing to undo', 1500); return; }
-    redoStack.push(snapshot());
-    applySnapshot(undoStack.pop());
+    if (!history.undo()) { App.setHint('Nothing to undo', 1500); return; }
     App.setHint('Undo · Ctrl+Shift+Z to redo', 1800);
   };
 
   App.redo = function () {
-    if (!redoStack.length) { App.setHint('Nothing to redo', 1500); return; }
-    undoStack.push(snapshot());
-    applySnapshot(redoStack.pop());
+    if (!history.redo()) { App.setHint('Nothing to redo', 1500); return; }
     App.setHint('Redo', 1800);
   };
 

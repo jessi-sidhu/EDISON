@@ -40,6 +40,18 @@ test('unknown battery ref fails without throwing', () => {
   assert.equal(board.wires.length, 0);
 });
 
+test('accepting a build runs every action inside one board.batch, for one undo step', () => {
+  const log = [];
+  const board = Object.assign(fakeBoard([]), {
+    batch: fn => { log.push('batch start'); const out = fn(); log.push('batch end'); return out; },
+    clearAll: () => log.push('clear'),
+    placeBattery: () => log.push('battery'),
+  });
+  const out = Chat.acceptBuild([{ tool: 'delete_all' }, { tool: 'place_battery' }], board);
+  assert.deepEqual(out, { applied: 2, failed: 0 });
+  assert.deepEqual(log, ['batch start', 'clear', 'battery', 'batch end']);
+});
+
 test('a full build places every part and passes the wire colour through', () => {
   const parts = [];
   const calls = [];

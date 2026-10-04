@@ -720,6 +720,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="circuit3d/js/storage.js"></script>
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyDZDxmH5HHwx8N3U1FVglx6Iubh665t42s",
@@ -736,10 +737,10 @@
     let _currentUser = null;
     let _authUsername = null;
 
-    // Circuits live in localStorage, so a sign-out has to wipe them or the next
-    // person on this browser opens the previous user's work.
+    // Sign-out forgets who is signed in. Each user's circuits stay under their
+    // own key, so the next person on this browser sees only their own.
     function clearAppStorage() {
-      [LS_KEY, STARRED_KEY, 'sparky_username'].forEach(k => localStorage.removeItem(k));
+      SparkyStorage.signOut(localStorage);
       sessionStorage.removeItem('sparky_load_circuit');
       _circuitsCache = [];
       _sparksCache   = [];
@@ -763,6 +764,12 @@
         return;
       }
       _currentUser = user;
+      // Switch to this user's circuits, adopting any saved as guest or before
+      // circuits were kept per user.
+      SparkyStorage.signIn(localStorage, user.uid);
+      LS_KEY      = SparkyStorage.projectsKey(user.uid);
+      STARRED_KEY = SparkyStorage.starredKey(user.uid);
+      renderMyCircuits();
       _authUsername = user.email ? user.email.split('@')[0] : (user.displayName || '');
       localStorage.setItem('sparky_username', _authUsername);
       document.getElementById('user-info').textContent = _authUsername;
@@ -770,7 +777,8 @@
     });
 
     // ── Local project storage ─────────────────────────────────────
-    const LS_KEY = 'sparky_local_projects';
+    // Guest keys until onAuthStateChanged knows who is signed in.
+    let LS_KEY = SparkyStorage.projectsKey(null);
     let _circuitsCache = [];
 
     function loadCircuits() {
@@ -1103,7 +1111,7 @@
     });
 
     // ── Starred sparks ─────────────────────────────────────────
-    const STARRED_KEY = 'sparky_starred';
+    let STARRED_KEY = SparkyStorage.starredKey(null);
     let _favOnly = false;
 
     function getStarred() {
