@@ -7,7 +7,8 @@
 //      netOf(hole)     "b14" → { id, holes[], pins[{ label, pin }] }, or
 //                      null for a hole not on the board
 //      voltage(x)      a hole, a net or a net id → volts; null when floating
-//      part(label)     { V, I, P, rating, over }, or null without readings
+//      part(label)     { V, I, P, rating, over }, plus energy (µJ) for a
+//                      capacitor; or null without readings
 //      kcl(net)        [{ label, pin, amps }], each element's current INTO
 //                      the net in mA; sums to about 0
 //      problems()      [{ kind, labels[], why }], the mistake checker (#95):
@@ -80,13 +81,19 @@
     try { return [...netsOf(board).byId.values()]; } catch { return []; }
   }
 
-  // { W } or { mA } from the part's own values, or null.
-  function ratingOf(type, values) {
+  // { W }, { mA } or { V } from the part's own values or elements, or null.
+  // { V }: an element with a vmax (a capacitor's C).
+  function ratingOf(type, values, els) {
     if (type === 'resistor') return { W: RESISTOR_W };
     if (type === 'zener')    return { W: ZENER_W };
     if (values && typeof values.maxCurrent === 'number') return { mA: values.maxCurrent * 1000 };
+    const rated = (els || []).find(e => typeof e.el.vmax === 'number');
+    if (rated) return { V: rated.el.vmax };
     return null;
   }
+
+  // Does the part's own warning say it is backwards?
+  const saysBackwards = pr => ((pr && pr.warnings) || []).some(w => /backwards/i.test(w));
 
   function from(result, board) {
     const res = result || {};
@@ -123,10 +130,15 @@
       const V = typeof a === 'number' && typeof b === 'number' ? a - b : null;
       const I = typeof res.currents[ci] === 'number' ? res.currents[ci] * 1000 : null;   // simulate.js partAmps, pin 0 → pin 1
       const P = V !== null && I !== null ? V * I / 1000 : null;
-      const rating = ratingOf(graph[ci].comp.type, pr.r.values);
+      const rating = ratingOf(graph[ci].comp.type, pr.r.values, graph[ci].part.els);
+      // A rated-volts part (an electrolytic capacitor) is over past its
+      // rating or when it says it is backwards: reversed, it vents too.
       const over = !!rating && (rating.W !== undefined ? P !== null && Math.abs(P) > rating.W
-                                                       : I !== null && Math.abs(I) > rating.mA);
-      return { V, I, P, rating, over };
+                              : rating.mA !== undefined ? I !== null && Math.abs(I) > rating.mA
+                              : (V !== null && Math.abs(V) > rating.V) || saysBackwards(pr));
+      const out = { V, I, P, rating, over };
+      if (pr.m && typeof pr.m.energy === 'number') out.energy = pr.m.energy;
+      return out;
     }
 
     // Element pins [a, b], current I mA from a to b through it: −I flows
@@ -203,9 +215,13 @@
       labelled.forEach(g => {
         const label = g.comp.label, p = part(label);
         if (!p || !p.over) return;
+        // Over only because it is reversed: the backwards row already says so.
+        if (p.rating.V !== undefined && !(Math.abs(p.V) > p.rating.V)) return;
         const why = p.rating.W !== undefined
           ? `${label} uses ${Math.abs(p.P).toFixed(2)} W, over its ${p.rating.W} W rating. Use a bigger resistor in series.`
-          : `${label} carries ${Math.abs(p.I).toFixed(1)} mA, over its ${p.rating.mA.toFixed(0)} mA rating. Add more resistance in series.`;
+          : p.rating.mA !== undefined
+          ? `${label} carries ${Math.abs(p.I).toFixed(1)} mA, over its ${p.rating.mA.toFixed(0)} mA rating. Add more resistance in series.`
+          : `${label} has ${Math.abs(p.V).toFixed(1)} V across it, over its ${p.rating.V} V rating. Use a lower supply voltage.`;
         add('over', [label], why);
       });
       return out;

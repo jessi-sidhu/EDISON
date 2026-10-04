@@ -452,6 +452,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     notes.forEach(text => sparkyAddMsg(text, 'system'));
 
     document.getElementById('sparky-pending-bar').style.display = 'flex';
+    App.requestRender();   // the reply arrives with no input to draw the ghosts
   }
 
   // What a delete_wire will do: "Remove wire W2 (BAT1.1 → tn_63)."
@@ -536,6 +537,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
   function clearGhosts() {
     _pendingGhosts.forEach(g => App.scene.remove(g));
     _pendingGhosts = [];
+    App.requestRender();
   }
 
   // ── Main ask ─────────────────────────────────────────────────

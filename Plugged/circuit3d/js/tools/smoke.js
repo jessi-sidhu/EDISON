@@ -2,9 +2,10 @@
 //  tools/smoke.js — overload smoke (issue #99)
 //
 //  On every plugged:sim, each part whose readings.part(label).over is
-//  true puffs smoke (a few sprites rising and fading, PUFF_MS) above it
-//  and its body goes dark (scorched). It stays scorched while still
-//  over, clears when a later solve says it is fine, and plugged:sim-stop
+//  true goes dark (scorched), and a part that has just gone over puffs
+//  smoke (a few sprites rising and fading, PUFF_MS) above it. It stays
+//  scorched, with no new puff, while still over (a time run solves every
+//  frame), clears when a later solve says it is fine, and plugged:sim-stop
 //  clears every scorch and puff. At most MAX_PUFFS puffs are alive; a
 //  new one ends the oldest. Visual only: the simulator is unchanged.
 //
@@ -22,7 +23,8 @@
 //  scorchList(readings, labels) → labels, in the given order, whose
 //      readings.part(label).over is true; [] for no readings
 //  MAX_PUFFS                    the most puffs alive at once
-//  Browser only: scorched() → labels scorched now; activePuffs() → count
+//  Browser only: scorched() → labels scorched now; activePuffs() → count;
+//      puffsStarted() → puffs started since page load (only goes up)
 // ─────────────────────────────────────────────────────────────
 
 (function (root, factory) {
@@ -52,6 +54,7 @@
 
     const scorches = new Map();   // comp → { group, mats: [{ mesh, orig, clone, color }] }
     let puffs = [];               // { group, sprites: [{ sprite, dx, dz, delay }], born }
+    let started = 0;              // puffs started since page load
     let raf = 0;
     let texture = null;           // one soft round smoke texture, shared by every sprite
 
@@ -149,6 +152,7 @@
       }
       App.scene.add(group);
       puffs.push({ group, sprites, born: performance.now() });
+      started++;
       if (!raf) raf = requestAnimationFrame(tick);
     }
 
@@ -183,13 +187,15 @@
       const comps = App.state.components.filter(c => c.label != null && c.group);
       const over = new Set(scorchList(readings, comps.map(c => c.label)));
       const hot = comps.filter(c => over.has(c.label));
+      // Puff only for a part that has just gone over, not a redrawn one.
+      const was = new Set(scorches.keys());
       // Fine now, gone, or redrawn (a new model): give its materials back.
       [...scorches.keys()].forEach(c => {
         if (!hot.includes(c) || scorches.get(c).group !== c.group) unscorch(c);
       });
       hot.forEach(c => {
         if (!scorches.has(c)) scorch(c);
-        startPuff(c);
+        if (!was.has(c)) startPuff(c);
       });
     });
 
@@ -200,6 +206,7 @@
 
     api.scorched    = () => [...scorches.keys()].map(c => c.label);
     api.activePuffs = () => puffs.length;
+    api.puffsStarted = () => started;
   }
 
   return api;

@@ -24,7 +24,7 @@
   camera.lookAt(...App.CAMERA.home.target);
 
   // ── Renderer ───────────────────────────────────────────────
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !navigator.webdriver });
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -83,6 +83,7 @@
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    if (App.requestRender) App.requestRender();   // set by app.js; the first frame covers the first resize
   }
   resize();
   new ResizeObserver(resize).observe(container);

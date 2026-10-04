@@ -80,10 +80,33 @@
            Math.abs(t.z - target[2]) < _camThreshold;
   }
 
+  // Render on demand (#109): a frame is drawn only while the camera moves,
+  // for INPUT_MS after any input, or once after App.requestRender(), so an
+  // idle page costs almost nothing.
+  const INPUT_MS = 450;
+  let needsRender = true;
+  let lastInput   = -Infinity;
+  App.requestRender = function () { needsRender = true; };
+
+  const noteInput = () => { lastInput = performance.now(); };
+  for (const type of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'keyup', 'click', 'input', 'change'])
+    window.addEventListener(type, noteInput, { capture: true, passive: true });
+  document.addEventListener('plugged:sim', App.requestRender);
+  document.addEventListener('plugged:sim-stop', App.requestRender);
+
+  // Every other requestAnimationFrame callback is an animation that changed
+  // the scene (a part's spin or press, smoke, flow dots), so each one asks
+  // for the next frame. Parts draw only through ctx and can't reach App.
+  const raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = cb => raf(now => { cb(now); needsRender = true; });
+
   function animate() {
-    requestAnimationFrame(animate);
-    App.controls.update();
-    App.renderer.render(App.scene, App.camera);
+    raf(animate);
+    const moved = App.controls.update();   // r128: true while the camera moves or damps
+    if (moved || needsRender || performance.now() - lastInput < INPUT_MS) {
+      needsRender = false;
+      App.renderer.render(App.scene, App.camera);
+    }
 
     const resetBtn = document.getElementById('reset-cam-btn');
     if (resetBtn) resetBtn.style.display = _isCamDefault() ? 'none' : 'flex';
@@ -319,6 +342,7 @@
     comp.controls = Object.assign({}, comp.controls, controls);
     if (App.simRunning) App.runSimulation();
     else showControls(comp);
+    App.requestRender();
   };
 
   // Removes the part and the wires on its pins.
@@ -629,6 +653,7 @@
     App.controls.target.set(...target);
     App.camera.position.set(...pos);
     App.controls.update();
+    App.requestRender();
   };
 
   // ── Save / Load ──────────────────────────────────────────────
@@ -655,6 +680,7 @@
     App.controls.target.copy(prevTarget);
     App.camera.lookAt(prevTarget);
     App.controls.update();
+    App.requestRender();   // the canvas still shows the thumbnail view
 
     return out;
   }
@@ -1242,6 +1268,7 @@
 
     scheduleAutoSave();
     if (window.Connections) Connections.onBoardChange(state);
+    App.requestRender();   // the board changed, whatever changed it (load, AI, undo)
   }
 
   // ── Inspector ────────────────────────────────────────────────

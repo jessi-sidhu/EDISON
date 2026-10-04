@@ -9,6 +9,11 @@
 //   Smoke.scorched()     labels of the parts scorched right now (any order)
 //   Smoke.activePuffs()  how many puffs are alive right now (0 once faded)
 //   Smoke.MAX_PUFFS      the cap on activePuffs()
+//   Smoke.puffsStarted() how many puffs have started since the page loaded
+//                        (only ever counts up). Puffs fade in 1.5 s, which a
+//                        loaded machine can outlast between samples, so "did
+//                        it puff" is the change in this count around a solve,
+//                        never activePuffs() at a sampled moment.
 // "Darker" is also read off the part itself: the mean luminance of the
 // material colours of the meshes in its model (comp.group), checked once the
 // puffs have faded so no smoke is counted.
@@ -163,13 +168,20 @@ test('several overloads while running: each over part scorches, puffs never pass
     });
   });
 
+  const started = () => page.evaluate(() => (window.Smoke && window.Smoke.puffsStarted ? window.Smoke.puffsStarted() : null));
+  const before = await started();
+  expect(before, 'Smoke.puffsStarted() counts the puffs started').not.toBeNull();
+
   await page.locator('#sim-run-btn').click();
   await expect.poll(() => page.evaluate(() => window.__over.length), { message: 'the solver calls the resistors over' }).toBe(3);
   const over = await page.evaluate(() => window.__over);
   expect(await scorched(page), 'every over part is scorched').toEqual(over);
+  expect(await started() - before, 'going over puffs once per over part').toBe(over.length);
 
-  // Re-solve (as a click on a part or an edit does) until the uncapped puff
-  // count, one per over part per solve, would be past the cap; sample after each.
+  // Re-solve (as a click on a part or an edit does) more times than one
+  // puff per over part per solve would fit under the cap. Still over, so no
+  // new puffs; puffs alive never pass the cap at any sample.
+  const afterRun = await started();
   const peak = await page.evaluate(async () => {
     const max = window.Smoke.MAX_PUFFS;
     const solves = Math.ceil((max + 1) / window.__over.length) + 1;
@@ -180,13 +192,9 @@ test('several overloads while running: each over part scorches, puffs never pass
       await new Promise(r => requestAnimationFrame(r));
       most = Math.max(most, window.Smoke.activePuffs());
     }
-    for (let f = 0; f < 30; f++) {
-      await new Promise(r => requestAnimationFrame(r));
-      most = Math.max(most, window.Smoke.activePuffs());
-    }
-    return { most, max };
+    return { most, max, solves };
   });
-  expect(peak.most, 'smoke is showing').toBeGreaterThan(0);
+  expect(await started() - afterRun, `${peak.solves} more solves with the same parts still over start no new puffs`).toBe(0);
   expect(peak.most, `puffs alive at once (${peak.most}) stay within MAX_PUFFS (${peak.max})`).toBeLessThanOrEqual(peak.max);
 
   // A later solve says R2 is fine (1 kΩ: 0.081 W): R2 clears, the others stay, still running.
@@ -196,6 +204,7 @@ test('several overloads while running: each over part scorches, puffs never pass
   expect(await page.evaluate(() => App.simRunning), 'still simulating, no Stop').toBe(true);
   await expect.poll(() => page.evaluate(() => window.__over)).toEqual(over.filter(l => l !== 'R2'));
   expect(await scorched(page), 'R2 is fine now; the parts still over stay scorched').toEqual(over.filter(l => l !== 'R2'));
+  expect(await started() - afterRun, 'a part going fine starts no puff').toBe(0);
 
   await page.locator('#sim-stop-btn').click();
   await expect.poll(() => scorched(page), { message: 'Stop clears every scorch' }).toEqual([]);
@@ -317,5 +326,83 @@ test('selected while it scorches, or while scorched: once deselected and cleared
   // lit or not they match the look from before anything was selected.
   expect(fixed, 'LED1 has its own colour and emissive again, not the scorched or selected ones').toEqual(before);
 
+  expect(errors).toEqual([]);
+});
+
+// ── A time run fires plugged:sim every frame (#103 review, fixed with #104) ──
+// While time runs, plugged:sim fires once per animation frame. A part that is
+// over must puff once, when it first goes over (its scorch starts), not on
+// every frame: one puff per frame would hit MAX_PUFFS at once, end each
+// puff about 130 ms in, and churn sprite materials. It puffs again only
+// after a solve found it fine and a later one finds it over again. Checked
+// on Smoke.puffsStarted() deltas, so a slow machine reads the same.
+//
+// Board: 9 V; R1 1 kΩ a10–a14 → C1, the real 1000 µF capacitor (#104),
+// + b14, − b17 → − (an RC, so the time run keeps going); R2 100 Ω a30–a34
+// straight across 9 V (0.81 W, over ¼ W) every frame.
+
+test('time run: an over part puffs once when it first goes over, not on every frame, and again only after it was fine', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.route('**/api/ask', route => route.fulfill({ json: { reply: 'ok', actions: [] } }));
+  await page.goto('/circuit3d/index.html');
+  await page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
+  const started = () => page.evaluate(() => (window.Smoke && window.Smoke.puffsStarted ? window.Smoke.puffsStarted() : null));
+  const before = await started();
+  expect(before, 'Smoke.puffsStarted() counts the puffs started').not.toBeNull();
+
+  await page.evaluate(EDIT_HELPERS);
+  await page.evaluate(() => {
+    const E = window.__edit;
+    App.placePart('battery', { x: 13, z: 0 });
+    E.wireBat(0, 'tp_2');
+    E.wireBat(1, 'tn_18');
+    App.placePart('resistor', [E.hole('a10'), E.hole('a14')], { resistance: 1000 });
+    App.placePart('capacitor', [E.hole('b14'), E.hole('b17')]);   // pins [plus, minus]
+    E.wire('tp_10', 'c10');
+    E.wire('c17', 'tn_17');
+    App.placePart('resistor', [E.hole('a30'), E.hole('a34')], { resistance: 100 });
+    E.wire('tp_30', 'c30');
+    E.wire('c34', 'tn_34');
+    // After each solve (tools/smoke.js's handler has run): is R2 over, the
+    // puffs started so far, and the puffs alive now.
+    window.__frames = [];
+    document.addEventListener('plugged:sim', e => {
+      const r = e.detail && e.detail.readings;
+      const p = r && r.part('R2');
+      window.__frames.push({ over: !!(p && p.over), started: window.Smoke.puffsStarted(), alive: window.Smoke.activePuffs() });
+    });
+  });
+  expect(await page.evaluate(() => App.state.components.some(c => c.type === 'capacitor')), 'the capacitor is on the board').toBe(true);
+
+  const frameCount = () => page.evaluate(() => window.__frames.length);
+  await page.locator('#sim-run-btn').click();
+  await expect.poll(() => page.evaluate(() => window.__frames.filter(f => f.over).length),
+    { message: 'the time run fires plugged:sim frame after frame with R2 over', timeout: 10_000 }).toBeGreaterThanOrEqual(12);
+  const frames = await page.evaluate(() => window.__frames);
+  const max = await page.evaluate(() => window.Smoke.MAX_PUFFS);
+  expect(frames.every(f => f.over), 'R2 is over on every frame').toBe(true);
+  expect(frames[0].started - before, 'R2 puffs when it first goes over').toBe(1);
+  expect(frames[frames.length - 1].started - before,
+    `one over part, one puff: ${frames[frames.length - 1].started - before} puffs started over ${frames.length} frames`).toBe(1);
+  expect(Math.max(...frames.map(f => f.alive)), `puffs alive never pass MAX_PUFFS (${max})`).toBeLessThanOrEqual(max);
+  expect(await scorched(page), 'R2 is scorched the whole time').toEqual(['R2']);
+
+  // Fine (1 kΩ: 81 mW): the scorch clears, no puff. Over again (100 Ω): one
+  // new puff, and still only one as frames go by.
+  const s1 = await started();
+  await page.evaluate(() => App.setValues(App.state.components.find(c => c.label === 'R2'), { resistance: 1000 }));
+  await expect.poll(() => scorched(page), { message: 'R2 is fine at 1 kΩ, the scorch clears' }).toEqual([]);
+  expect(await started() - s1, 'going fine starts no puff').toBe(0);
+  await page.evaluate(() => App.setValues(App.state.components.find(c => c.label === 'R2'), { resistance: 100 }));
+  await expect.poll(() => scorched(page), { message: 'R2 is over again at 100 Ω' }).toEqual(['R2']);
+  expect(await started() - s1, 'going over again puffs once more').toBe(1);
+  const mark = await frameCount();
+  await expect.poll(frameCount, { message: 'more frames go by with R2 still over', timeout: 10_000 }).toBeGreaterThanOrEqual(mark + 10);
+  expect(await started() - s1, 'and only once, frame after frame').toBe(1);
+  const tail = (await page.evaluate(() => window.__frames)).slice(mark);
+  expect(tail.every(f => f.over && f.alive <= max), 'still over, puffs alive within the cap').toBe(true);
+
+  await page.locator('#sim-stop-btn').click();
+  await expect.poll(() => scorched(page), { message: 'Stop clears every scorch' }).toEqual([]);
   expect(errors).toEqual([]);
 });

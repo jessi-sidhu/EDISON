@@ -37,8 +37,8 @@ async function openDemo(page) {
   await page.route('**/api/ask', route => route.fulfill({ json: { reply: '', actions: [] } }));
   await page.goto('/landing.html');
   await page.getByRole('button', { name: /Try it out/ }).click();
-  await page.waitForURL('**/circuit3d/index.html');
-  await page.waitForFunction(() => window.App && App.renderer && App.state && App.state.components.length === 4);
+  await page.waitForURL('**/circuit3d/index.html', { timeout: 20_000 });
+  await page.waitForFunction(() => window.App && App.renderer && App.state && App.state.components.length === 4, null, { timeout: 20_000 });
 }
 
 // Click the top of the button's cap on the canvas, as button.spec.js does.
@@ -121,16 +121,75 @@ const dotsOnWires = (page, ids) => page.evaluate(async ids => {
   return res;
 }, ids);
 
-// +1 when most of the wire's dots moved start → end, −1 end → start, 0 when
-// they didn't move. A dot wrapping round from one end to the other is
-// outvoted by the rest.
-const heading = list => {
-  const fwd = list.filter(d => d.s1 - d.s0 > 1e-4).length;
-  const back = list.filter(d => d.s0 - d.s1 > 1e-4).length;
-  return fwd > back ? 1 : back > fwd ? -1 : 0;
-};
+// Which way the dots on one wire move, from short pairs of samples taken in
+// the page: a sample in each of a few consecutive animation frames, each with
+// its frame timestamp and performance.now(), paired frame to next frame. A dot keeps its
+// instance index, so each index on the wire in both samples is a pair; its
+// step along the arc (0 start end, 1 end end) is taken modulo 1, so a dot that
+// wrapped past the end back to the start still counts the way it went. A pair
+// is skipped when the dot could have gone 0.4 of the wire or more in the time
+// between (dotSpeed(mA) × elapsed, read off the module), as its step would then
+// be ambiguous, or when the mesh's dot count changed (a new layout). Pairs are
+// pooled until 12 are counted (at most 8 frame pairs), so slow frames on CI's
+// software WebGL still leave enough counted.
+// → { fwd, back, counted }: counted pairs, and how many stepped start → end
+// or end → start.
+const stepsOnWire = (page, id, mA) => page.evaluate(async ({ id, mA }) => {
+  let m = null;
+  App.scene.traverse(o => { if (o.isInstancedMesh && o.name === 'flow-dots') m = m || o; });
+  const w = App.state.wires.find(x => x.id === id);
+  let path = null;
+  if (w) w.group.traverse(o => { if (!path && o.geometry && o.geometry.parameters && o.geometry.parameters.path) path = o.geometry.parameters.path; });
+  const out = { fwd: 0, back: 0, counted: 0 };
+  if (!m || !path) return out;
+  const N = 400, len = path.getLength(), speed = FlowDots.dotSpeed(mA);
+  const pts = Array.from({ length: N + 1 }, (_, k) => path.getPointAt(k / N));
+  const sample = stamp => {
+    m.updateMatrixWorld(true);
+    const at = [], mat = new THREE.Matrix4();
+    for (let i = 0; i < m.count; i++) {
+      m.getMatrixAt(i, mat);
+      at.push(new THREE.Vector3().setFromMatrixPosition(mat.premultiply(m.matrixWorld)));
+    }
+    return { at, stamp, now: performance.now() };
+  };
+  // The dot's place along the arc, refined between the nearest samples; null when off it.
+  const along = p => {
+    let k = 0, best = Infinity;
+    pts.forEach((q, j) => { const d = q.distanceToSquared(p); if (d < best) { best = d; k = j; } });
+    if (Math.sqrt(best) > 0.1) return null;
+    const a = pts[Math.max(0, k - 1)], b = pts[Math.min(N, k + 1)];
+    const ab = b.clone().sub(a), t = ab.lengthSq() ? Math.max(0, Math.min(1, p.clone().sub(a).dot(ab) / ab.lengthSq())) : 0;
+    return (Math.max(0, k - 1) + t * (Math.min(N, k + 1) - Math.max(0, k - 1))) / N;
+  };
+  const frame = () => new Promise(r => requestAnimationFrame(r));
+  let b = sample(await frame());
+  for (let pair = 0; pair < 8 && out.counted < 12; pair++) {
+    const a = b;
+    b = sample(await frame());
+    const elapsed = Math.max(b.stamp - a.stamp, b.now - a.now) / 1000;
+    if (a.at.length !== b.at.length || speed * elapsed / len >= 0.4) continue;
+    a.at.forEach((p, i) => {
+      const s0 = along(p), s1 = along(b.at[i]);
+      if (s0 === null || s1 === null) return;
+      let ds = s1 - s0;
+      if (ds >= 0.5) ds -= 1;
+      if (ds < -0.5) ds += 1;
+      out.counted++;
+      if (ds > 1e-4) out.fwd++;
+      if (ds < -1e-4) out.back++;
+    });
+  }
+  return out;
+}, { id, mA });
+
+// +1 when the dots clearly move start → end (at least 3 counted pairs, 80 % of
+// them forward), −1 end → start, 0 otherwise (still, mixed, or too few counted).
+const heading = ({ fwd, back, counted }) =>
+  fwd >= 3 && fwd >= 0.8 * counted ? 1 : back >= 3 && back >= 0.8 * counted ? -1 : 0;
 
 test('Run + press: one InstancedMesh of dots on every wire, moving + → −; released, toggled or stopped, none', async ({ page }) => {
+  test.setTimeout(90_000);   // slow CI runner (software WebGL)
   const errors = watchErrors(page);
   await openDemo(page);
 
@@ -162,9 +221,9 @@ test('Run + press: one InstancedMesh of dots on every wire, moving + → −; re
 
   // Conventional current: + rail → R1 on W3, button → − rail on W5 (both
   // drawn start → end), and − rail back into the battery's − on W2 (drawn
-  // BAT1.1 → tn_16, so end → start). Sampled a few times so one wrap can't decide it.
+  // BAT1.1 → tn_16, so end → start). Every wire carries the loop's 14.9 mA.
   for (const [id, want] of [['W3', 1], ['W5', 1], ['W2', -1]]) {
-    await expect.poll(async () => heading((await dotsOnWires(page, [id]))[id]),
+    await expect.poll(async () => heading(await stepsOnWire(page, id, 14.9)),
       { message: `dots on ${id} move ${want > 0 ? 'start → end' : 'end → start'} with the current` }).toBe(want);
   }
 

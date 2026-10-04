@@ -3,8 +3,8 @@
 //
 //  While simulating, #hover-card follows the pointer: over a hole it
 //  shows readings.voltage(hole), over a part readings.part(label) as
-//  V · mA · mW (W from 1 W), magnitudes, plus "over its ¼ W rating" when
-//  the part is over. It listens on the canvas with its own raycaster and
+//  V · mA · mW (W from 1 W), magnitudes, plus a capacitor's stored energy,
+//  plus "over its ¼ W rating" when the part is over. It listens on the canvas with its own raycaster and
 //  never stops or cancels the event, so interaction.js sees it all.
 //
 //  EXPORTS
@@ -13,6 +13,7 @@
 //  Node:    module.exports
 //
 //  formatPower(W)          '9.5 mW' below 10 mW, '104 mW' to under 1 W, '1.72 W'
+//  formatEnergy(µJ)        '850 µJ', '12.5 mJ' from 1 mJ, '1.24 J' from 1 J
 //  cardLines(label, part)  [label, 'V · mA · P', 'over its … rating'?], or null
 //  holeLines(hole, volts)  [hole, '9.0 V'] signed, or [hole, 'floating']
 // ─────────────────────────────────────────────────────────────
@@ -32,8 +33,16 @@
     return mW.toFixed(mW >= 10 ? 0 : 1) + ' mW';
   }
 
+  function formatEnergy(uJ) {
+    const a = Math.abs(uJ);
+    if (a >= 1e6) return (a / 1e6).toFixed(2) + ' J';
+    if (a >= 1e3) return (a / 1e3).toFixed(1) + ' mJ';
+    return a.toFixed(a >= 10 ? 0 : 1) + ' µJ';
+  }
+
   const FRACTIONS = { 0.25: '¼', 0.5: '½' };
-  const ratingText = r => (r.W !== undefined ? (FRACTIONS[r.W] || r.W) + ' W' : r.mA + ' mA');
+  const ratingText = r => (r.W !== undefined ? (FRACTIONS[r.W] || r.W) + ' W'
+                         : r.mA !== undefined ? r.mA + ' mA' : r.V + ' V');
 
   function cardLines(label, part) {
     if (!part) return null;
@@ -41,8 +50,11 @@
     if (part.V !== null) bits.push(fixed(Math.abs(part.V), 1) + ' V');
     if (part.I !== null) bits.push(fixed(Math.abs(part.I), 1) + ' mA');
     if (part.P !== null) bits.push(formatPower(part.P));
+    if (typeof part.energy === 'number') bits.push(formatEnergy(part.energy) + ' stored');
     const lines = [label, bits.join(' · ')];
-    if (part.over && part.rating) lines.push('over its ' + ratingText(part.rating) + ' rating');
+    // A rated-volts part (a capacitor) under its rating is over for being reversed.
+    const reversed = part.rating && part.rating.V !== undefined && !(Math.abs(part.V) > part.rating.V);
+    if (part.over && part.rating) lines.push(reversed ? 'in backwards' : 'over its ' + ratingText(part.rating) + ' rating');
     return lines;
   }
 
@@ -124,5 +136,5 @@
     document.addEventListener('plugged:sim-stop', () => { readings = null; hide(); });
   }
 
-  return { formatPower, cardLines, holeLines };
+  return { formatPower, formatEnergy, cardLines, holeLines };
 });
