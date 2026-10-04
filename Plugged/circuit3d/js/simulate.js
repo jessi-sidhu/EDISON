@@ -330,6 +330,14 @@
     return el.volts || 0;
   }
 
+  // Does a V element's sine cross 0 V (amplitude > |offset|)? Then a diode
+  // in its path is reversed on one half by the wave, not by its wiring (#2).
+  function crossesZero(el) {
+    const w = el.wave;
+    return el.kind === 'V' && !!w && w.kind === 'sine' && [w.amp, w.freq, w.offset].every(Number.isFinite) &&
+           w.amp > Math.abs(w.offset);
+  }
+
   // Amps through one of a registry part's elements, + in its pin order.
   function elementAmps(e, sol, mode) {
     const { el, nodes: [a, b] } = e;
@@ -512,7 +520,10 @@
   // V(cathode) + vf, the cathode driven or itself capped (a chain of off
   // diodes); null if none caps it (#73). Each pass that lowers a cap adds
   // vf > 0 along a chain, so it settles within one pass per diode.
+  // swings: true on every result when the board holds a sine that crosses
+  // 0 V (crossesZero), absent otherwise.
   function partResults(graph, sol, live, modeOf, openSol) {
+    const swings = allElements(graph).some(e => crossesZero(e.el));
     const cap = new Map();   // floating node → its lowest cap
     const offEls = [...modeOf].filter(([, mode]) => mode === 'off').map(([e]) => e);
     for (let pass = 0; pass <= offEls.length; pass++) {
@@ -530,6 +541,7 @@
       if (!g.part) return null;
       const { nodes, part: { def, els } } = g;
       const r = bareResult(graph, i);
+      if (swings) r.swings = true;
       def.pins.forEach((pin, k) => { r.pins[pin] = live.has(nodes[k]) ? sol.v(nodes[k]) : null; });
       def.pins.forEach((pin, k) => {
         if (r.pins[pin] !== null) return;

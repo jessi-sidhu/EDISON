@@ -144,6 +144,7 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
   current: { d: 14.9 },                       // mA, by element id (or index), + in pin order
   modes:   { d: 'on' },                       // mode blocks only
   open:    { d: 9.00 },                       // volts across each mode block with every mode block off
+  swings?: true,                              // on every part when the board holds a sine that crosses 0 V (amplitude > |offset|)
 }
 ```
 
