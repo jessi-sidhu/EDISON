@@ -241,6 +241,33 @@
     return { paths: [...found.values()], truncated, cutShort };
   }
 
+  // ── Nodal analysis ──────────────────────────────────────────
+
+  const PIVOT_EPS = 1e-12;
+
+  // Gaussian elimination with partial pivoting. null when singular.
+  function solveLinear(A, b) {
+    const n = b.length;
+    const M = A.map((row, i) => row.concat([b[i]]));
+    for (let c = 0; c < n; c++) {
+      let p = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+      if (Math.abs(M[p][c]) < PIVOT_EPS) return null;
+      if (p !== c) { const t = M[c]; M[c] = M[p]; M[p] = t; }
+      for (let r = c + 1; r < n; r++) {
+        const f = M[r][c] / M[c][c];
+        for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+      }
+    }
+    const x = new Array(n).fill(0);
+    for (let r = n - 1; r >= 0; r--) {
+      let s = M[r][n];
+      for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k];
+      x[r] = s / M[r][r];
+    }
+    return x;
+  }
+
   // ── Pure: analyze ────────────────────────────────────────────
   //
   //  components + wires in, numbers and report lines out. Returns:
@@ -406,7 +433,28 @@
       }
     });
 
-    return { status: 'ok', lines, ledsOn, buzzersOn, branches };
+    // Walk each branch from + down to −, dropping I·R + Vf across each part.
+    const nodeVoltages = {};
+    branches.forEach(br => {
+      const bat = bats[br.battery];
+      let v = propsOf(bat.comp).voltage || 0;
+      nodeVoltages[bat.nodes[1]] = 0;
+      br.path.forEach(step => {
+        const entry = graph.find(g => g.comp === step.comp);
+        nodeVoltages[entry.nodes[step.inPin]] = v;
+        const p = propsOf(step.comp);
+        v -= br.current * (p.resistance || 0) + (p.forwardVoltage || 0);
+        nodeVoltages[entry.nodes[step.outPin]] = v;
+      });
+    });
+
+    // Current through each part, + from pin 0 to pin 1 inside it.
+    const currents = components.map(() => 0);
+    branches.forEach(br => br.path.forEach(step => {
+      currents[components.indexOf(step.comp)] += step.inPin === 0 ? br.current : -br.current;
+    }));
+
+    return { status: 'ok', lines, ledsOn, buzzersOn, branches, nodeVoltages, currents };
   }
 
   // ── Presentation ─────────────────────────────────────────────
@@ -632,5 +680,5 @@
     App.stopSimulation = stopSimulation;
   }
 
-  return { PROPS, UnionFind, bbNodeId, buildGraph, findAllPaths, analyze, install };
+  return { PROPS, UnionFind, bbNodeId, buildGraph, findAllPaths, solveLinear, analyze, install };
 });

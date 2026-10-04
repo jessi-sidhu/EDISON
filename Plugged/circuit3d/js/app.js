@@ -504,7 +504,7 @@
       thumbnail: captureIsometricThumb(),
       components: state.components.map((c, i) => ({
         type:     c.type,
-        id:       c.type + '_' + i,
+        id:       App.componentId(state.components, c),
         values:   c.values,
         holeRefs: c.holeRefs,          // null for battery
         position: c.group
@@ -694,8 +694,8 @@
     } else {
       md += '| id | type | value | pin_A | pin_B |\n';
       md += '|----|------|-------|-------|-------|\n';
-      comps.forEach((c, i) => {
-        const id = `${c.type}_${i}`;
+      comps.forEach(c => {
+        const id = App.componentId(comps, c);
         let pA = '—', pB = '—';
         if (c.holeRefs) {
           pA = holeStr(c.holeRefs[0]);
@@ -714,8 +714,8 @@
     const batteries = comps.filter(c => c.type === 'battery');
     if (batteries.length) {
       md += '\n## Battery wiring (how to connect in add_wire actions)\n';
-      batteries.forEach((b, i) => {
-        const id = `battery_${comps.indexOf(b)}`;
+      batteries.forEach(b => {
+        const id = App.componentId(comps, b);
         md += `- **${id}**: positive terminal → use \`"from": "${id}_pin0"\`  |  negative terminal → use \`"from": "${id}_pin1"\`\n`;
       });
     }
@@ -730,10 +730,10 @@
       wires.forEach(w => {
         const from = w.startHole
           ? holeStr(w.startHole)
-          : (w.startComp ? `${w.startComp.type}_${comps.indexOf(w.startComp)}_pin${w.startPinIdx}` : '?');
+          : (w.startComp ? `${App.componentId(comps, w.startComp)}_pin${w.startPinIdx}` : '?');
         const to = w.endHole
           ? holeStr(w.endHole)
-          : (w.endComp ? `${w.endComp.type}_${comps.indexOf(w.endComp)}_pin${w.endPinIdx}` : '?');
+          : (w.endComp ? `${App.componentId(comps, w.endComp)}_pin${w.endPinIdx}` : '?');
         const colorHex = '#' + (w.group?.children?.[0]?.material?.color?.getHex?.() ?? 0xef4444).toString(16).padStart(6, '0');
         md += `| ${from} | ${to} | ${colorHex} |\n`;
       });
@@ -752,8 +752,8 @@
       return App.formatHole(ref);       // e.g. "e14", "tp_14"
     }
 
-    const components = state.components.map((c, i) => {
-      const obj = { type: c.type.toUpperCase(), id: c.type + '_' + i };
+    const components = state.components.map(c => {
+      const obj = { type: c.type.toUpperCase(), id: App.componentId(state.components, c) };
       if (c.holeRefs) {
         obj.holes = c.holeRefs.map(holeStr);
       } else if (c.group) {
@@ -777,10 +777,10 @@
     const wires = state.wires.map(w => {
       const from = w.startHole
         ? holeStr(w.startHole)
-        : (w.startComp ? w.startComp.type + '_pin' + w.startPinIdx : null);
+        : (w.startComp ? App.componentId(state.components, w.startComp) + '_pin' + w.startPinIdx : null);
       const to = w.endHole
         ? holeStr(w.endHole)
-        : (w.endComp ? w.endComp.type + '_pin' + w.endPinIdx : null);
+        : (w.endComp ? App.componentId(state.components, w.endComp) + '_pin' + w.endPinIdx : null);
       return { from, to };
     });
 

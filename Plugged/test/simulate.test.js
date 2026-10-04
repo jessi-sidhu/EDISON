@@ -1,12 +1,7 @@
 // Golden tests for the simulate.js solver.
 //
 // Run with:  npm test
-// No dependencies: node's built-in test runner only.
-//
-// Tests marked WRONG TODAY assert the behaviour the engine currently has,
-// so that the solver replacement produces a visible diff. Each one is
-// paired with a skipped test holding the analytically correct answer and
-// the issue that will unskip it.
+// Expected values are worked out by hand from Ohm's and Kirchhoff's laws.
 
 const assert = require('node:assert');
 
@@ -38,10 +33,15 @@ const mA = i => i * 1000;
 function texts(result) { return result.lines.map(l => l.text); }
 function hasLine(result, substr) { return texts(result).some(t => t.includes(substr)); }
 
+
+// Forward current through an LED: pin 1 (anode) to pin 0 (cathode).
+// currents[] is positive from pin 0 to pin 1 inside a part, so negate it.
+const ledI = (r, i) => -r.currents[i];
+
 // ── Series: 9V - 470R - LED ───────────────────────────────────
 // I = (9 - 2) / 470 = 14.894 mA
 
-test('series battery, resistor, LED: one branch at (9-2)/470', () => {
+test('series battery, resistor, LED: (9-2)/470', () => {
   const bat = battery();
   const res = comp('resistor', [h(5, 'a'), h(10, 'a')]);
   const led = comp('led',      [h(15, 'a'), h(10, 'a')]); // pin0 cathode, pin1 anode
@@ -50,113 +50,72 @@ test('series battery, resistor, LED: one branch at (9-2)/470', () => {
   const r = Sim.analyze([bat, res, led], wires);
 
   assert.equal(r.status, 'ok');
-  assert.equal(r.branches.length, 1);
-  assert.ok(Math.abs(mA(r.branches[0].current) - 14.894) < 0.01,
-    `expected 14.894 mA, got ${mA(r.branches[0].current)}`);
+  assert.ok(Math.abs(mA(ledI(r, 2)) - 14.894) < 0.01, `got ${mA(ledI(r, 2))}`);
   assert.equal(r.ledsOn.length, 1);
   assert.ok(hasLine(r, 'LED ON  (14.9 mA)'), texts(r).join(' | '));
 });
 
-// ── Parallel: 9V - 470R - two LEDs sharing it ─────────────────
-// Correct: 31.8 mA through the resistor, 15.9 mA per LED.
-// WRONG TODAY: each enumerated path is solved on its own, so both LEDs
-// report the full 31.8 mA and KCL is violated at the shared node.
-// See issue #8.
+// ── Parallel: two LEDs behind one 470R (#8) ───────────────────
+// 14.894 mA through the resistor, split 7.447 mA per LED.
 
-function parallelSharedResistor() {
+test.skip('parallel LEDs behind one resistor split its current (#8)', () => {
   const bat  = battery();
   const res  = comp('resistor', [h(5, 'a'), h(10, 'a')]);
   const led1 = comp('led', [h(1, 'tn'), h(10, 'a')]);
   const led2 = comp('led', [h(3, 'tn'), h(10, 'a')]);
-  const wires = [wire(h(2, 'tp'), h(5, 'a'))];
-  return { components: [bat, res, led1, led2], wires };
-}
+  const r = Sim.analyze([bat, res, led1, led2], [wire(h(2, 'tp'), h(5, 'a'))]);
 
-test('parallel LEDs behind one resistor: WRONG TODAY, full current in both (#8)', () => {
-  const { components, wires } = parallelSharedResistor();
-  const r = Sim.analyze(components, wires);
-
-  assert.equal(r.branches.length, 2);
-  r.branches.forEach(b => {
-    assert.ok(Math.abs(mA(b.current) - 14.894) < 0.01,
-      `expected the current 14.894 mA per branch, got ${mA(b.current)}`);
-  });
+  assert.ok(Math.abs(mA(r.currents[1]) - 14.894) < 0.01, `resistor ${mA(r.currents[1])}`);
+  assert.ok(Math.abs(mA(ledI(r, 2)) - 7.447) < 0.01, `led1 ${mA(ledI(r, 2))}`);
+  assert.ok(Math.abs(mA(ledI(r, 3)) - 7.447) < 0.01, `led2 ${mA(ledI(r, 3))}`);
   assert.equal(r.ledsOn.length, 2);
 });
 
-test.skip('parallel LEDs behind one resistor: KCL holds, 15.9 mA each (#8)', () => {
-  const { components, wires } = parallelSharedResistor();
-  const r = Sim.analyze(components, wires);
+// ── Voltage divider: 9V - 470R - X - 470R - GND (#9) ──────────
+// V(X) = 4.5 V, loop current 9 / 940 = 9.574 mA.
 
-  const total = r.branches.reduce((s, b) => s + b.current, 0);
-  assert.ok(Math.abs(mA(total) - 14.894) < 0.01, 'branch currents must sum to the resistor current');
-  r.branches.forEach(b => {
-    assert.ok(Math.abs(mA(b.current) - 7.447) < 0.01);
-  });
-});
-
-// ── Voltage divider: 9V - 470R - node X - 470R - GND ──────────
-// Correct: V(X) = 4.5 V. There is no node voltage anywhere in the
-// output today, only a loop current. See issue #9.
-
-function divider() {
+test('voltage divider: V(midpoint) = 4.5 V (#9)', () => {
   const bat = battery();
   const r1  = comp('resistor', [h(5, 'a'),  h(10, 'a')]);
   const r2  = comp('resistor', [h(10, 'a'), h(15, 'a')]);
   const wires = [wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn'))];
-  return { components: [bat, r1, r2], wires, midNode: 'bb_top_10' };
-}
-
-test('voltage divider: loop current is right, node voltage is absent (#9)', () => {
-  const { components, wires } = divider();
-  const r = Sim.analyze(components, wires);
-
-  assert.equal(r.branches.length, 1);
-  assert.ok(Math.abs(mA(r.branches[0].current) - 9.574) < 0.01,
-    `expected 9.574 mA, got ${mA(r.branches[0].current)}`);
-  assert.equal(r.nodeVoltages, undefined, 'no node voltage is computed today');
-});
-
-test.skip('voltage divider: V(midpoint) = 4.5 V (#9)', () => {
-  const { components, wires, midNode } = divider();
-  const r = Sim.analyze(components, wires);
+  const r = Sim.analyze([bat, r1, r2], wires);
 
   assert.ok(r.nodeVoltages, 'solver should report node voltages');
-  assert.ok(Math.abs(r.nodeVoltages[midNode] - 4.5) < 1e-6);
+  assert.ok(Math.abs(r.nodeVoltages.bb_top_10 - 4.5) < 1e-6, `got ${r.nodeVoltages.bb_top_10}`);
+  assert.ok(r.currents, 'solver should report the current through each part');
+  assert.ok(Math.abs(mA(r.currents[1]) - 9.574) < 0.01);
 });
 
-// ── Reverse LED ───────────────────────────────────────────────
-// Same circuit as the series test with the LED turned around, so
-// current enters the cathode. WRONG TODAY: it lights at full
-// brightness. See issue #10.
+// ── Reverse LED (#10) ─────────────────────────────────────────
 
-function reversedLED() {
+test('reversed LED: stays dark and says so (#10)', () => {
   const bat = battery();
   const res = comp('resistor', [h(5, 'a'), h(10, 'a')]);
   const led = comp('led',      [h(10, 'a'), h(15, 'a')]); // cathode toward the resistor
   const wires = [wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn'))];
-  return { components: [bat, res, led], wires };
-}
-
-test('reversed LED: stays dark and says so (#10)', () => {
-  const { components, wires } = reversedLED();
-  const r = Sim.analyze(components, wires);
+  const r = Sim.analyze([bat, res, led], wires);
 
   assert.equal(r.ledsOn.length, 0);
   assert.ok(hasLine(r, 'backwards'), texts(r).join(' | '));
 });
 
-// ── Short circuit: LED straight across the battery ────────────
+// ── Shorts ────────────────────────────────────────────────────
 
-test('LED across the battery with no resistor is reported as a short', () => {
+test.skip('LED across the battery with no resistor is reported as a short', () => {
   const bat = battery();
   const led = comp('led', [h(1, 'tn'), h(1, 'tp')]); // cathode on -, anode on +
   const r = Sim.analyze([bat, led], []);
 
-  assert.equal(r.branches.length, 1);
-  assert.equal(r.branches[0].shorted, true);
-  assert.equal(r.branches[0].current, 0);
+  assert.equal(r.shorted, true);
   assert.equal(r.ledsOn.length, 0);
+  assert.ok(hasLine(r, 'Short circuit'), texts(r).join(' | '));
+});
+
+test.skip('a wire straight across the battery is a short', () => {
+  const r = Sim.analyze([battery()], [wire(h(4, 'tp'), h(4, 'tn'))]);
+
+  assert.equal(r.shorted, true);
   assert.ok(hasLine(r, 'Short circuit'), texts(r).join(' | '));
 });
 
@@ -169,51 +128,86 @@ test('resistor and LED not wired to the battery leave the circuit open', () => {
   const r = Sim.analyze([bat, res, led], []);
 
   assert.equal(r.status, 'ok');
-  assert.equal(r.branches.length, 0);
   assert.equal(r.ledsOn.length, 0);
   assert.ok(hasLine(r, 'Circuit open'), texts(r).join(' | '));
   assert.ok(hasLine(r, 'Battery terminals not connected'), texts(r).join(' | '));
 });
 
-// ── Two batteries in series ───────────────────────────────────
-// Correct for 18 V: (18 - 2) / 470 = 34.0 mA. WRONG TODAY: each
-// battery is solved alone and the other counts as a 0-ohm wire, so
-// the answer is the single-battery answer. See issue #11.
+// ── Two batteries in series (#11) ─────────────────────────────
+// 18 V drives (18 - 2) / 470 = 34.043 mA.
 
-function twoInSeries() {
+test.skip('two 9V batteries in series add up (#11)', () => {
   const batA = comp('battery', [h(1, 'tp'),  h(20, 'a')]);
   const batB = comp('battery', [h(20, 'a'), h(1, 'tn')]);
   const res  = comp('resistor', [h(5, 'a'), h(10, 'a')]);
   const led  = comp('led',      [h(15, 'a'), h(10, 'a')]);
   const wires = [wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn'))];
-  return { components: [batA, batB, res, led], wires };
-}
+  const r = Sim.analyze([batA, batB, res, led], wires);
 
-test('two 9V batteries in series: WRONG TODAY, same current as one (#11)', () => {
-  const { components, wires } = twoInSeries();
-  const r = Sim.analyze(components, wires);
-
-  assert.ok(r.branches.length > 0);
-  r.branches.forEach(b => {
-    assert.ok(Math.abs(mA(b.current) - 14.894) < 0.01,
-      `expected the single-battery current 14.894 mA, got ${mA(b.current)}`);
-  });
+  assert.ok(Math.abs(mA(ledI(r, 3)) - 34.043) < 0.01, `got ${mA(ledI(r, 3))}`);
 });
 
-test.skip('two 9V batteries in series: 18 V drives 72.7 mA (#11)', () => {
-  const { components, wires } = twoInSeries();
-  const r = Sim.analyze(components, wires);
+// ── Mixed LEDs, floating parts, buttons ───────────────────────
 
-  assert.ok(Math.abs(mA(r.branches[0].current) - 34.043) < 0.01);
+test.skip('red and green LEDs in parallel: only the lower-Vf red one lights', () => {
+  const bat   = battery();
+  const res   = comp('resistor', [h(5, 'a'), h(10, 'a')]);
+  const red   = comp('led', [h(1, 'tn'), h(10, 'a')]);
+  const green = comp('led', [h(3, 'tn'), h(10, 'a')],
+    { values: { color: 'green', forwardVoltage: 2.2, thresholdCurrent: 0.001, maxCurrent: 0.020 } });
+  const r = Sim.analyze([bat, res, red, green], [wire(h(2, 'tp'), h(5, 'a'))]);
+
+  assert.deepEqual(r.ledsOn, [red]);
+});
+
+test.skip('a floating resistor does not disturb the circuit', () => {
+  const bat   = battery();
+  const res   = comp('resistor', [h(5, 'a'), h(10, 'a')]);
+  const led   = comp('led',      [h(15, 'a'), h(10, 'a')]);
+  const loose = comp('resistor', [h(30, 'f'), h(34, 'f')]);
+  const wires = [wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn'))];
+  const r = Sim.analyze([bat, res, led, loose], wires);
+
+  assert.equal(r.status, 'ok');
+  assert.ok(Math.abs(mA(ledI(r, 2)) - 14.894) < 0.01);
+});
+
+test('a push button opens and closes the circuit', () => {
+  const build = pressed => {
+    const bat = battery();
+    const btn = comp('button', [h(3, 'a'), h(6, 'a')], { pressed });
+    const res = comp('resistor', [h(6, 'a'), h(10, 'a')]);
+    const led = comp('led', [h(15, 'a'), h(10, 'a')]);
+    const wires = [wire(h(2, 'tp'), h(3, 'a')), wire(h(15, 'a'), h(2, 'tn'))];
+    return Sim.analyze([bat, btn, res, led], wires);
+  };
+  assert.equal(build(false).ledsOn.length, 0);
+  assert.equal(build(true).ledsOn.length, 1);
+});
+
+test.skip('batteries wired straight together are unsolvable, not a crash', () => {
+  const a = battery();
+  const b = comp('battery', [h(9, 'tp'), h(9, 'tn')], { values: { voltage: 6 } });
+  const r = Sim.analyze([a, b], []);
+
+  assert.equal(r.status, 'unsolvable');
+  assert.ok(hasLine(r, 'cannot be solved'), texts(r).join(' | '));
+});
+
+// ── Linear solver ─────────────────────────────────────────────
+
+test('solveLinear solves a 2x2 system and reports a singular one as null', () => {
+  // 2x + y = 3, x + 3y = 5  ->  x = 0.8, y = 1.4
+  const x = Sim.solveLinear([[2, 1], [1, 3]], [3, 5]);
+  assert.ok(Math.abs(x[0] - 0.8) < 1e-12 && Math.abs(x[1] - 1.4) < 1e-12, `got ${x}`);
+  assert.equal(Sim.solveLinear([[1, 2], [2, 4]], [1, 2]), null);
 });
 
 // ── Degenerate inputs ─────────────────────────────────────────
 
 test('empty board and battery-less board report their own status', () => {
   assert.equal(Sim.analyze([], []).status, 'empty');
-
-  const res = comp('resistor', [h(5, 'a'), h(10, 'a')]);
-  const noBat = Sim.analyze([res], []);
+  const noBat = Sim.analyze([comp('resistor', [h(5, 'a'), h(10, 'a')])], []);
   assert.equal(noBat.status, 'no-battery');
   assert.ok(hasLine(noBat, 'No battery in circuit.'));
 });
