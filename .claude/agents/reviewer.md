@@ -10,7 +10,7 @@ You get: the issue text (Goal, Done when, Out of scope) and the branch name.
 
 1. See the change with `git diff dev...HEAD`, plus `git diff` for uncommitted work.
 2. Check it against:
-   - **Done when:** is each item actually done? Run `npm test` from `Plugged/`. Run `npm run e2e` if UI files changed. Run `npm run check`.
+   - **Done when:** is each item actually done? Run `npm test` from `Plugged/`. If UI files changed, run only the browser specs the change reaches (the builder's "Reach" list), e.g. `npm run e2e -- e2e/<spec>.spec.js`, one browser job at a time; `/ship` runs the single full local suite. Run `npm run check`.
    - **Out of scope:** was anything done that the issue said not to do?
    - **`Plugged/AGENTS.md` code rules:** no build step, logic in Node-loadable modules, per-type part names, no real AI in tests, secrets untouched.
    - **The tests, both ways.** Tests must be complete but not wasteful:

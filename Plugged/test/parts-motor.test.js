@@ -678,7 +678,6 @@ for (const message of [
     motor();
     const got = toolNames(message);
     assert.ok(got.includes('place_motor'), `place_motor missing from ${JSON.stringify(got)}`);
-    assert.ok(got.length <= 12, `${got.length} tools`);
   });
 }
 

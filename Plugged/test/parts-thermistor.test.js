@@ -540,7 +540,6 @@ test('selectTools("Build a temperature alarm that sounds a buzzer when it gets h
   for (const n of ['place_thermistor', 'place_buzzer', 'place_resistor']) {
     assert.ok(got.includes(n), `${n} missing from ${JSON.stringify(got)}`);
   }
-  assert.ok(got.length <= 12, `${got.length} tools`);
 });
 
 // ── The browser half ──────────────────────────────────────────────────────

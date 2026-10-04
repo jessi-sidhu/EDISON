@@ -22,6 +22,7 @@ You get: the issue text and the scout's change map.
    - **Logic of any size goes in Vitest**, including complex circuits: series and parallel, several sources, switches, backwards parts, over-limit cases. Check them against hand-computed numbers. The simulator, registry and server checks are pure, so this is where the depth goes.
    - **Playwright is for what needs a real page:** the issue's main user flow, one realistic flow through the real UI (clicks, keys, wiring, Accept, Run), and anything you can only see or click. Aim for about 2–4 new browser tests per issue, and say why if you need more.
    - **Pins** (tests that already pass) only when the change could plausibly break that exact behaviour. Label them, and prefer one table-driven test over near-copies.
+   - **Assert the behaviour the issue adds.** Don't restate counts, registries or lists another test owns; derive them (`Parts.all()`, imported constants such as `ALWAYS_SENT` and `MAX_TOOLS` from `backend/server.js`). Exact strings only when the wording is the feature.
 
    **Cheaper must not mean weaker.** Moving a check out of the browser is only allowed when the unit test proves the same thing:
    - Every Done-when item still gets a test, or a line under "Not testable automatically" saying why.

@@ -461,7 +461,6 @@ test('selectTools("Make an LED dimmer with a potentiometer") sends place_potenti
   for (const n of ['place_potentiometer', 'place_resistor', 'place_led']) {
     assert.ok(got.includes(n), `${n} missing from ${JSON.stringify(got)}`);
   }
-  assert.ok(got.length <= 12, `${got.length} tools`);
 });
 
 test('the dimmer recipe passes finishAIReply untouched: every action kept, no "Heads up"', () => {

@@ -186,6 +186,13 @@ The board as plain data, no THREE or DOM, so an AI build can be applied and simu
   - No range or placement-legality checks: the server does those.
 - `Board.toSim(board)` → `{ components, wires }` for `Sim.analyze(components, wires)`, with values filled in from the part's defaults. Throws on a hole that isn't a board address or a wire end that names no pin.
 - `Board.ROTATION` = `{ right: 0, down: 90, left: 180, up: 270 }`, the same as `Chat.ROTATION`.
+- `Board.toActions(board)` → `{ actions, labelMap }` (#84): the actions that rebuild `board` from nothing. `delete_all`; one `place_*` per part in board order (span `holeA`/`holeB`, footprint `hole` + the `direction` whose legs are its holes, off-board none) with its values as arguments; one `add_wire { from, to }` per wire; then `set_control { part, ...controls }` per part with controls. Labels are re-predicted by placement order (a board with `R1, R3` rebuilds as `R1, R2`); `labelMap` maps old label → new, and `LABEL.k` wire ends are rewritten through it. Never mutates `board`.
+- `App.exportBoard()` (#84) → the live board in this shape: parts by label (`holes` in pin order, none off-board; `values`; `controls` when it has any), wires `{ id, from, to }` with the same ends as the markdown Wires table.
+
+### `POST /api/ask` (#84)
+- Request: `{ markdown, message, history, board? }`. `board` is `App.exportBoard()`. A request without it (an older client) behaves as before #84.
+- Every live wire has an id `W<n>` (highest in use + 1, never renumbered; after the AI's `delete_all` it starts again at W1). The markdown Wires table is `| id | from | to | color |`.
+- Server checks: a reply with `delete_all` is checked from its last one, as before. An edit with a `board` is checked on `Board.apply(board, actions).board`, rebuilt by `Board.toActions` so it gets the full checker and the simulator, with the rebuild's labels mapped back to the board's own in the problems. An edit reports only the problems it introduces: the board after it minus the board before, compared in the board's own labels, so unfinished wiring already on the board is never reported. The repair loop and the Heads up both use this. An edit without a `board` is not checked. The actions sent back are always the reply's own.
 
 ### Placed-part record (runtime) and saved record
 ```js
@@ -195,6 +202,8 @@ The board as plain data, no THREE or DOM, so an AI build can be applied and simu
 // saved (file, autosave, undo): today's shape, plus `controls` (saved ones only) and pin names
 { type, label, values, controls?, holeRefs: [{ pin: 'cathode', col, row }, ...], position }
 // ONE holeRef per pin, each carrying its pin name. Off-board parts: holeRefs null, position set.
+// Saved wires carry their id (#84): { id: 'W3', startHole, ... }. A file from before ids loads as
+//   W1…Wn in its saved order.
 // Saved wires name the pin at each end:  { ..., startPin: 'anode', endPin: '0' }  alongside today's
 //   startPinIdx/endPinIdx (kept for older builds). Loading matches by NAME; only when a name is
 //   missing (files from before this change) does it fall back to the index.
@@ -330,6 +339,7 @@ The per-type wrappers (`App.placeResistor` and the rest) and `chat.js`'s `PLACE`
   - `set_value { part: 'R1', <key>: value }`
   - `set_control { part: 'SW1', <key>: value }`
   - `delete_part { part: 'R1' }`
+  - `delete_wire { wire: 'W3' }` (#84): the wire's id from the markdown Wires table. On Accept it is removed as the UI deletes a wire, in the same undo step; an unknown id is a failed action.
   - `use_parts { types: [...] }`, which adds those parts' tools and continues the same tool loop.
 - **Tool selection** is `selectTools(message, boardTypes) → tool[]`, a pure function that's tested. Per request it sends:
   1. the always-sent tools
@@ -337,7 +347,7 @@ The per-type wrappers (`App.placeResistor` and the rest) and `chat.js`'s `PLACE`
   3. keyword matches
   4. if nothing else matched, the everyday set (resistor, LED, button, buzzer)
 
-  It sends **at most 12 tools**. The prompt always carries a one-line catalogue of every part.
+  It sends **at most 12 part tools**, plus the always-sent tools (#76). The prompt always carries a one-line catalogue of every part.
 - **Generated prompt sections:** label prefixes, sizing lines built from `span`/`legs` (e.g. `"resistor: 3–5 columns apart on one row (4 is typical)"`), pin names, and the guides of the tools being sent. Recipes stay hand-written.
 - **The server's circuit checks** read `elements`: `R` and `SW` conduct, and `D` conducts one way. Placement goes through `Parts.checkPlacement`.
 

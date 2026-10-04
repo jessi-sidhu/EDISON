@@ -251,5 +251,53 @@
     return { components, wires };
   }
 
-  return { ROTATION, empty, fromExample, apply, toSim };
+  // ── Board → actions ────────────────────────────────────────
+
+  // The direction whose footprint legs sit in exactly `holes`, or null.
+  function directionOf(type, holes) {
+    const want = holes.map(h => String(h).toLowerCase()).join();
+    return Object.keys(ROTATION).find(dir => {
+      const legs = Parts.footprintLegs(type, holes[0], ROTATION[dir]);
+      return legs && legs.map(l => l.hole).join() === want;
+    }) || null;
+  }
+
+  // The actions that rebuild `board` from nothing (issue #84):
+  // delete_all, a place_* per part in order (its values as arguments),
+  // an add_wire per wire, then a set_control per part with controls.
+  // Labels are re-predicted by placement order, so a board with gaps
+  // (R1, R3) rebuilds as R1, R2. → { actions, labelMap }, labelMap old
+  // label → new; LABEL.k wire ends are rewritten through it. Never
+  // mutates `board`.
+  function toActions(board) {
+    const actions = [{ tool: 'delete_all' }], labelMap = {}, placedParts = [];
+    for (const p of board.parts) {
+      const def = Parts.get(p.type);
+      const a = { tool: (def && def.ai && def.ai.tool) || 'place_' + p.type };
+      const kind = def ? def.place.kind : (p.holes ? 'span' : 'off');
+      if (p.holes && kind === 'footprint') {
+        a.hole = String(p.holes[0]).toLowerCase();
+        a.direction = directionOf(p.type, p.holes);
+      } else if (p.holes) {
+        a.holeA = String(p.holes[0]).toLowerCase();
+        a.holeB = String(p.holes[1]).toLowerCase();
+      }
+      Object.assign(a, p.values || {});
+      actions.push(a);
+      const label = Ids.nextLabel(placedParts, p.type);
+      labelMap[p.label] = label;
+      placedParts.push({ label });
+    }
+    const end = e => {
+      const m = /^([A-Za-z]+\d+)\.(\w+)$/.exec(String(e));
+      return m ? `${labelMap[m[1]] || m[1]}.${m[2]}` : String(e).toLowerCase();
+    };
+    for (const w of board.wires) actions.push({ tool: 'add_wire', from: end(w.from), to: end(w.to) });
+    for (const p of board.parts) {
+      if (p.controls && Object.keys(p.controls).length) actions.push(Object.assign({ tool: 'set_control', part: labelMap[p.label] }, p.controls));
+    }
+    return { actions, labelMap };
+  }
+
+  return { ROTATION, empty, fromExample, apply, toSim, toActions };
 });

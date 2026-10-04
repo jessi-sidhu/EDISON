@@ -1,6 +1,6 @@
 ---
 name: qa-pass
-description: Full QA pass on dev like a real user - run every case in docs/QA.md (AI prompts, simulator numbers, core flows) in a real browser, report pass/fail and file failures as bug issues. For checkpoints (about daily, and before submitting), not every promotion. Use when the user says QA dev, run QA, or full test pass. For a quick check before moving dev to main, use /promote instead.
+description: Full QA pass on dev like a real user - run every case in docs/QA.md (AI prompts, simulator numbers, core flows), the graded AI cases through npm run ai-eval and the rest in a real browser, report pass/fail and file failures as bug issues. For checkpoints (about daily, and before submitting), not every promotion. Use when the user says QA dev, run QA, or full test pass. For a quick check before moving dev to main, use /promote instead.
 ---
 
 # QA pass on dev
@@ -16,8 +16,10 @@ This is black-box testing: use the app the way a person would, and judge it only
    - Sign-in cases need a person: never type a password or Google account details.
    - Ask the user to sign in themselves in the browser now.
    - If they'd rather not, those cases get reported "skipped", not "passed".
-4. **Run the cases through the `qa-tester` subagent.**
-   - Give it the app URL and the case IDs, all by default.
+4. **Run the cases.**
+   - First run `npm run ai-eval` from `Plugged/`: it grades AI-01, 02, 06 and 08–23 (3 runs each), so those don't go to the browser. Report its results with the rest.
+   - Run the remaining cases through the `qa-tester` subagent: the visual cases, the LG and CF cases, AI-03, AI-04, AI-05, AI-07, and one real-AI browser run of AI-01 (the demo). See the note in `docs/QA.md`.
+   - Give it the app URL and those case IDs.
    - It can't edit files or run commands, so the pass is pure black-box testing.
    - Check its report: every case in `docs/QA.md` has a result, and every failure has evidence (an exact message or number, and a screenshot).
    - Re-run any case it missed, once.

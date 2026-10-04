@@ -191,6 +191,7 @@
     if (typeof a.tool === 'string' && a.tool.startsWith('place_')) return placeOne(a, board);
     if (EDITS.includes(a.tool))     return editOne(a, board);
     if (a.tool === 'delete_all')    { board.clearAll(); return true; }
+    if (a.tool === 'delete_wire')   return board.deleteWire(String(a.wire));   // false: no such wire
     if (a.tool === 'add_wire') {
       const from = resolveEndpoint(a.from, board), to = resolveEndpoint(a.to, board);
       return !!(from && to && board.addWire(from, to, colorHex(a.color)));
@@ -267,6 +268,11 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     setValues:     (comp, v) => App.setValues(comp, v),
     setControls:   (comp, c) => App.setControls(comp, c),
     deletePart:    comp => App.deletePart(comp),
+    deleteWire(id) {
+      const wire = App.state.wires.find(w => w.id === id);
+      if (wire) App.deleteWire(wire);
+      return !!wire;
+    },
     clearAll:      () => App.clearAll({ keepCircuit: true }),   // same circuit, same saved record
     batch:         fn => App.history.batch(fn),
     holeMap:       () => App.holeMap(),
@@ -292,11 +298,11 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     return pm ? { world: pm.userData.world.clone(), holeRef: null, pinMesh: pm } : null;
   }
 
-  async function askSparky(markdown, userMsg, history) {
+  async function askSparky(markdown, userMsg, history, board) {
     const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ markdown, message: userMsg, history }),
+      body: JSON.stringify({ markdown, message: userMsg, history, board }),
     });
     let data = null;
     try { data = await res.json(); } catch { /* upstream returned a non-JSON error page */ }
@@ -395,6 +401,8 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
         ghost = buildWireGhost(a.from, a.to, a.color, pendingPins);
       } else if (Chat.EDITS.includes(a.tool)) {
         notes.push(editNote(a));   // an edit places nothing: a note, no ghost
+      } else if (a.tool === 'delete_wire') {
+        notes.push(wireNote(a));
       }
       // delete_all: no ghost mesh
 
@@ -403,6 +411,14 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     notes.forEach(text => sparkyAddMsg(text, 'system'));
 
     document.getElementById('sparky-pending-bar').style.display = 'flex';
+  }
+
+  // What a delete_wire will do: "Remove wire W2 (BAT1.1 → tn_63)."
+  function wireNote(a) {
+    const wire = App.state.wires.find(w => w.id === a.wire);
+    if (!wire) return `Remove wire ${a.wire}: no wire on the board has that id.`;
+    const { from, to } = App.wireEnds(wire);
+    return `Remove wire ${a.wire} (${from} → ${to}).`;
   }
 
   // What an edit will do, for the preview: "R1 → 1 kΩ", "Delete R1".
@@ -500,7 +516,8 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
 
     try {
       const markdown = App.exportMarkdown ? App.exportMarkdown() : '_Board not ready._';
-      const data = await askSparky(markdown, msg, chatHistory.slice(-20));
+      const boardNow = App.exportBoard ? App.exportBoard() : undefined;   // the board model, wire ids included (#84)
+      const data = await askSparky(markdown, msg, chatHistory.slice(-20), boardNow);
       typingEl.remove();
       sparkyAddMsg(data.reply || '(no reply)', 'ai');
 

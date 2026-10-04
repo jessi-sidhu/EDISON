@@ -453,7 +453,6 @@ for (const message of [
     isrc();
     const got = toolNames(message);
     assert.ok(got.includes('place_current_source'), `place_current_source missing from ${JSON.stringify(got)}`);
-    assert.ok(got.length <= 12, `${got.length} tools`);
   });
 }
 

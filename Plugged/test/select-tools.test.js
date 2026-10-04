@@ -7,13 +7,15 @@
 // - It returns a list of tool declarations in Gemini's function_declarations
 //   shape ({ name, description, parameters? }), the same objects
 //   CIRCUIT_TOOLS holds. These tests read each tool's `name`.
-// - Order: the 7 always-sent tools (delete_all, add_wire, place_battery,
-//   use_parts, set_value, set_control, delete_part), then the tools for parts
+// - Order: the always-sent tools (server.js's ALWAYS_SENT), then the tools for parts
 //   on the board, then keyword matches, then the everyday set (resistor, LED,
 //   button, buzzer) if nothing matched.
 // - Keywords match whole words, case-insensitive, with a simple plural "s".
-// - At most 12 part tools, plus the 7 always-sent tools, which don't count
-//   toward the 12 (issue #76). Never a name twice.
+// - At most MAX_TOOLS part tools, plus the always-sent tools, which don't
+//   count toward the cap (issue #76). Never a name twice.
+// - server.js exports ALWAYS_SENT and MAX_TOOLS (#105), so this file is the
+//   one place that checks the cap; other test files only check that their
+//   part's tool is selected.
 
 const assert = require('node:assert');
 process.env.AI_PROVIDER = 'fixture';   // no key needed, never calls out
@@ -22,8 +24,9 @@ const { withGizmos } = require('./fixtures/gizmos.js');
 
 const ALWAYS   = ['delete_all', 'add_wire', 'place_battery', 'use_parts'];
 const EVERYDAY = ['place_resistor', 'place_led', 'place_button', 'place_buzzer'];
-// All 7 tools sent with every request (#27 D2 added the edit tools).
-const ALWAYS_SENT = [...ALWAYS, 'set_value', 'set_control', 'delete_part'];
+// Every tool sent with every request, and the part-tool cap, from server.js
+// (#105), so a tool change edits one list, not every test file.
+const { ALWAYS_SENT, MAX_TOOLS } = Server;
 // The part tools in a selection: everything but the always-sent tools.
 const partTools = got => got.filter(n => !ALWAYS_SENT.includes(n));
 
@@ -35,6 +38,13 @@ function select(S, message, boardTypes = []) {
   return out.map(t => t.name);
 }
 const names = (message, boardTypes) => select(Server, message, boardTypes);
+
+test('server.js exports ALWAYS_SENT (tool names, including the four basics) and MAX_TOOLS (a positive number)', () => {
+  assert.ok(Array.isArray(ALWAYS_SENT) && ALWAYS_SENT.every(n => typeof n === 'string'),
+    `ALWAYS_SENT should be a list of tool names: ${JSON.stringify(ALWAYS_SENT)}`);
+  assert.deepEqual(ALWAYS.filter(n => !ALWAYS_SENT.includes(n)), [], `ALWAYS_SENT: ${JSON.stringify(ALWAYS_SENT)}`);
+  assert.ok(Number.isInteger(MAX_TOOLS) && MAX_TOOLS > 0, `MAX_TOOLS: ${MAX_TOOLS}`);
+});
 
 // ── What each message gets ─────────────────────────────────────────────────
 
@@ -98,12 +108,6 @@ test('a board type the server does not know is skipped, not sent as a broken too
   assert.deepEqual(ALWAYS.filter(n => !got.includes(n)), []);
 });
 
-test('never more than 12 tools with the five real parts', () => {
-  const every = ['resistor', 'led', 'battery', 'buzzer', 'button'];
-  const got = names('a resistor, an led, a battery, a buzzer and a button', every);
-  assert.ok(got.length <= 12, `${got.length} tools: ${JSON.stringify(got)}`);
-});
-
 // ── MAX_TOOLS counts part tools only (issue #76) ───────────────────────────
 // A request naming 10 real parts used to get 5 part tools (the 7 always-sent
 // tools took the rest of the 12) and silently lost the others.
@@ -112,12 +116,11 @@ const TEN_PARTS = 'a potentiometer, a resistor, a current source, a diode, an LE
 const TEN_TOOLS = ['place_potentiometer', 'place_resistor', 'place_current_source', 'place_diode', 'place_led',
                    'place_zener', 'place_buzzer', 'place_motor', 'place_bulb', 'place_thermistor'];
 
-test('a message naming 10 parts gets all 10 of their tools (more than 5 part tools), at most 12, plus every always-sent tool', () => {
+test('a message naming 10 parts gets all 10 of their tools (more than 5 part tools), plus every always-sent tool', () => {
   const got = names(TEN_PARTS);
   assert.deepEqual(ALWAYS_SENT.filter(n => !got.includes(n)), [], `always-sent tools missing: ${JSON.stringify(got)}`);
   assert.deepEqual(TEN_TOOLS.filter(n => !got.includes(n)), [], `named parts dropped: ${JSON.stringify(got)}`);
   assert.ok(partTools(got).length > 5, `${partTools(got).length} part tools: ${JSON.stringify(got)}`);
-  assert.ok(partTools(got).length <= 12, `${partTools(got).length} part tools: ${JSON.stringify(got)}`);
   assert.deepEqual(got.filter((n, i) => got.indexOf(n) !== i), [], 'no duplicates');
 });
 
@@ -133,19 +136,20 @@ describe('with 10 extra parts in the registry', () => {
   let S, gizmos;
   beforeAll(() => { ({ Server: S, gizmos } = withGizmos(10)); });
 
-  // #76: the always-sent tools no longer count toward the 12.
-  test('a keyword that matches 10 parts sends all 10 gizmo tools: at most 12 part tools, plus every always-sent tool', () => {
+  // #76: the always-sent tools no longer count toward the cap.
+  test('a keyword that matches 10 parts sends all 10 gizmo tools, plus every always-sent tool', () => {
     const got = select(S, 'add a gizmo', []);
-    assert.ok(partTools(got).length <= 12, `${partTools(got).length} part tools: ${JSON.stringify(got)}`);
     assert.deepEqual(ALWAYS_SENT.filter(n => !got.includes(n)), [], JSON.stringify(got));
     const missing = gizmos.map(g => 'place_' + g.type).filter(n => !got.includes(n));
-    assert.deepEqual(missing, [], `every matched gizmo fits in the 12 part slots: ${JSON.stringify(got)}`);
+    assert.deepEqual(missing, [], `every matched gizmo fits in the part slots: ${JSON.stringify(got)}`);
   });
 
-  test('14 parts on the board plus keyword matches fill exactly 12 part slots, plus every always-sent tool', () => {
+  // The one cap test (#105): more part tools asked for than MAX_TOOLS.
+  test('14 parts on the board plus keyword matches fill exactly MAX_TOOLS part slots, plus every always-sent tool', () => {
     const board = ['resistor', 'led', 'buzzer', 'button', ...gizmos.map(g => g.type)];
+    assert.ok(board.length > MAX_TOOLS, `the test asks for ${board.length} part tools, more than MAX_TOOLS (${MAX_TOOLS})`);
     const got = select(S, 'gizmo resistor led buzzer button', board);
-    assert.equal(partTools(got).length, 12, `12 part tools when 14 are asked for: ${JSON.stringify(got)}`);
+    assert.equal(partTools(got).length, MAX_TOOLS, `${MAX_TOOLS} part tools when ${board.length} are asked for: ${JSON.stringify(got)}`);
     assert.deepEqual(ALWAYS_SENT.filter(n => !got.includes(n)), [], JSON.stringify(got));
     assert.deepEqual(got.filter((n, i) => got.indexOf(n) !== i), [], 'no duplicates');
   });
@@ -167,10 +171,22 @@ test('set_value, set_control and delete_part are in every selection, ahead of th
   }
 });
 
-test('with the edit tools always sent, every part on the board still fits in 12', () => {
+test('with the edit tools always sent, every part on the board is still sent', () => {
   const every = ['resistor', 'led', 'battery', 'buzzer', 'button'];
   const got = names('a resistor, an led, a battery, a buzzer and a button', every);
-  assert.ok(got.length <= 12, `${got.length} tools: ${JSON.stringify(got)}`);
   const want = [...ALWAYS, ...EDIT_TOOLS, 'place_resistor', 'place_led', 'place_buzzer', 'place_button'];
   assert.deepEqual(want.filter(n => !got.includes(n)), [], `missing from ${JSON.stringify(got)}`);
+});
+
+// ── delete_wire, issue #84 ──────────────────────────────────────────────────
+// The AI removes one wire by its id (W3), on any request, so it joins the
+// always-sent tools, ahead of the part tools.
+
+test('delete_wire is in every selection, ahead of the part tools', () => {
+  for (const [message, board] of [...CASES, ['remove the wire from a8', ['battery', 'resistor', 'led']], [TEN_PARTS, []]]) {
+    const got = names(message, board);
+    assert.ok(got.includes('delete_wire'), `"${message}": delete_wire missing from ${JSON.stringify(got)}`);
+    const firstPart = got.findIndex(n => /^place_/.test(n) && n !== 'place_battery');
+    if (firstPart >= 0) assert.ok(got.indexOf('delete_wire') < firstPart, `"${message}": delete_wire is always-sent, so it comes first: ${JSON.stringify(got)}`);
+  }
 });

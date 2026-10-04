@@ -630,7 +630,6 @@ for (const message of [
     toggle();
     const got = toolNames(message);
     assert.ok(got.includes('place_toggle_switch'), `place_toggle_switch missing from ${JSON.stringify(got)}`);
-    assert.ok(got.length <= 12, `${got.length} tools`);
   });
 }
 

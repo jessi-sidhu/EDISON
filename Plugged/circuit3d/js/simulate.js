@@ -48,7 +48,7 @@
 (function (root, factory) {
   const Sim = factory();
   if (typeof module === 'object' && module.exports) module.exports = Sim;
-  if (root) Sim.install(root.App = root.App || {});
+  if (root) { root.Sim = Sim; Sim.install(root.App = root.App || {}); }   // window.Sim: readings.js builds nets with it
 })(typeof window !== 'undefined' ? window : null, function () {
 
   // Browser App namespace, set by install(). Stays null under node.
@@ -831,6 +831,9 @@
     const result = analyze(components, wires);
     showResults(result.lines);
     showParts(components, result.status === 'ok' && !result.shorted ? result.parts : {});
+    // Every solve is announced; the Phase 3 tools listen (API-CONTRACT → "Page events").
+    const readings = window.Readings ? window.Readings.from(result, { components, wires }) : null;
+    document.dispatchEvent(new CustomEvent('plugged:sim', { detail: { result, readings } }));
     if (result.status === 'empty') return;
 
     if (result.status === 'ok') {
@@ -850,6 +853,7 @@
     const stopBtn = document.getElementById('sim-stop-btn');
     if (runBtn)  runBtn.style.display  = 'inline-flex';
     if (stopBtn) stopBtn.style.display = 'none';
+    document.dispatchEvent(new CustomEvent('plugged:sim-stop'));
   }
 
   // ── Wiring ───────────────────────────────────────────────────

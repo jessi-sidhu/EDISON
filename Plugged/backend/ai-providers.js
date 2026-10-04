@@ -137,7 +137,7 @@ function toOpenAITools(circuitTools) {
   }));
 }
 
-async function askDeepSeek(markdown, userMsg, history, ctx) {
+async function askDeepSeek(markdown, userMsg, history, ctx, board) {
   const msg = userMsg || 'Analyze my circuit and tell me what to do next.';
   const boardState = markdown || '**Board is EMPTY — no components or wires placed.**';
 
@@ -172,7 +172,7 @@ async function askDeepSeek(markdown, userMsg, history, ctx) {
       // in goes back to it with those problems, at most MAX_REPAIRS times,
       // and only while a round is left for the answer.
       const canRepair = !!ctx.checkBuild && repairs < MAX_REPAIRS && round + 1 < DEEPSEEK_MAX_ROUNDS;
-      const problems  = canRepair || (ctx.checkBuild && repairs > 0) ? safeCheck(ctx.checkBuild, actions) : [];
+      const problems  = canRepair || (ctx.checkBuild && repairs > 0) ? safeCheck(ctx.checkBuild, actions, board) : [];
       if (repairs > 0) console.log(`[repair] after round ${repairs}: ${problems.length ? `${problems.length} problems left` : 'clean'}`);
       if (!canRepair || !problems.length) break;
       repairs++;
@@ -222,9 +222,9 @@ const MAX_REPAIRS = 2;
 const REPAIR_HEADING = 'Your build has problems. Rebuild it with these fixed (delete_all first, then the whole corrected circuit):';
 
 // checkBuild's problems, or none if it throws: a broken check never costs a round.
-function safeCheck(checkBuild, actions) {
+function safeCheck(checkBuild, actions, board) {
   try {
-    const problems = checkBuild(actions);
+    const problems = checkBuild(actions, board);
     return Array.isArray(problems) ? problems : [];
   } catch (e) {
     console.warn('[repair] check failed:', e.message);
@@ -330,7 +330,9 @@ function recordFixture(markdown, userMsg, history, result, provider) {
 function makeAsk(askGemini, ctx) {
   const provider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
 
-  return async function ask(markdown, userMsg, history) {
+  // `board` (issue #84) is the browser's board, optional: the DeepSeek and
+  // Gemini paths check an edit against it.
+  return async function ask(markdown, userMsg, history, board) {
     if (provider === 'fixture') {
       return askFixture(markdown, userMsg, history);
     }
@@ -347,9 +349,9 @@ function makeAsk(askGemini, ctx) {
     } else if (provider === 'deepseek') {
       // Same clean-up and circuit checks the Gemini path applies itself.
       const finish = ctx.finish || (r => r);
-      result = finish(await askDeepSeek(markdown, userMsg, history, ctx));
+      result = finish({ ...(await askDeepSeek(markdown, userMsg, history, ctx, board)), board });
     } else {
-      result = await askGemini(markdown, userMsg, history);
+      result = await askGemini(markdown, userMsg, history, board);
     }
 
     if (process.env.RECORD_FIXTURES === '1') {

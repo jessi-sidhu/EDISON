@@ -156,14 +156,16 @@
   // A drawn wire as a saved record (without its colour, which app.js adds).
   // An end on a registry part names its pin next to the index.
   function wireRecord(wire, components) {
-    const rec = {
+    const rec = {};
+    if (wire.id !== undefined) rec.id = wire.id;   // W<n> (#84); older wires have none
+    Object.assign(rec, {
       startHole:    wire.startHole,
       endHole:      wire.endHole,
       startCompIdx: wire.startComp ? components.indexOf(wire.startComp) : -1,
       startPinIdx:  wire.startPinIdx,
       endCompIdx:   wire.endComp   ? components.indexOf(wire.endComp)   : -1,
       endPinIdx:    wire.endPinIdx,
-    };
+    });
     const startPin = wire.startComp ? pinName(wire.startComp, wire.startPinIdx) : undefined;
     const endPin   = wire.endComp   ? pinName(wire.endComp,   wire.endPinIdx)   : undefined;
     if (startPin !== undefined) rec.startPin = startPin;

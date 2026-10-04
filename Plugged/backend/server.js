@@ -412,17 +412,21 @@ const SET_CONTROL = setControlTool(PARTS);
 const DELETE_PART = editTool('delete_part',
   'Remove one part from the board by its label, with the wires on its pins. The rest of the circuit stays.',
   {});
+// A wire has no label; it is named by its id in the Wires table (W3).
+const DELETE_WIRE = { name: 'delete_wire',
+  description: 'Remove one wire from the board by its id from the Wires table, e.g. wire: "W3". The parts and the other wires stay.',
+  parameters: { type: 'OBJECT', properties: { wire: { type: 'STRING', description: 'The wire\'s id from the Wires table, e.g. "W3"' } }, required: ['wire'] } };
 
 // Every tool, in Gemini's shape. The providers that send their tools once
 // (Gemini, claude) send all of them.
 const CIRCUIT_TOOLS = [{ function_declarations: [DELETE_ALL, ...PARTS.map(partTool), ADD_WIRE, USE_PARTS,
-                                                 SET_VALUE, SET_CONTROL, DELETE_PART] }];
+                                                 SET_VALUE, SET_CONTROL, DELETE_PART, DELETE_WIRE] }];
 const TOOL_BY_NAME  = new Map(CIRCUIT_TOOLS[0].function_declarations.map(d => [d.name, d]));
 const PART_BY_TOOL  = new Map(PARTS.map(def => [toolName(def), def]));
 
 // ── Tool selection (DeepSeek, per request) ───────────────────
 const BATTERY_TOOL = 'place_battery';
-const ALWAYS_SENT  = ['delete_all', 'add_wire', BATTERY_TOOL, 'use_parts', 'set_value', 'set_control', 'delete_part'];
+const ALWAYS_SENT  = ['delete_all', 'add_wire', BATTERY_TOOL, 'use_parts', 'set_value', 'set_control', 'delete_part', 'delete_wire'];
 const EVERYDAY     = PARTS.filter(def => def.ai.everyday);   // sent when nothing else matched
 const MAX_TOOLS    = 12;
 
@@ -964,7 +968,7 @@ const SYSTEM_PROMPT = buildPrompt(CIRCUIT_TOOLS[0].function_declarations);
 
 // ── Call Gemini ──────────────────────────────────────────────
 const ask = makeAsk(
-  (markdown, userMsg, history) => askGemini(markdown, userMsg, history),
+  (markdown, userMsg, history, board) => askGemini(markdown, userMsg, history, board),
   {
     SYSTEM_PROMPT, CIRCUIT_TOOLS, finish: finishAIReply,
     // DeepSeek's tool loop: the tools and prompt per request, use_parts, and
@@ -977,7 +981,7 @@ const ask = makeAsk(
   }
 );
 
-async function askGemini(markdown, userMsg, history) {
+async function askGemini(markdown, userMsg, history, board) {
   const msg = userMsg || 'Analyze my circuit and tell me what to do next.';
   const boardState = markdown || '**Board is EMPTY — no components or wires placed.**';
 
@@ -1035,7 +1039,7 @@ async function askGemini(markdown, userMsg, history) {
     }
   }
 
-  return finishAIReply({ reply, actions });
+  return finishAIReply({ reply, actions, board });
 }
 
 // ── Build check (the repair loop) ────────────────────────────
@@ -1047,14 +1051,11 @@ function fromLastDeleteAll(actions) {
   return i < 0 ? null : actions.slice(i);
 }
 
-// A full rebuild's problems as sentences the model can act on: the
-// checker's, then the simulator's. [] for an edit (no delete_all), whose
-// board the server doesn't have. Board.apply errors are not problems (the
-// live board accepts older pin forms), and a simulator that throws leaves
-// just the checker's list.
-function checkBuild(actions) {
-  const build = fromLastDeleteAll(actions);
-  if (!build) return [];
+// A rebuild's problems as sentences the model can act on: the checker's,
+// then the simulator's. Board.apply errors are not problems (the live board
+// accepts older pin forms), and a simulator that throws leaves just the
+// checker's list.
+function rebuildProblems(build) {
   const problems = findCircuitProblems(build, { labelForm: true });
   try {
     const { components, wires } = Board.toSim(Board.apply(Board.empty(), build).board);
@@ -1069,11 +1070,41 @@ function checkBuild(actions) {
   return [...new Set(problems)];
 }
 
+// A whole board's problems: rebuilt by Board.toActions so it gets the full
+// checker and the simulator, then the rebuild's labels mapped back to the
+// board's real ones, all in one pass (R1 → R3 and LED1 → R1 must not
+// chain).
+function problemsOn(board) {
+  const { actions: rebuild, labelMap } = Board.toActions(board);
+  const real = {};
+  for (const [old, now] of Object.entries(labelMap)) if (old !== now) real[now] = old;
+  const names = Object.keys(real);
+  if (!names.length) return rebuildProblems(rebuild);
+  const re = new RegExp(`\\b(${names.join('|')})\\b`, 'g');
+  return [...new Set(rebuildProblems(rebuild).map(p => p.replace(re, n => real[n])))];
+}
+
+// A build's problems. A reply with a delete_all is checked from its last
+// one. An edit on a sent board (issue #84) reports only the problems it
+// adds: the board after it minus the board before, in the board's own
+// labels, so a student's unfinished wiring never triggers a repair. [] for
+// an edit with no board, a reply that changes nothing, or a malformed board.
+function checkBuild(actions, board) {
+  const build = fromLastDeleteAll(actions);
+  if (build) return rebuildProblems(build);
+  if (!board || !(actions || []).some(a => a && a.tool !== 'use_parts')) return [];
+  try {
+    const after  = problemsOn(Board.apply(board, actions).board);
+    const before = new Set(problemsOn(board));
+    return after.filter(p => !before.has(p));
+  } catch { return []; }   // a malformed board from the client is not checked
+}
+
 // ── Shared reply clean-up ────────────────────────────────────
 // Every model's { reply, actions } goes through this before the browser
 // sees it: a default reply, JSON-in-text fallback, malformed actions
 // dropped, and circuit problems reported.
-function finishAIReply({ reply, actions }) {
+function finishAIReply({ reply, actions, board }) {
   reply = String(reply || '').trim();
   actions = Array.isArray(actions) ? actions : [];
 
@@ -1136,7 +1167,10 @@ function finishAIReply({ reply, actions }) {
 
   // Report problems instead of patching them, so a wrong circuit is visible
   // rather than rewritten into a different one.
-  const problems = findCircuitProblems(actions, { labelForm: !usedOldForm });
+  // An edit on a sent board gets the full checks against it; a rebuild, or
+  // no board, the checker as before.
+  const problems = board && !fromLastDeleteAll(actions) ? checkBuild(actions, board)
+    : findCircuitProblems(actions, { labelForm: !usedOldForm });
   if (problems.length) {
     console.warn('[validate] ' + problems.join(' | '));
     reply += `\n\nHeads up, this build has a problem:\n- ${problems.join('\n- ')}\n\nAsk me to fix it and I will rebuild the circuit.`;
@@ -1187,6 +1221,10 @@ function askRateLimited(req) {
   return hits.length > ASK_MAX_PER_WINDOW;
 }
 
+// A sent board in the board-model shape; anything else is ignored, as
+// from an older client.
+const isBoard = b => !!b && Array.isArray(b.parts) && Array.isArray(b.wires);
+
 const server = http.createServer(async (req, res) => {
   setCORS(res);
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
@@ -1214,8 +1252,8 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       if (tooBig) return;
       try {
-        const { markdown = '', message = '', history = [] } = JSON.parse(body || '{}');
-        const { reply, actions } = await ask(markdown, message, history);
+        const { markdown = '', message = '', history = [], board } = JSON.parse(body || '{}');
+        const { reply, actions } = await ask(markdown, message, history, isBoard(board) ? board : undefined);
         console.log(`[ask] "${message.slice(0,60)}" → ${actions.length} action(s)`);
         return sendJSON(res, 200, { reply, actions });
       } catch (e) {
@@ -1298,4 +1336,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, ask, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems, checkBuild };
+module.exports = { server, ask, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems, checkBuild, ALWAYS_SENT, MAX_TOOLS };

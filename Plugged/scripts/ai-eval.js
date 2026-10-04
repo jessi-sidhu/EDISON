@@ -196,7 +196,8 @@ async function main() {
     for (let run = 1; run <= args.runs; run++) {
       let res;
       try {
-        res = await ask(markdown, c.message, []);
+        // The board the browser would send with the markdown (#84).
+        res = await ask(markdown, c.message, [], c.board ? Board.fromExample(c.board) : Board.empty());
       } catch (e) {
         res = e instanceof Error ? e : new Error(String(e));
       }

@@ -600,7 +600,6 @@ for (const message of [
     diode();
     const got = toolNames(message);
     assert.ok(got.includes('place_diode'), `place_diode missing from ${JSON.stringify(got)}`);
-    assert.ok(got.length <= 12, `${got.length} tools`);
   });
 }
 

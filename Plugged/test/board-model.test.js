@@ -629,3 +629,188 @@ test('button + two parallel LED branches, pressed by set_control: each LED 14.9 
   const sw = r.parts.SW1.m.current;
   assert.ok(Math.abs(sw - 2 * BRANCH_MA) < 0.02, `SW1 expected ${(2 * BRANCH_MA).toFixed(3)} mA, got ${sw}`);
 });
+
+// ── Board.toActions: a board as the actions that rebuild it (issue #84) ──
+// Contract (decided on the issue; the builder matches it):
+// - Board.toActions(board) → { actions, labelMap }. Never mutates board.
+//   actions = [delete_all, one place_* per part in board order (span:
+//   holeA/holeB = holes; footprint: hole = holes[0] + the direction whose
+//   footprintLegs are exactly `holes`; off-board: no holes), the part's
+//   values as tool arguments; then add_wire { from, to } per wire, in
+//   order; then set_control { part, ...controls } per part with controls].
+// - Labels are re-predicted by placement order, so a board with gaps
+//   (R1, R3) rebuilds as R1, R2. labelMap maps each old label to its new
+//   one (an unchanged label may be left out), and every LABEL.k wire end is
+//   rewritten through it (R3.0 → R2.0).
+// - Property: Board.apply(Board.empty(), toActions(b).actions).board is b
+//   up to the label map and wire ids, and simulates identically.
+
+// The new label for `old`: labelMap[old], or old when the map leaves it out.
+const renamed = (labelMap, old) => (labelMap && Object.hasOwn(labelMap, old) ? labelMap[old] : old);
+const renameEnd = (labelMap, end) => {
+  const m = /^([A-Za-z]+\d+)\.(\w+)$/.exec(String(end));
+  return m ? `${renamed(labelMap, m[1])}.${m[2]}` : String(end).toLowerCase();
+};
+
+function toActions(board) {
+  assert.equal(typeof Board.toActions, 'function', 'board-model.js exports no toActions(board)');
+  const out = Board.toActions(board);
+  assert.ok(out && Array.isArray(out.actions), `toActions must return { actions, labelMap }; got ${JSON.stringify(out)}`);
+  assert.ok(out.labelMap && typeof out.labelMap === 'object', `toActions must return a labelMap object; got ${JSON.stringify(out.labelMap)}`);
+  return out;
+}
+
+// Rebuilds `board` from its actions and checks it is the same board up to
+// labels and wire ids: same parts in order (type, holes, values, controls),
+// same wires in order with ends renamed, and the same simulation.
+function roundTrip(name, board) {
+  const { actions, labelMap } = toActions(board);
+  assert.deepStrictEqual(actions[0], { tool: 'delete_all' }, `${name}: the rebuild starts with delete_all`);
+  const rebuilt = applyOk(Board.empty(), actions);
+
+  assert.deepStrictEqual(labels(rebuilt), board.parts.map(p => renamed(labelMap, p.label)), `${name}: labels through the labelMap`);
+  board.parts.forEach((p, i) => {
+    const q = rebuilt.parts[i];
+    assert.equal(q.type, p.type, `${name}: part ${i} type`);
+    assert.deepStrictEqual(q.holes || null, p.holes ? p.holes.map(h => h.toLowerCase()) : null, `${name}: ${p.label} holes`);
+    assert.deepStrictEqual(q.values || {}, p.values || {}, `${name}: ${p.label} values`);
+    assert.deepStrictEqual(q.controls || {}, p.controls || {}, `${name}: ${p.label} controls`);
+  });
+  assert.deepStrictEqual(rebuilt.wires.map(w => [w.from, w.to]),
+    board.wires.map(w => [renameEnd(labelMap, w.from), renameEnd(labelMap, w.to)]), `${name}: wires, ends renamed`);
+
+  const before = simulate(board), after = simulate(rebuilt);
+  assert.equal(after.status, before.status, `${name}: status`);
+  assert.equal(after.shorted, before.shorted, `${name}: shorted`);
+  for (const p of board.parts) {
+    const a = before.parts[p.label], b = after.parts[renamed(labelMap, p.label)];
+    assert.deepStrictEqual(b && b.m, a && a.m, `${name}: ${p.label} simulates the same after the rebuild`);
+  }
+  return { actions, labelMap, rebuilt, before, after };
+}
+
+test('toActions(one-LED contract board): delete_all, the parts, the wires; the rebuild lights LED1 at 14.9 mA', () => {
+  const board = Board.fromExample(CONTRACT_LED);
+  const { actions, labelMap, after } = roundTrip('contract LED', board);
+  assert.deepStrictEqual(actions, [
+    { tool: 'delete_all' },
+    { tool: 'place_battery' },
+    { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
+    { tool: 'place_led', holeA: 'b8', holeB: 'b6', color: 'red' },
+    { tool: 'add_wire', from: 'BAT1.0', to: 'tp_50' },
+    { tool: 'add_wire', from: 'BAT1.1', to: 'tn_50' },
+    { tool: 'add_wire', from: 'tp_2', to: 'b2' },
+    { tool: 'add_wire', from: 'c8', to: 'tn_8' },
+  ]);
+  for (const l of ['BAT1', 'R1', 'LED1']) assert.equal(renamed(labelMap, l), l, `${l} keeps its label`);
+  checkExpect(CONTRACT_LED.name, CONTRACT_LED.expect, after);
+});
+
+test('toActions does not mutate the board it is given', () => {
+  const board = Board.fromExample(CONTRACT_LED);
+  const copy = JSON.parse(JSON.stringify(board));
+  toActions(board);
+  assert.deepStrictEqual(board, copy);
+});
+
+// Label gaps: a lone battery BAT2, resistors R1 and R3, LEDs LED1 and LED2.
+// Two branches off the 9 V rails:
+//   R1 470 Ω b2–b6, LED1 anode c6 / cathode c8, tp_3 → a2, a8 → tn_8
+//     I = (9 − 2.0) / (470 + 0.1) = 14.891 mA
+//   R3 1 kΩ b10–b14, LED2 anode c14 / cathode c16, tp_11 → R3.0, a16 → tn_16
+//     I = (9 − 2.0) / (1000 + 0.1) = 6.999 mA
+// Placement order rebuilds BAT2 → BAT1 and R3 → R2, so the wires on BAT2.k
+// and R3.0 are rewritten.
+const GAPS = {
+  parts: [
+    { type: 'battery',  label: 'BAT2' },
+    { type: 'resistor', label: 'R1', holes: ['b2', 'b6'], values: { resistance: 470 } },
+    { type: 'led',      label: 'LED1', holes: ['c8', 'c6'], values: { color: 'red' } },
+    { type: 'resistor', label: 'R3', holes: ['b10', 'b14'], values: { resistance: 1000 } },
+    { type: 'led',      label: 'LED2', holes: ['c16', 'c14'], values: { color: 'red' } },
+  ],
+  wires: [
+    { id: 'W2', from: 'BAT2.0', to: 'tp_63' },
+    { id: 'W5', from: 'BAT2.1', to: 'tn_63' },
+    { id: 'W6', from: 'tp_3',   to: 'a2' },
+    { id: 'W7', from: 'a8',     to: 'tn_8' },
+    { id: 'W9', from: 'tp_11',  to: 'R3.0' },
+    { id: 'W10', from: 'a16',   to: 'tn_16' },
+  ],
+};
+
+test('toActions on a board with label gaps (BAT2, R1, R3): labelMap BAT2 → BAT1, R3 → R2, and the wire ends follow', () => {
+  const { actions, labelMap, before, after } = roundTrip('label gaps', GAPS);
+  assert.equal(renamed(labelMap, 'BAT2'), 'BAT1');
+  assert.equal(renamed(labelMap, 'R3'), 'R2');
+  for (const l of ['R1', 'LED1', 'LED2']) assert.equal(renamed(labelMap, l), l, `${l} keeps its label`);
+
+  const wires = actions.filter(a => a.tool === 'add_wire').map(a => [a.from, a.to]);
+  assert.deepStrictEqual(wires, [['BAT1.0', 'tp_63'], ['BAT1.1', 'tn_63'], ['tp_3', 'a2'], ['a8', 'tn_8'], ['tp_11', 'R2.0'], ['a16', 'tn_16']]);
+  assert.ok(!JSON.stringify(actions).includes('BAT2') && !JSON.stringify(actions).includes('R3'), `no old label left in ${JSON.stringify(actions)}`);
+
+  // Hand-computed currents, before and after.
+  for (const r of [before, after]) {
+    assert.equal(r.status, 'ok');
+    assert.ok(Math.abs(r.parts.LED1.m.current - 7 / 470.1 * 1000) < 0.01, `LED1 expected 14.891 mA, got ${r.parts.LED1.m.current}`);
+    assert.ok(Math.abs(r.parts.LED2.m.current - 7 / 1000.1 * 1000) < 0.01, `LED2 expected 6.999 mA, got ${r.parts.LED2.m.current}`);
+  }
+});
+
+// A footprint part and a bench supply, with gaps: PS2 at 9 V, the
+// seven-segment recipe's display DS1 (hole f30, right) and its three 470 Ω
+// resistors labelled R1, R5, R3. Rebuilt in order: PS2 → PS1, R5 → R2, R3
+// stays R3 (R1 and R2 are taken by then). It still shows "7".
+const MIXED = {
+  parts: [
+    { type: 'bench_supply',  label: 'PS2', values: { voltage: 9 } },
+    { type: 'seven_segment', label: 'DS1', holes: ['f30', 'f31', 'f32', 'f33', 'f34', 'e34', 'e33', 'e32', 'e31', 'e30'] },
+    { type: 'resistor',      label: 'R1', holes: ['b33', 'b37'], values: { resistance: 470 } },
+    { type: 'resistor',      label: 'R5', holes: ['c34', 'c39'], values: { resistance: 470 } },
+    { type: 'resistor',      label: 'R3', holes: ['h33', 'h37'], values: { resistance: 470 } },
+  ],
+  wires: [
+    { id: 'W1', from: 'PS2.0', to: 'tp_63' },
+    { id: 'W2', from: 'PS2.1', to: 'tn_63' },
+    { id: 'W3', from: 'tp_37', to: 'a37' },
+    { id: 'W4', from: 'tp_39', to: 'a39' },
+    { id: 'W5', from: 'e37',   to: 'f37' },
+    { id: 'W6', from: 'a32',   to: 'tn_32' },
+  ],
+};
+
+test('toActions with a footprint part and a bench supply: hole + direction, PS2 → PS1, R5 → R2, and the display still shows 7', () => {
+  const { actions, labelMap, after } = roundTrip('footprint + bench supply', MIXED);
+  assert.deepStrictEqual(actions.find(a => a.tool === 'place_seven_segment'), { tool: 'place_seven_segment', hole: 'f30', direction: 'right' });
+  assert.deepStrictEqual(actions.find(a => a.tool === 'place_bench_supply'), { tool: 'place_bench_supply', voltage: 9 });
+  assert.equal(renamed(labelMap, 'PS2'), 'PS1');
+  assert.equal(renamed(labelMap, 'R5'), 'R2');
+  assert.equal(renamed(labelMap, 'R3'), 'R3');
+  assert.deepStrictEqual(actions.filter(a => a.tool === 'add_wire').slice(0, 2).map(a => a.from), ['PS1.0', 'PS1.1']);
+  assert.equal(after.parts.DS1.m.digit, '7');
+});
+
+test('toActions ends with one set_control per part that has controls', () => {
+  const board = { parts: [
+    { type: 'battery', label: 'BAT1' },
+    { type: 'toggle_switch', label: 'S1', holes: ['b2', 'b4'], controls: { closed: true } },
+    { type: 'button', label: 'SW1', holes: ['b12', 'b15'], controls: { pressed: true } },
+  ], wires: [] };
+  const { actions } = roundTrip('controls', board);
+  assert.deepStrictEqual(actions.slice(-2), [
+    { tool: 'set_control', part: 'S1', closed: true },
+    { tool: 'set_control', part: 'SW1', pressed: true },
+  ]);
+});
+
+// Every registered example and recipe (37 examples: every part type, span,
+// footprint and off-board, with values and controls) survives the round trip.
+for (const def of Parts.all()) {
+  const cases = (def.examples || []).map((ex, i) => [`${def.type} examples[${i}]`, ex]);
+  if (def.ai && def.ai.recipe) cases.push([`${def.type} ai.recipe`, def.ai.recipe]);
+  for (const [name, ex] of cases) {
+    test(`toActions round trip: ${name} rebuilds and simulates the same`, () => {
+      roundTrip(name, Board.fromExample(ex));
+    });
+  }
+}

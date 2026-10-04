@@ -1,7 +1,7 @@
 # QA script
 
 <!-- Thandi owns the expected results here (the circuits and the numbers a real board gives); Aarmen keeps the cases runnable.
-     /qa-pass runs every case here against `dev`, in a real browser, the way a user would.
+     /qa-pass runs every case here against `dev`: the AI build cases through `npm run ai-eval` (see the note above the AI table), the rest in a real browser, the way a user would.
      Each case: what to do, and what must be true. Keep expected results concrete (numbers, exact messages) so a
      pass/fail is never a judgment call. At track drop, add the new demo path first. -->
 
@@ -12,6 +12,8 @@
 - "Fresh board": in the editor, click Clear All, or start a New Circuit from the dashboard.
 
 ## AI prompt checks (does the tutor do the right thing?)
+AI-01, 02, 06 and 08–23 are graded automatically by `npm run ai-eval` (3 runs each, from `Plugged/`). `/qa-pass` still runs the visual cases, the LG and CF cases, AI-03, AI-04, AI-05 and AI-07, and one real-AI browser run of AI-01 (the demo).
+
 | ID | Do | Pass when |
 |---|---|---|
 | AI-01 | Fresh board. Send: `Build a single LED circuit with a current-limiting resistor.` Accept, then Run Simulation. | The preview appears before anything changes. Accept says "Applied N changes" and doesn't say "could not be applied". The reply has no "Heads up, this build has a problem". The simulation shows `💡 LED ON` at 10–20 mA with no over-current line. |

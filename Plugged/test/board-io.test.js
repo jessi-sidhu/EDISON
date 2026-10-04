@@ -759,3 +759,43 @@ test('demo.sparky loads with no flag; released it is open, and pressing SW1 ligh
   assert.ok(Math.abs(lit.parts.LED1.m.current - 14.89) < 0.01, `LED1 ${lit.parts.LED1.m.current}`);
   assert.ok(Math.abs(Math.abs(lit.currents[3]) * 1000 - 14.89) < 0.01, `SW1 carries the loop current: ${lit.currents[3]}`);
 });
+
+// ── Wire ids in the saved record, issue #84 ─────────────────────────────────
+// Every drawn wire has id 'W<n>' (App.state.wires[i].id). wireRecord copies
+// it into the saved record as `id`; a wire with no id (none in a page after
+// #84, but the helper is pure) gets no `id` key, so older records compare as
+// before. Loading a record restores the id; records without ids (files saved
+// before #84) get W1…Wn in order on load (app.js; checked in
+// e2e/wire-ids.spec.js, since the load path lives in the page).
+
+test('wireRecord saves the wire id next to its ends (#84)', () => {
+  const bat = runtime('battery', 'BAT1', null);
+  const r1  = runtime('resistor', 'R1', [h(1, 'a'), h(5, 'a')]);
+  const comps = [bat, r1];
+  const wireRecord = need('wireRecord');
+  const plain = wireRecord(Object.assign(drawn(h(2, 'tp'), h(1, 'b')), { id: 'W3' }), comps);
+  assert.deepStrictEqual(plain, { id: 'W3', startHole: h(2, 'tp'), endHole: h(1, 'b'), startCompIdx: -1, startPinIdx: -1,
+                                  endCompIdx: -1, endPinIdx: -1 });
+  const onPins = wireRecord(Object.assign(drawn(null, null, bat, 0, r1, 1), { id: 'W12' }), comps);
+  assert.equal(onPins.id, 'W12', JSON.stringify(onPins));
+  assert.equal(onPins.startPin, '0');
+  assert.equal(onPins.endPin, 'lead2');
+});
+
+test('save → JSON → save keeps every wire id, gaps and order included (#84)', () => {
+  const bat = runtime('battery', 'BAT1', null, { voltage: 9 });
+  const r1  = runtime('resistor', 'R1', [h(1, 'a'), h(5, 'a')], { resistance: 470 });
+  const comps = [bat, r1];
+  const wires = [
+    Object.assign(drawn(null, h(62, 'tp'), bat, 0), { id: 'W1' }),
+    Object.assign(drawn(h(1, 'a'), h(1, 'tp'), r1, 0), { id: 'W4' }),
+    Object.assign(drawn(h(5, 'b'), h(5, 'tn')), { id: 'W2' }),
+  ];
+  const first = JSON.parse(JSON.stringify(wires.map(w => need('wireRecord')(w, comps))));
+  assert.deepStrictEqual(first.map(w => w.id), ['W1', 'W4', 'W2']);
+  // Reloaded wires carry the saved id; saving them again writes the same records.
+  const back = first.map(w => Object.assign(drawn(w.startHole, w.endHole,
+    w.startCompIdx >= 0 ? comps[w.startCompIdx] : null, w.startPinIdx,
+    w.endCompIdx >= 0 ? comps[w.endCompIdx] : null, w.endPinIdx), { id: w.id }));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(back.map(w => need('wireRecord')(w, comps)))), first);
+});

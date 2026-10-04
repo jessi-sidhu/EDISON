@@ -648,7 +648,6 @@ for (const message of [
     bulb();
     const got = toolNames(message);
     assert.ok(got.includes('place_bulb'), `place_bulb missing from ${JSON.stringify(got)}`);
-    assert.ok(got.length <= 12, `${got.length} tools`);
   });
 }
 

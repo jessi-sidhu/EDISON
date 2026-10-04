@@ -279,3 +279,274 @@ test('pin: finishAIReply keeps only the actions from the last delete_all; an edi
   ];
   assert.deepStrictEqual(Server.finishAIReply({ reply: 'Done.', actions: edit }).actions, edit);
 });
+
+// ── Checks against the sent board (issue #84) ───────────────────────────────
+// The browser sends `board` (the board-model shape, wire ids W1…) next to
+// the markdown. Shapes these tests assume (decided on the issue):
+// - Server.ask(markdown, message, history, board): `board` optional; passed
+//   to the DeepSeek loop's checkBuild and to finishAIReply. POST /api/ask
+//   reads an optional `board` from the body. Missing → today's behaviour.
+// - Server.checkBuild(actions, board):
+//   - a delete_all in the reply → as today, from the last delete_all; the
+//     board is ignored.
+//   - else, with a board → result = Board.apply(board, actions).board; the
+//     checks run on Board.toActions(result).actions (findCircuitProblems
+//     sees a full rebuild) plus the simulator on the result. Label names in
+//     the problems are mapped back to the board's real labels (the inverse
+//     of toActions' labelMap).
+//   - else (no board, no delete_all) → [] as today.
+// - Server.finishAIReply({ reply, actions, board }): with a board, the
+//   Heads up uses the same path, so an edit gets the full checks. The
+//   actions sent back are the reply's own, never the rebuild. Without a
+//   board it is unchanged.
+
+// The one-LED recipe as the browser would send it: BAT1, R1, LED1, W1…W4
+// (W4 is a8 → tn_8).
+const LED_BOARD = Board.apply(Board.empty(), GOOD).board;
+// The same circuit with label gaps: BAT2, R3, LED2 (as after deletes).
+// Rebuilt by toActions they become BAT1, R1, LED1, so every name in a
+// problem has to be mapped back.
+const GAP_BOARD = {
+  parts: [
+    { type: 'battery',  label: 'BAT2' },
+    { type: 'resistor', label: 'R3', holes: ['b2', 'b6'] },
+    { type: 'led',      label: 'LED2', holes: ['c8', 'c6'] },
+  ],
+  wires: [
+    { id: 'W1', from: 'BAT2.0', to: 'tp_63' },
+    { id: 'W2', from: 'BAT2.1', to: 'tn_63' },
+    { id: 'W3', from: 'tp_3',   to: 'a2' },
+    { id: 'W4', from: 'a8',     to: 'tn_8' },
+  ],
+};
+// An edit (no delete_all) adding an LED straight across the rails, no
+// resistor: cathode c20 to tn_20, anode c18 from tp_18.
+const LED_NO_RESISTOR_EDIT = [
+  { tool: 'place_led', holeA: 'c20', holeB: 'c18' },
+  { tool: 'add_wire', from: 'tp_18', to: 'a18', color: 'red' },
+  { tool: 'add_wire', from: 'a20', to: 'tn_20', color: 'black' },
+];
+const CLEAN_EDIT = [{ tool: 'set_value', part: 'R1', resistance: 1000 }];
+
+function checkOn(actions, board) {
+  assert.equal(typeof Server.checkBuild, 'function', 'server.js exports no checkBuild(actions, board)');
+  const problems = Server.checkBuild(actions, board);
+  assert.ok(Array.isArray(problems), `expected an array, got ${JSON.stringify(problems)}`);
+  return problems;
+}
+
+test('precondition: the sent boards light their LED (14.9 mA) and have no problems as a rebuild', () => {
+  for (const board of [LED_BOARD, GAP_BOARD]) {
+    const { components, wires } = Board.toSim(board);
+    const r = Sim.analyze(components, wires);
+    const led = board.parts.find(p => p.type === 'led').label;
+    assert.ok(Math.abs(r.parts[led].m.current - 7 / 470.1 * 1000) < 0.01, `${led}: ${r.parts[led].m.current}`);
+  }
+  assert.deepStrictEqual(checkOn(GOOD), []);
+});
+
+test('checkBuild(edit, board): an LED added with no resistor, no delete_all, is flagged as a short with the resistor fix', () => {
+  const problems = checkOn(LED_NO_RESISTOR_EDIT, LED_BOARD);
+  assert.ok(problems.some(p => /short/i.test(p) && !/^[A-Z]+\d+: /.test(p)),
+    `no one-sentence short-circuit problem: ${JSON.stringify(problems)}`);
+  assert.ok(problems.some(p => /^LED2: Short circuit\..*no current-limiting resistor/.test(p)),
+    `no "LED2: Short circuit..." warning: ${JSON.stringify(problems)}`);
+  assert.ok(problems.some(p => /^LED2: Put a resistor in series/.test(p)),
+    `no "LED2: Put a resistor in series..." warning: ${JSON.stringify(problems)}`);
+});
+
+test('checkBuild(edit, board) names the board\'s real labels: the new LED is LED3, not the rebuild\'s LED2', () => {
+  const problems = checkOn(LED_NO_RESISTOR_EDIT, GAP_BOARD);
+  assert.ok(problems.some(p => /^LED3: Short circuit\./.test(p)), `no "LED3: Short circuit..." (the added LED is LED3 on this board): ${JSON.stringify(problems)}`);
+  assert.deepStrictEqual(problems.filter(p => /\b(BAT1|R1|LED1)\b/.test(p)), [],
+    `the board has no BAT1, R1 or LED1; those are the rebuild's names: ${JSON.stringify(problems)}`);
+  assert.deepStrictEqual(problems.filter(p => /^LED2: /.test(p)), [], `LED2 is the good LED: ${JSON.stringify(problems)}`);
+});
+
+test('checkBuild(delete_wire, board): removing the battery\'s − wire names BAT2.1, the real pin', () => {
+  const problems = checkOn([{ tool: 'delete_wire', wire: 'W2' }], GAP_BOARD);
+  assert.ok(problems.some(p => /\bBAT2\.1 is not wired\b/.test(p)), `no "BAT2.1 is not wired": ${JSON.stringify(problems)}`);
+  assert.deepStrictEqual(problems.filter(p => /\bBAT1\b/.test(p)), [], `BAT1 is the rebuild's name: ${JSON.stringify(problems)}`);
+});
+
+test('checkBuild(delete_wire W4, board): the LED\'s ground wire gone, the LED is not connected between power and ground', () => {
+  const problems = checkOn([{ tool: 'delete_wire', wire: 'W4' }], LED_BOARD);
+  assert.ok(problems.some(p => /LED at c8\/c6 is not connected between power and ground/.test(p)),
+    `no "LED at c8/c6 is not connected": ${JSON.stringify(problems)}`);
+});
+
+test('checkBuild(clean edit, board) is []: set_value R1 1000 on the one-LED board', () => {
+  assert.deepStrictEqual(checkOn(CLEAN_EDIT, LED_BOARD), []);
+  assert.deepStrictEqual(checkOn([{ tool: 'set_value', part: 'R3', resistance: 1000 }], GAP_BOARD), []);
+});
+
+// Pins (pass today, must keep passing): a rebuild ignores the board, and no
+// board keeps today's "an edit is never checked".
+test('pin: checkBuild with a delete_all rebuild gives the same problems with or without a board', () => {
+  for (const actions of [BACKWARDS, GOOD, NO_RESISTOR]) {
+    assert.deepStrictEqual(checkOn(actions, LED_BOARD), checkOn(actions), `for ${JSON.stringify(actions.map(a => a.tool))}`);
+  }
+});
+
+test('pin: checkBuild(edit) with no board is [] as today', () => {
+  for (const actions of [LED_NO_RESISTOR_EDIT, CLEAN_EDIT, [{ tool: 'delete_wire', wire: 'W4' }]]) {
+    assert.deepStrictEqual(checkOn(actions), [], `for ${JSON.stringify(actions)}`);
+    assert.deepStrictEqual(checkOn(actions, undefined), [], `for ${JSON.stringify(actions)} (board undefined)`);
+  }
+});
+
+// finishAIReply's Heads up with a board.
+test('finishAIReply({ reply, actions, board }): a bad edit gets the Heads up; the actions stay the edit\'s own', () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const out = Server.finishAIReply({ reply: 'Added an LED.', actions: LED_NO_RESISTOR_EDIT.map(a => ({ ...a })), board: LED_BOARD });
+  assert.match(out.reply, /^Added an LED\./);
+  assert.match(out.reply, /Heads up, this build has a problem:/, out.reply);
+  assert.match(out.reply, /LED2: Short circuit/, out.reply);
+  assert.deepStrictEqual(out.actions, LED_NO_RESISTOR_EDIT, 'the browser gets the edit, not a rebuild');
+});
+
+test('finishAIReply({ reply, actions, board }): a clean edit has no Heads up', () => {
+  const out = Server.finishAIReply({ reply: 'Done.', actions: CLEAN_EDIT.map(a => ({ ...a })), board: LED_BOARD });
+  assert.equal(out.reply, 'Done.');
+  assert.deepStrictEqual(out.actions, CLEAN_EDIT);
+});
+
+test('pin: finishAIReply without a board leaves the same bad edit unflagged, as today', () => {
+  const out = Server.finishAIReply({ reply: 'Added an LED.', actions: LED_NO_RESISTOR_EDIT.map(a => ({ ...a })) });
+  assert.equal(out.reply, 'Added an LED.');
+});
+
+// The loop, on a sent board.
+async function runOn(board, replies, message = 'Add another LED.') {
+  const fetch = scriptedDeepSeek(replies);
+  vi.stubGlobal('fetch', fetch);
+  for (const m of ['log', 'info', 'warn']) vi.spyOn(console, m).mockImplementation(() => {});
+  const out = await Server.ask('', message, [], board);
+  return { out, calls: fetch.calls, last: fetch.calls[fetch.calls.length - 1] };
+}
+// Repair messages by their start, so a later reworded heading still counts.
+const repairsOn = body => body.messages.filter(m => m.role === 'user' && /^Your build has problems/.test(String(m.content || '')));
+
+test('an edit on a sent board that shorts an LED gets a repair round naming LED2; the fix clears the Heads up', async () => {
+  const { out, calls, last } = await runOn(LED_BOARD, [
+    tools('a', LED_NO_RESISTOR_EDIT), says('Added an LED.'),
+    tools('b', [{ tool: 'delete_part', part: 'LED2' }]), says('Took the bare LED out.'),
+  ]);
+  assert.equal(calls.length, 4, `expected 4 requests (edit, end, repair fix, end), got ${calls.length}; user messages sent: ${JSON.stringify(userHeads(last))}`);
+  const repairs = repairsOn(last);
+  assert.equal(repairs.length, 1, `expected 1 repair message; user messages sent: ${JSON.stringify(userHeads(last))}`);
+  assert.match(repairs[0].content, /LED2: Short circuit/, repairs[0].content);
+  assert.equal(out.reply, 'Took the bare LED out.');
+  assert.doesNotMatch(out.reply, /Heads up/);
+});
+
+test('a clean edit on a sent board gets no repair round', async () => {
+  const { out, calls, last } = await runOn(LED_BOARD, [tools('e', CLEAN_EDIT), says('Done.')]);
+  assert.equal(calls.length, 2, `expected 2 requests, got ${calls.length}`);
+  assert.equal(repairsOn(last).length, 0);
+  assert.equal(out.reply, 'Done.');
+});
+
+// ── POST /api/ask carries `board` through (issue #84) ───────────────────────
+// The real HTTP handler, the DeepSeek provider with the scripted fetch. The
+// test's own request goes over node:http, since fetch is stubbed.
+
+describe('POST /api/ask with and without board', () => {
+  const http = require('node:http');
+  let port;
+  beforeAll(() => new Promise(r => Server.server.listen(0, '127.0.0.1', () => { port = Server.server.address().port; r(); })));
+  afterAll(() => new Promise(r => Server.server.close(r)));
+
+  const post = body => new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request({ host: '127.0.0.1', port, path: '/api/ask', method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }, res => {
+      let text = '';
+      res.on('data', c => { text += c; });
+      res.on('end', () => resolve({ status: res.statusCode, json: JSON.parse(text) }));
+    });
+    req.on('error', reject);
+    req.end(data);
+  });
+
+  // The model adds a bare LED and never fixes it.
+  const stubborn = () => [tools('a', LED_NO_RESISTOR_EDIT), says('Added an LED.'), says('It is fine.'), says('Still fine.')];
+
+  test('with board: the bad edit is checked against it (repair rounds, then the Heads up)', async () => {
+    const fetch = scriptedDeepSeek(stubborn());
+    vi.stubGlobal('fetch', fetch);
+    for (const m of ['log', 'info', 'warn', 'error']) vi.spyOn(console, m).mockImplementation(() => {});
+    const res = await post({ markdown: '', message: 'Add another LED.', history: [], board: LED_BOARD });
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    assert.ok(repairsOn(fetch.calls[fetch.calls.length - 1]).length > 0,
+      `the server never sent a repair round: user messages ${JSON.stringify(userHeads(fetch.calls[fetch.calls.length - 1]))}`);
+    assert.match(res.json.reply, /Heads up, this build has a problem:/, res.json.reply);
+    assert.match(res.json.reply, /LED2: Short circuit/, res.json.reply);
+    assert.deepStrictEqual(res.json.actions, LED_NO_RESISTOR_EDIT);
+  });
+
+  test('pin: without board, the same reply is as today (no repair round, no Heads up)', async () => {
+    const fetch = scriptedDeepSeek(stubborn());
+    vi.stubGlobal('fetch', fetch);
+    for (const m of ['log', 'info', 'warn', 'error']) vi.spyOn(console, m).mockImplementation(() => {});
+    const res = await post({ markdown: '', message: 'Add another LED.', history: [] });
+    assert.equal(res.status, 200, JSON.stringify(res.json));
+    assert.equal(fetch.calls.length, 2, `expected 2 requests, got ${fetch.calls.length}`);
+    assert.equal(res.json.reply, 'Added an LED.');
+    assert.deepStrictEqual(res.json.actions, LED_NO_RESISTOR_EDIT);
+  });
+});
+
+// ── An edit reports only the problems it introduces (#84 review) ────────────
+// With a board, checkBuild(actions, board) and finishAIReply's Heads up list
+// the problems on the board after the edit minus those already on it before,
+// both compared in the board's real labels. A half-built board's own gaps
+// are not the edit's fault, so they never cost a repair round or a Heads up.
+
+// Half built: BAT1 with only BAT1.0 → tp_63 wired, R1 at b2/b6, LED1 at
+// c8/c6, nothing else wired. Already on it, as a rebuild: BAT1.1 not wired,
+// the resistor at b2/b6 and the LED at c8/c6 not connected.
+const HALF_BOARD = {
+  parts: [
+    { type: 'battery',  label: 'BAT1' },
+    { type: 'resistor', label: 'R1', holes: ['b2', 'b6'] },
+    { type: 'led',      label: 'LED1', holes: ['c8', 'c6'] },
+  ],
+  wires: [{ id: 'W1', from: 'BAT1.0', to: 'tp_63' }],
+};
+const HALF_BEFORE = [/BAT1\.1 is not wired/, /resistor at b2\/b6 is not connected/, /LED at c8\/c6 is not connected/];
+// An LED straight across the rails: the − rail needs BAT1.1 first, then the
+// same bare LED as LED_NO_RESISTOR_EDIT. It becomes LED2.
+const HALF_LED_EDIT = [{ tool: 'add_wire', from: 'BAT1.1', to: 'tn_63', color: 'black' }, ...LED_NO_RESISTOR_EDIT];
+
+test('precondition: the half-built board has its 3 problems as a rebuild', () => {
+  const problems = checkOn(Board.toActions(HALF_BOARD).actions);
+  for (const re of HALF_BEFORE) assert.ok(problems.some(p => re.test(p)), `no ${re} on the half-built board: ${JSON.stringify(problems)}`);
+});
+
+test('checkBuild(clean edit, half-built board) is []: the board\'s own gaps are not the edit\'s problems', () => {
+  assert.deepStrictEqual(checkOn(CLEAN_EDIT, HALF_BOARD), []);
+});
+
+test('finishAIReply with a clean edit on the half-built board has no Heads up', () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const out = Server.finishAIReply({ reply: 'Done.', actions: CLEAN_EDIT.map(a => ({ ...a })), board: HALF_BOARD });
+  assert.equal(out.reply, 'Done.');
+  assert.deepStrictEqual(out.actions, CLEAN_EDIT);
+});
+
+test('a clean edit on the half-built board makes 2 requests and sends no repair message', async () => {
+  const { out, calls, last } = await runOn(HALF_BOARD, [tools('e', CLEAN_EDIT), says('Done.')]);
+  assert.equal(calls.length, 2, `expected 2 requests, got ${calls.length}; user messages sent: ${JSON.stringify(userHeads(last))}`);
+  assert.equal(repairsOn(last).length, 0, `no repair message: ${JSON.stringify(userHeads(last))}`);
+  assert.equal(out.reply, 'Done.');
+});
+
+test('a bare LED added to the half-built board: only LED2\'s new problems, none of the 3 already there', () => {
+  const problems = checkOn(HALF_LED_EDIT, HALF_BOARD);
+  assert.ok(problems.some(p => /^LED2: Short circuit\./.test(p)), `no "LED2: Short circuit...": ${JSON.stringify(problems)}`);
+  assert.ok(problems.some(p => /^LED2: Put a resistor in series/.test(p)), `no "LED2: Put a resistor in series...": ${JSON.stringify(problems)}`);
+  for (const re of HALF_BEFORE) {
+    assert.deepStrictEqual(problems.filter(p => re.test(p)), [], `${re} was on the board before the edit: ${JSON.stringify(problems)}`);
+  }
+});

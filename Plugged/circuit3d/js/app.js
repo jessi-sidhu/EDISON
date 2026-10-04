@@ -330,6 +330,16 @@
     if (App.simRunning) App.runSimulation();
   };
 
+  // Removes one wire, as selecting it and pressing Delete does (#84).
+  App.deleteWire = function (wire) {
+    pushHistory();
+    if (state.selected && state.selected.item === wire) App.deselect();
+    App.scene.remove(wire.group);
+    state.wires = state.wires.filter(w => w !== wire);
+    refreshCounts();
+    if (App.simRunning) App.runSimulation();
+  };
+
   // ── Gestures ─────────────────────────────────────────────────
   // A click (or a scroll) on a part's model while the simulation runs
   // moves the control its `gestures` names. gestures.js throttles the
@@ -413,8 +423,21 @@
 
   // ── Wire Drawing ─────────────────────────────────────────────
   // endPin: { world: Vector3, holeRef: { col, row } | null }
+  // id: the wire's saved id ('W3') when a load or undo redraws it; a new
+  // wire gets the next one.
 
-  App.finishWire = function (endPin) {
+  // One more than the highest wire number in use (#84): ids are never
+  // renumbered, and a deleted one comes back only once nothing is above it.
+  function nextWireId() {
+    let max = 0;
+    for (const w of state.wires.concat(state.unknownWires.map(u => u.raw))) {
+      const m = /^W(\d+)$/.exec(String(w && w.id));
+      if (m) max = Math.max(max, +m[1]);
+    }
+    return 'W' + (max + 1);
+  }
+
+  App.finishWire = function (endPin, id) {
     if (!state.wireStart) return;
     pushHistory();
 
@@ -438,6 +461,7 @@
     if (sp) { sp.userData.isWireStart = false; sp.material.emissiveIntensity = 0.4; }
 
     state.wires.push({
+      id:           /^W\d+$/.test(String(id)) ? id : nextWireId(),
       group:        wireGroup,
       startWorld,   endWorld,
       startHole,    endHole,          // breadboard hole refs (null for off-board pins)
@@ -769,7 +793,7 @@
 
       if (startWorld && endWorld) {
         state.wireStart = { world: startWorld, holeRef: startHole, pinMesh: startPinMesh };
-        App.finishWire({ world: endWorld, holeRef: endHole, pinMesh: endPinMesh });
+        App.finishWire({ world: endWorld, holeRef: endHole, pinMesh: endPinMesh }, w.id);
       }
     }
     state.wireColor = savedColor;
@@ -852,6 +876,13 @@
     return els.some(el => el.kind !== 'R' && el.kind !== 'SW');
   }
 
+  // A wire's two ends as the Wires table writes them: a hole name, or
+  // LABEL.k for an end on an off-board pin.
+  App.wireEnds = function (w) {
+    const end = (hole, comp, k) => (hole ? App.formatHole(hole) : comp ? pinRef(state.components, comp, k) : '?');
+    return { from: end(w.startHole, w.startComp, w.startPinIdx), to: end(w.endHole, w.endComp, w.endPinIdx) };
+  };
+
   App.exportMarkdown = function () {
     function holeStr(ref) {
       if (!ref) return null;
@@ -924,17 +955,12 @@
     if (!wires.length) {
       md += '_None._\n';
     } else {
-      md += '| from | to | color |\n';
-      md += '|------|----|-----------|\n';
+      md += '| id | from | to | color |\n';
+      md += '|----|------|----|-----------|\n';
       wires.forEach(w => {
-        const from = w.startHole
-          ? holeStr(w.startHole)
-          : (w.startComp ? pinRef(comps, w.startComp, w.startPinIdx) : '?');
-        const to = w.endHole
-          ? holeStr(w.endHole)
-          : (w.endComp ? pinRef(comps, w.endComp, w.endPinIdx) : '?');
+        const { from, to } = App.wireEnds(w);
         const colorHex = '#' + (w.group?.children?.[0]?.material?.color?.getHex?.() ?? 0xef4444).toString(16).padStart(6, '0');
-        md += `| ${from} | ${to} | ${colorHex} |\n`;
+        md += `| ${w.id} | ${from} | ${to} | ${colorHex} |\n`;
       });
     }
 
@@ -988,6 +1014,22 @@
     });
 
     return { components, wires };
+  };
+
+  // ── Export Board (issue #84) ──────────────────────────────────
+  // The live board in the board-model shape (docs/API-CONTRACT.md → "Board
+  // model"), sent with each AI request: parts by label with their holes in
+  // pin order (none off-board), values and controls; wires by id.
+  App.exportBoard = function () {
+    const parts = state.components.filter(c => !c.unknown).map(c => {
+      const p = { type: c.type, label: c.label };
+      if (c.holeRefs) p.holes = c.holeRefs.map(r => (r ? App.formatHole(r) : null));
+      p.values = Object.assign({}, c.values);
+      if (c.controls && Object.keys(c.controls).length) p.controls = Object.assign({}, c.controls);
+      return p;
+    });
+    const wires = state.wires.map(w => Object.assign({ id: w.id }, App.wireEnds(w)));
+    return { parts, wires };
   };
 
   // ── Clear All ─────────────────────────────────────────────────

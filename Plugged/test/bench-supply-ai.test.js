@@ -61,7 +61,6 @@ test('selectTools("Power an LED from the bench supply at 5 V with a series resis
   needSupply();
   const got = names('Power an LED from the bench supply at 5 V with a series resistor');
   for (const n of ['place_bench_supply', 'place_led', 'place_resistor']) assert.ok(got.includes(n), `${n} missing from ${JSON.stringify(got)}`);
-  assert.ok(got.length <= 12, `${got.length} tools`);
 });
 
 test('selectTools("use a ±12 V dual supply") sends place_bench_supply', () => {

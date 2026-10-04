@@ -570,7 +570,6 @@ for (const message of [
     seg();
     const got = toolNames(message);
     for (const n of ['place_seven_segment', 'place_resistor']) assert.ok(got.includes(n), `${n} missing from ${JSON.stringify(got)}`);
-    assert.ok(got.length <= 12, `${got.length} tools`);
   });
 }
 

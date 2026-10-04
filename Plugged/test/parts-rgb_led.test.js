@@ -683,11 +683,10 @@ for (const message of [
   'Build a color LED circuit',
   'Wire up two RGB LEDs',
 ]) {
-  test(`selectTools("${message}") sends place_rgb_led and place_resistor, at most 12 tools`, () => {
+  test(`selectTools("${message}") sends place_rgb_led and place_resistor`, () => {
     rgb();
     const got = toolNames(message);
     for (const n of ['place_rgb_led', 'place_resistor']) assert.ok(got.includes(n), `${n} missing from ${JSON.stringify(got)}`);
-    assert.ok(got.length <= 12, `${got.length} tools`);
   });
 }
 

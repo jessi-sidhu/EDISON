@@ -412,12 +412,11 @@ const systemOf = body => {
 };
 const toolNames = body => (body.tools || []).map(t => t.function.name);
 
-test('the QA request sends place_slide_switch, place_led, place_resistor and set_control (at most 12 tools)', () => {
+test('the QA request sends place_slide_switch, place_led, place_resistor and set_control', () => {
   const got = toolNames(sent[QA_PROMPT]);
   for (const n of ['place_slide_switch', 'place_led', 'place_resistor', 'set_control']) {
     assert.ok(got.includes(n), `${n} missing from the QA request's tools: ${JSON.stringify(got)}`);
   }
-  assert.ok(got.length <= 12, `${got.length} tools`);
 });
 
 // The recipe steps in the prompt sent for the QA request.

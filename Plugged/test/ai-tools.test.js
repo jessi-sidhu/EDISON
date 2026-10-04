@@ -486,3 +486,15 @@ describe('with 10 extra parts in the registry', () => {
       'no one catalogue line names every part, gizmos included');
   });
 });
+
+// ── delete_wire, issue #84 ──────────────────────────────────────────────────
+// docs/API-CONTRACT.md → "AI tools", always sent:
+//   delete_wire { wire: 'W3' }   the wire's id from the markdown Wires table
+
+test('delete_wire is a valid tool taking only the wire id, a required STRING', () => {
+  const t = tool('delete_wire');
+  checkDecl(t);
+  assert.deepEqual(Object.keys(t.parameters.properties), ['wire']);
+  assert.equal(t.parameters.properties.wire.type, 'STRING', 'delete_wire.wire is an id, e.g. "W3"');
+  assert.deepEqual(t.parameters.required, ['wire']);
+});

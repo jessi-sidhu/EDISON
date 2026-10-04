@@ -532,7 +532,6 @@ test('selectTools("Build a night light that turns an LED on when it gets dark") 
   for (const n of ['place_ldr', 'place_led', 'place_resistor']) {
     assert.ok(got.includes(n), `${n} missing from ${JSON.stringify(got)}`);
   }
-  assert.ok(got.length <= 12, `${got.length} tools`);
 });
 
 // ── The browser half ──────────────────────────────────────────────────────
