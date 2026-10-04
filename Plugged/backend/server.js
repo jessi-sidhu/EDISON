@@ -58,12 +58,21 @@ const SYSTEM_PROMPT = [
   '- tp_N = positive power rail at column N (+9V). tn_N = GND rail at column N.',
   '- Rails are NOT auto-connected to body holes. Always wire from tp/tn to body holes.',
   '',
+  'PART LABELS:',
+  '- Every part has a label that never changes: R1, R2 (resistors), LED1 (LEDs), BAT1 (batteries), BZ1 (buzzers), SW1 (buttons).',
+  '- The board state lists parts by label, so you can talk about them as R1, LED1 and so on.',
+  '- Only a battery pin can be a wire end by label: "BAT1.0" (+) or "BAT1.1" (-).',
+  '- Parts on the board (R, LED, BZ, SW) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.',
+  '- A new part gets the next free number for its type. After delete_all, numbering starts again at 1, so the first place_battery is BAT1.',
+  '- Without delete_all, a battery added next to BAT1 is BAT2.',
+  '',
   'BATTERY (CRITICAL):',
-  '- pin0 = positive (+), pin1 = negative (-). The battery sits off-board.',
+  '- BAT1.0 = positive (+), BAT1.1 = negative (-). The battery sits off-board.',
   '- EVERY circuit needs a battery with TWO wires:',
-  '  1. add_wire from "battery_0_pin0" to "tp_N" (red wire)',
-  '  2. add_wire from "battery_0_pin1" to "tn_N" (black wire)',
+  '  1. add_wire from "BAT1.0" to "tp_N" (red wire)',
+  '  2. add_wire from "BAT1.1" to "tn_N" (black wire)',
   '- Without BOTH battery wires the circuit WILL NOT WORK. ALWAYS include them.',
+  '- Never wire BAT1.0 straight to BAT1.1, or tp to tn: that is a short circuit.',
   '',
   'COMPONENT RULES:',
   '- LED: holeA = cathode (-) goes toward GND. holeB = anode (+) goes toward resistor/power.',
@@ -79,7 +88,8 @@ const SYSTEM_PROMPT = [
   'HOLE NAMES:',
   '- Body: "a3", "e14", "j22"',
   '- Rail: "tp_5" (positive col 5), "tn_5" (GND col 5)',
-  '- Battery: "battery_0_pin0" (+), "battery_0_pin1" (-)',
+  '- Battery: "BAT1.0" (+), "BAT1.1" (-). This label form is only for battery pins.',
+  '- Other parts: use the body holes they sit in, e.g. "a3", never "<label>.<k>".',
   '',
   'BUILDING BEHAVIOR:',
   '- When asked to build, fix, or create a circuit: call delete_all FIRST, then rebuild from scratch.',
@@ -95,8 +105,8 @@ const SYSTEM_PROMPT = [
   'COMPLETE RECIPE FOR ONE LED (starting at column C):',
   '  1. delete_all',
   '  2. place_battery',
-  '  3. add_wire: battery_0_pin0 -> tp_C (red)       ← battery to + rail',
-  '  4. add_wire: battery_0_pin1 -> tn_{C+6} (black) ← battery to - rail',
+  '  3. add_wire: BAT1.0 -> tp_C (red)               ← battery to + rail',
+  '  4. add_wire: BAT1.1 -> tn_{C+6} (black)         ← battery to - rail',
   '  5. place_resistor: holeA=a{C}, holeB=a{C+4}',
   '  6. place_led: holeA=a{C+6} (cathode), holeB=a{C+4} (anode)',
   '  7. add_wire: tp_{C} -> a{C} (red)               ← rail to resistor (REQUIRED!)',
@@ -120,7 +130,7 @@ const CIRCUIT_TOOLS = [{
     },
     {
       name: 'place_battery',
-      description: 'Place a 9V battery off-board. You MUST follow this with add_wire calls to connect battery_0_pin0 to a positive rail (tp_N) and battery_0_pin1 to a negative rail (tn_N).',
+      description: 'Place a 9V battery off-board. It gets the next battery label (BAT1 after delete_all). You MUST follow this with add_wire calls to connect BAT1.0 (+) to a positive rail (tp_N) and BAT1.1 (-) to a negative rail (tn_N).',
     },
     {
       name: 'place_resistor',
@@ -172,7 +182,7 @@ const CIRCUIT_TOOLS = [{
     },
     {
       name: 'add_wire',
-      description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or battery pins (e.g. "battery_0_pin0").',
+      description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or battery pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -). Other parts are wired through the body holes they sit in.',
       parameters: {
         type: 'OBJECT',
         properties: {
@@ -192,47 +202,61 @@ const CIRCUIT_TOOLS = [{
 // backwards LED into a guaranteed-dead one, or short past a component the
 // model deliberately put in series.
 
+// The old form of a battery pin, "battery_0_pin1".
+const OLD_BATTERY_PIN = /^battery_(\d+)_pin(\d+)$/i;
+
+// A battery pin in either form, as { n, pin } with n counting from 0:
+// "battery_0_pin1" and "BAT1.1" are both { n: 0, pin: 1 }. The i-th
+// place_battery in a build is battery_<i> and BAT<i+1>.
+function batteryPin(ref) {
+  const s = String(ref);
+  let m = OLD_BATTERY_PIN.exec(s);
+  if (m) return { n: +m[1], pin: +m[2] };
+  m = /^bat(\d+)\.(\d+)$/i.exec(s);
+  return m && +m[1] > 0 ? { n: +m[1] - 1, pin: +m[2] } : null;
+}
+
 // Holes in the same column and same half share a node. Each power rail is one
-// node along its whole length.
+// node along its whole length. Both forms of a battery pin are one node.
 function nodeKey(hole) {
   if (!hole) return null;
   const rail = /^(tp|tn|bp|bn)_\d+$/.exec(hole);
   if (rail) return rail[1];
   const body = /^([a-j])(\d+)$/i.exec(hole);
   if (body) return (body[1].toLowerCase() <= 'e' ? 'top' : 'bot') + body[2];
-  return hole;   // battery pins and anything unrecognised stay as themselves
+  const bat = batteryPin(hole);
+  if (bat) return `battery_${bat.n}_pin${bat.pin}`;
+  return hole;   // other part pins and anything unrecognised stay as themselves
 }
 
 // LEDs are left out of the graph below: they only conduct one way, so
 // treating one as a plain connection would bridge power to ground.
 const CONDUCTORS = ['place_resistor', 'place_button', 'place_buzzer'];
 
-function findCircuitProblems(actions) {
+// Problems name battery pins in label form (BAT1.0), matching the board and
+// the prompt, unless the AI itself wrote the old form (battery_0_pin0).
+// finishAIReply decides that from the reply as sent, before malformed
+// actions are dropped.
+function findCircuitProblems(actions, { labelForm = true } = {}) {
   if (!Array.isArray(actions) || actions.length === 0) return [];
   const problems = [];
   const wires = actions.filter(a => a.tool === 'add_wire');
-  const wired = pin => wires.some(w => w.from === pin || w.to === pin);
+  const ends = wires.flatMap(w => [w.from, w.to]);
+  const wired = key => ends.some(e => nodeKey(e) === key);
 
-  let batIdx = 0;
-  for (const a of actions) {
-    if (a.tool !== 'place_battery') continue;
-    const pin0 = `battery_${batIdx}_pin0`, pin1 = `battery_${batIdx}_pin1`;
-    if (!wired(pin0)) problems.push(`${pin0} is not wired to a positive rail (tp_N), so nothing on the board is powered.`);
-    if (!wired(pin1)) problems.push(`${pin1} is not wired to a ground rail (tn_N), so the circuit has no return path.`);
-    batIdx++;
-  }
+  const pinName = (n, k) => labelForm ? `BAT${n + 1}.${k}` : `battery_${n}_pin${k}`;
 
-  const edges = [];
-  for (const w of wires) edges.push([nodeKey(w.from), nodeKey(w.to)]);
+  const wireEdges = wires.map(w => [nodeKey(w.from), nodeKey(w.to)]);
+  const edges = wireEdges.slice();
   for (const c of actions) {
     if (CONDUCTORS.includes(c.tool)) edges.push([nodeKey(c.holeA), nodeKey(c.holeB)]);
   }
 
-  function reach(seed) {
+  function reach(seed, graph = edges) {
     const seen = new Set([seed]), queue = [seed];
     while (queue.length) {
       const at = queue.shift();
-      for (const [x, y] of edges) {
+      for (const [x, y] of graph) {
         if (!x || !y) continue;
         const next = x === at ? y : (y === at ? x : null);
         if (next && !seen.has(next)) { seen.add(next); queue.push(next); }
@@ -241,7 +265,27 @@ function findCircuitProblems(actions) {
     return seen;
   }
 
-  const pos = reach('battery_0_pin0'), neg = reach('battery_0_pin1');
+  // Every battery the build places or wires to.
+  const batteries = new Set();
+  let placed = 0;
+  for (const a of actions) if (a.tool === 'place_battery') batteries.add(placed++);
+  for (const e of ends) { const b = batteryPin(e); if (b) batteries.add(b.n); }
+
+  const pos = new Set(), neg = new Set();
+  for (const n of [...batteries].sort((a, b) => a - b)) {
+    const plus = `battery_${n}_pin0`, minus = `battery_${n}_pin1`;   // nodeKey form
+    if (n < placed) {
+      if (!wired(plus))  problems.push(`${pinName(n, 0)} is not wired to a positive rail (tp_N), so nothing on the board is powered.`);
+      if (!wired(minus)) problems.push(`${pinName(n, 1)} is not wired to a ground rail (tn_N), so the circuit has no return path.`);
+    }
+    // Wires alone joining + to − is a dead short. A resistor or buzzer in
+    // the path is a load, not a short.
+    if (reach(plus, wireEdges).has(minus)) {
+      problems.push(`${pinName(n, 0)} and ${pinName(n, 1)} are joined by wires alone, which is a short circuit across the battery. Put a resistor or other part between them.`);
+    }
+    for (const k of reach(plus)) pos.add(k);
+    for (const k of reach(minus)) neg.add(k);
+  }
 
   // holeA is the cathode (-), holeB is the anode (+).
   for (const led of actions.filter(a => a.tool === 'place_led')) {
@@ -355,6 +399,11 @@ function finishAIReply({ reply, actions }) {
     }
   }
 
+  // Name battery pins in problems the way the AI wrote them, judged before
+  // malformed actions are dropped so a half-written wire still counts.
+  const usedOldForm = actions.some(a => a && a.tool === 'add_wire'
+    && [a.from, a.to].some(e => OLD_BATTERY_PIN.test(String(e))));
+
   // Filter out malformed actions (missing required fields)
   actions = actions.filter(a => {
     if (a.tool === 'add_wire' && (!a.from || !a.to)) return false;
@@ -365,7 +414,7 @@ function finishAIReply({ reply, actions }) {
 
   // Report problems instead of patching them, so a wrong circuit is visible
   // rather than rewritten into a different one.
-  const problems = findCircuitProblems(actions);
+  const problems = findCircuitProblems(actions, { labelForm: !usedOldForm });
   if (problems.length) {
     console.warn('[validate] ' + problems.join(' | '));
     reply += `\n\nHeads up, this build has a problem:\n- ${problems.join('\n- ')}\n\nAsk me to fix it and I will rebuild the circuit.`;

@@ -81,7 +81,111 @@ test('op_amp_0_pin1 resolves to pin 1 of the first op amp', () => {
   assert.deepEqual(Chat.resolveEndpoint('op_amp_0_pin1', board), { comp: amp, pin: 1 });
 });
 
-test('a label-form ref like U1.OUT resolves to null for now', () => {
-  const board = fakeBoard([{ type: 'op_amp' }]);
+// ── Label form (R2.1, BAT1.0), issue #8 ────────────────────────────────────
+
+const Ids = require('../circuit3d/js/ids.js');
+
+// A board whose place* calls label parts the way App.place* does.
+function labellingBoard(parts) {
+  const add = type => parts.push({ type, label: Ids.nextLabel(parts, type) });
+  return Object.assign(fakeBoard(parts), {
+    clearAll:      () => { parts.length = 0; },
+    placeBattery:  () => add('battery'),
+    placeResistor: () => add('resistor'),
+    placeLED:      () => add('led'),
+  });
+}
+
+test('with parts [R1, R2], after R1 is deleted, R2.1 finds pin 1 of R2', () => {
+  const r1 = { type: 'resistor', label: 'R1' }, r2 = { type: 'resistor', label: 'R2' };
+  const parts = [r1, r2];
+  parts.splice(0, 1);                                  // R1 deleted
+  const board = fakeBoard(parts);
+  assert.deepEqual(Chat.resolveEndpoint('R2.1', board), { comp: r2, pin: 1 });
+});
+
+test('BAT1.0 is the same pin as battery_0_pin0', () => {
+  const bat = { type: 'battery', label: 'BAT1' };
+  const board = fakeBoard([{ type: 'resistor', label: 'R1' }, bat]);
+  assert.deepEqual(Chat.resolveEndpoint('BAT1.0', board), { comp: bat, pin: 0 });
+  assert.deepEqual(Chat.resolveEndpoint('BAT1.0', board), Chat.resolveEndpoint('battery_0_pin0', board));
+  assert.deepEqual(Chat.resolveEndpoint('BAT1.1', board), Chat.resolveEndpoint('battery_0_pin1', board));
+});
+
+test('the old battery_0_pin0 form still resolves on a labelled board', () => {
+  const bat = { type: 'battery', label: 'BAT1' };
+  const board = fakeBoard([{ type: 'resistor', label: 'R1' }, bat]);
+  assert.deepEqual(Chat.resolveEndpoint('battery_0_pin1', board), { comp: bat, pin: 1 });
+});
+
+test('a label no part has resolves to null', () => {
+  const board = fakeBoard([{ type: 'resistor', label: 'R1' }]);
+  assert.equal(Chat.resolveEndpoint('R9.0', board), null);
+});
+
+test('a label-form ref to a named pin like U1.OUT resolves to null', () => {
+  const board = fakeBoard([{ type: 'op_amp', label: 'U1' }]);
   assert.equal(Chat.resolveEndpoint('U1.OUT', board), null);
+});
+
+test('accepting delete_all, place_battery, then a wire from BAT1.0 wires the new battery', () => {
+  const parts = [{ type: 'battery', label: 'BAT1' }, { type: 'resistor', label: 'R1' }];
+  const board = labellingBoard(parts);
+  const out = Chat.applyActions([
+    { tool: 'delete_all' },
+    { tool: 'place_battery' },
+    { tool: 'add_wire', from: 'BAT1.0', to: 'a2', color: 'red' },
+  ], board);
+  assert.deepEqual(out, { applied: 3, failed: 0 });
+  assert.equal(board.wires.length, 1);
+  assert.equal(board.wires[0][0].comp, parts[0]);     // the battery placed after delete_all
+  assert.equal(board.wires[0][0].pin, 0);
+});
+
+// The preview draws parts that do not exist yet, so it has to predict the
+// label each place_* action will give its part. predictLabels(actions,
+// components) returns one entry per action: that label, or null.
+test('the preview predicts BAT1 for a battery placed after delete_all, so a wire to BAT1.0 reaches it', () => {
+  assert.equal(typeof Chat.predictLabels, 'function', 'chat.js must export predictLabels(actions, components)');
+  const board = [{ type: 'battery', label: 'BAT1' }, { type: 'resistor', label: 'R1' }];
+  const actions = [
+    { tool: 'delete_all' },
+    { tool: 'place_battery' },
+    { tool: 'add_wire', from: 'BAT1.0', to: 'tp_2', color: 'red' },
+  ];
+  assert.deepEqual(Chat.predictLabels(actions, board), [null, 'BAT1', null]);
+});
+
+test('the preview predicts BAT1 on an empty board', () => {
+  assert.equal(typeof Chat.predictLabels, 'function', 'chat.js must export predictLabels(actions, components)');
+  const actions = [
+    { tool: 'delete_all' },
+    { tool: 'place_battery' },
+    { tool: 'add_wire', from: 'BAT1.0', to: 'tp_2', color: 'red' },
+    { tool: 'add_wire', from: 'BAT1.1', to: 'tn_8', color: 'black' },
+  ];
+  assert.deepEqual(Chat.predictLabels(actions, []), [null, 'BAT1', null, null]);
+});
+
+test('without delete_all, a battery added next to BAT1 is predicted as BAT2', () => {
+  assert.equal(typeof Chat.predictLabels, 'function', 'chat.js must export predictLabels(actions, components)');
+  const board = [{ type: 'battery', label: 'BAT1' }];
+  const actions = [
+    { tool: 'place_battery' },
+    { tool: 'add_wire', from: 'BAT2.0', to: 'tp_2', color: 'red' },
+  ];
+  assert.deepEqual(Chat.predictLabels(actions, board), ['BAT2', null]);
+});
+
+test('predicted labels count each type separately and follow the board, gaps included', () => {
+  assert.equal(typeof Chat.predictLabels, 'function', 'chat.js must export predictLabels(actions, components)');
+  const board = [{ type: 'resistor', label: 'R2' }];     // R1 was deleted
+  const actions = [
+    { tool: 'place_resistor', holeA: 'a2',  holeB: 'a6' },
+    { tool: 'place_led',      holeA: 'a8',  holeB: 'a6' },
+    { tool: 'delete_all' },
+    { tool: 'place_resistor', holeA: 'a10', holeB: 'a14' },
+    { tool: 'place_battery' },
+  ];
+  assert.deepEqual(Chat.predictLabels(actions, board), ['R3', 'LED1', null, 'R1', 'BAT1']);
 });

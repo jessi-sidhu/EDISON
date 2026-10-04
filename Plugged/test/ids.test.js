@@ -39,3 +39,86 @@ test('hole addresses and plain words are not pin references', () => {
     assert.equal(Ids.parsePinRef(s), null, s);
   }
 });
+
+// ── Stable labels (R1, LED1, BAT1…), issue #2 ─────────────────────────────
+
+// Place parts the way App.place* will: each new part takes nextLabel.
+function placeAll(types) {
+  const list = [];
+  for (const type of types) list.push({ type, label: Ids.nextLabel(list, type) });
+  return list;
+}
+
+test('each part type has its own label prefix', () => {
+  assert.deepEqual(Ids.LABEL_PREFIX, { resistor: 'R', led: 'LED', battery: 'BAT', buzzer: 'BZ', button: 'SW' });
+});
+
+test('the first part of each type is number 1', () => {
+  assert.equal(Ids.nextLabel([], 'resistor'), 'R1');
+  assert.equal(Ids.nextLabel([], 'led'), 'LED1');
+  assert.equal(Ids.nextLabel([], 'battery'), 'BAT1');
+  assert.equal(Ids.nextLabel([], 'buzzer'), 'BZ1');
+  assert.equal(Ids.nextLabel([], 'button'), 'SW1');
+});
+
+test('an unknown part type gets the U prefix', () => {
+  assert.equal(Ids.nextLabel([], 'op_amp'), 'U1');
+});
+
+test('two unknown types share the U prefix, so their labels never collide', () => {
+  assert.equal(Ids.nextLabel([{ type: 'op_amp', label: 'U1' }], 'capacitor'), 'U2');
+});
+
+test('removing R1 leaves R2 as R2', () => {
+  const [r1, r2] = placeAll(['resistor', 'resistor']);
+  assert.deepEqual([r1.label, r2.label], ['R1', 'R2']);
+  const rest = [r2];                                  // R1 deleted
+  assert.equal(r2.label, 'R2');
+  assert.equal(Ids.findByLabel(rest, 'R2'), r2);
+});
+
+test('after R1 is deleted the next resistor is R3, not a reused R1', () => {
+  const [, r2] = placeAll(['resistor', 'resistor']);
+  assert.equal(Ids.nextLabel([r2], 'resistor'), 'R3');
+});
+
+test('findByLabel ignores case', () => {
+  const parts = [{ type: 'resistor', label: 'R1' }, { type: 'resistor', label: 'R2' }, { type: 'led', label: 'LED1' }];
+  assert.equal(Ids.findByLabel(parts, 'r2'), parts[1]);
+  assert.equal(Ids.findByLabel(parts, 'led1'), parts[2]);
+});
+
+test('findByLabel finds nothing for a label no part has', () => {
+  const parts = [{ type: 'resistor', label: 'R1' }];
+  assert.ok(!Ids.findByLabel(parts, 'R9'));
+});
+
+test('other types\' labels do not count toward a prefix', () => {
+  const parts = [
+    { type: 'led', label: 'LED7' }, { type: 'battery', label: 'BAT4' },
+    { type: 'buzzer', label: 'BZ2' }, { type: 'button', label: 'SW9' },
+  ];
+  assert.equal(Ids.nextLabel(parts, 'resistor'), 'R1');
+  assert.equal(Ids.nextLabel(parts, 'led'), 'LED8');
+  assert.equal(Ids.nextLabel(parts, 'battery'), 'BAT5');
+});
+
+test('label numbers compare as numbers, so after R10 comes R11', () => {
+  const parts = [{ type: 'resistor', label: 'R9' }, { type: 'resistor', label: 'R10' }];
+  assert.equal(Ids.nextLabel(parts, 'resistor'), 'R11');
+});
+
+// componentId is the name the AI reads and wires to, so a labelled part goes
+// by its label (issue #8). Parts with no label still count by type.
+test('componentId is the label when a part has one', () => {
+  const parts = [{ type: 'resistor', label: 'R2' }, { type: 'led', label: 'LED1' }, { type: 'resistor', label: 'R3' }];
+  assert.equal(Ids.componentId(parts, parts[0]), 'R2');
+  assert.equal(Ids.componentId(parts, parts[1]), 'LED1');
+  assert.equal(Ids.componentId(parts, parts[2]), 'R3');
+});
+
+test('componentId falls back to type_n for a part with no label', () => {
+  const parts = [{ type: 'battery', label: 'BAT1' }, { type: 'resistor' }, { type: 'resistor' }];
+  assert.equal(Ids.componentId(parts, parts[0]), 'BAT1');
+  assert.equal(Ids.componentId(parts, parts[2]), 'resistor_1');
+});

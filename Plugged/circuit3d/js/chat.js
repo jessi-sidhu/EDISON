@@ -18,14 +18,17 @@
 
   const Ids = typeof module === 'object' && module.exports ? require('./ids.js') : window.App;
 
-  // A wire end the AI names: a component pin ("battery_0_pin0") or a hole.
+  // A wire end the AI names: a component pin by label ("BAT1.0") or the old
+  // form ("battery_0_pin0"), or a hole. Pin k is the same index in both.
   // Returns { comp, pin } or { hole }, or null if it names nothing.
   function resolveEndpoint(str, board) {
     const ref = Ids.parsePinRef(str);
     if (ref) {
-      // Label form ("U1.OUT") and named pins aren't wired up yet.
-      if (ref.label || typeof ref.pin !== 'number') return null;
-      const comp = Ids.findComponent(board.components(), ref.type, ref.n);
+      // Named pins ("U1.OUT") aren't wired up yet: pins are indexed by number.
+      if (typeof ref.pin !== 'number') return null;
+      const comp = ref.label
+        ? Ids.findByLabel(board.components(), ref.label)
+        : Ids.findComponent(board.components(), ref.type, ref.n);
       return comp ? { comp, pin: ref.pin } : null;
     }
     const hole = holeOf(str, board);
@@ -85,7 +88,22 @@
     return board.batch(() => applyActions(actions, board));
   }
 
-  return { resolveEndpoint, applyActions, acceptBuild, colorHex, BATTERY_SPOT };
+  // The label each action will give its part when accepted, or null for an
+  // action that places nothing. Mirrors what App.place* does on Accept:
+  // Ids.nextLabel over the board as it will be, with delete_all emptying it.
+  function predictLabels(actions, components) {
+    let parts = (components || []).slice();
+    return (actions || []).map(a => {
+      if (a.tool === 'delete_all') { parts = []; return null; }
+      if (!a.tool || !a.tool.startsWith('place_')) return null;
+      const type = a.tool.slice('place_'.length);
+      const label = Ids.nextLabel(parts, type);
+      parts.push({ type, label });
+      return label;
+    });
+  }
+
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, colorHex, BATTERY_SPOT };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -181,19 +199,25 @@ if (typeof window !== 'undefined') (function (App, Chat) {
     const bb = App.state.breadboard;
 
     // Pin positions of batteries that do not exist yet, so wire ghosts can
-    // reach them. A delete_all ahead of them means numbering restarts at 0.
+    // reach them. Keyed (lower case) by the label Accept will give each one
+    // ("bat1.0") and by the old form ("battery_0_pin0"). A delete_all ahead
+    // of them means numbering restarts.
     const pendingPins = {};
     const H = 2.6;                   // battery body height (must match buildBattery)
+    const labels = Chat.predictLabels(actions, App.state.components);
     let batteryIdx = App.state.components.filter(c => c.type === 'battery').length;
-    for (const a of actions) {
+    actions.forEach((a, i) => {
       if (a.tool === 'delete_all') batteryIdx = 0;
       if (a.tool === 'place_battery') {
         const { x, z } = Chat.BATTERY_SPOT;
-        pendingPins[`battery_${batteryIdx}_pin0`] = new THREE.Vector3(x - 0.32, H + 0.54, z);
-        pendingPins[`battery_${batteryIdx}_pin1`] = new THREE.Vector3(x + 0.32, H + 0.24, z);
+        const pins = [new THREE.Vector3(x - 0.32, H + 0.54, z), new THREE.Vector3(x + 0.32, H + 0.24, z)];
+        pins.forEach((p, k) => {
+          pendingPins[`${labels[i]}.${k}`.toLowerCase()] = p;
+          pendingPins[`battery_${batteryIdx}_pin${k}`] = p;
+        });
         batteryIdx++;
       }
-    }
+    });
 
     for (const a of actions) {
       let ghost = null;
@@ -225,7 +249,8 @@ if (typeof window !== 'undefined') (function (App, Chat) {
 
   function buildWireGhost(fromStr, toStr, colorName, pendingPins) {
     function resolvePos(str) {
-      if (pendingPins[str]) return pendingPins[str].clone();
+      const pending = pendingPins[String(str).toLowerCase()];
+      if (pending) return pending.clone();
       const e = Chat.resolveEndpoint(str, board);
       if (!e) return null;
       if (e.hole) return new THREE.Vector3(e.hole.x, 0.06, e.hole.z);

@@ -149,14 +149,20 @@
   // ── Placement ────────────────────────────────────────────────
   // Both placeResistor and placeLED now receive hole objects directly
   // (already resolved by interaction.js hover logic).
+  // Every place* takes an optional last `opts`; opts.label keeps a saved
+  // label (R2, BAT1…), otherwise the part gets the next free one.
 
-  App.placeResistor = function (holeA, holeB, values) {
+  function partLabel(type, opts) {
+    return (opts && opts.label) || App.nextLabel(state.components, type);
+  }
+
+  App.placeResistor = function (holeA, holeB, values, opts) {
     pushHistory();
     const vals = App.componentValues('resistor', values);
     const { group, pins } = App.buildResistor(holeA, holeB, vals.resistance);
     App.scene.add(group);
     const record = {
-      type: 'resistor', group, pins, pinMeshes: [], values: vals,
+      type: 'resistor', label: partLabel('resistor', opts), group, pins, pinMeshes: [], values: vals,
       holeRefs: [{ col: holeA.col, row: holeA.row },
                  { col: holeB.col, row: holeB.row }],
     };
@@ -165,13 +171,13 @@
     refreshCounts();
   };
 
-  App.placeLED = function (holeA, holeB, values) {
+  App.placeLED = function (holeA, holeB, values, opts) {
     pushHistory();
     const vals = App.componentValues('led', values);
     const { group, pins } = App.buildLED(holeA, holeB, vals.color);
     App.scene.add(group);
     const record = {
-      type: 'led', group, pins, pinMeshes: [], values: vals,
+      type: 'led', label: partLabel('led', opts), group, pins, pinMeshes: [], values: vals,
       // pin 0 = cathode (−), pin 1 = anode (+)
       holeRefs: [{ col: holeA.col, row: holeA.row },   // cathode
                  { col: holeB.col, row: holeB.row }],   // anode
@@ -181,12 +187,12 @@
     refreshCounts();
   };
 
-  App.placeBuzzer = function (holeA, holeB, values) {
+  App.placeBuzzer = function (holeA, holeB, values, opts) {
     pushHistory();
     const { group, pins } = App.buildBuzzer(holeA, holeB);
     App.scene.add(group);
     const record = {
-      type: 'buzzer', group, pins, pinMeshes: [],
+      type: 'buzzer', label: partLabel('buzzer', opts), group, pins, pinMeshes: [],
       values: App.componentValues('buzzer', values),
       holeRefs: [{ col: holeA.col, row: holeA.row },
                  { col: holeB.col, row: holeB.row }],
@@ -196,12 +202,12 @@
     refreshCounts();
   };
 
-  App.placeButton = function (holeA, holeB, values) {
+  App.placeButton = function (holeA, holeB, values, opts) {
     pushHistory();
     const { group, pins, capMesh } = App.buildButton(holeA, holeB);
     App.scene.add(group);
     const record = {
-      type: 'button', group, pins, pinMeshes: [],
+      type: 'button', label: partLabel('button', opts), group, pins, pinMeshes: [],
       values: App.componentValues('button', values),
       holeRefs: [{ col: holeA.col, row: holeA.row },
                  { col: holeB.col, row: holeB.row }],
@@ -270,14 +276,14 @@
 
   };
 
-  App.placeBattery = function (wx, wz, values) {
+  App.placeBattery = function (wx, wz, values, opts) {
     pushHistory();
     const margin = state.breadboard.BOARD_W / 2 + 2.5;
     const placedX = wx >= 0 ? Math.max(wx, margin) : Math.min(wx, -margin);
     const { group, pins } = App.buildBattery(placedX, wz);
     App.scene.add(group);
     const record = {
-      type: 'battery', group, pins, pinMeshes: [],
+      type: 'battery', label: partLabel('battery', opts), group, pins, pinMeshes: [],
       values: App.componentValues('battery', values),
       holeRefs: null, // not on breadboard
     };
@@ -506,6 +512,7 @@
       components: state.components.map((c, i) => ({
         type:     c.type,
         id:       App.componentId(state.components, c),
+        label:    c.label,             // on each part, never at file level
         values:   c.values,
         holeRefs: c.holeRefs,          // null for battery
         position: c.group
@@ -569,14 +576,17 @@
     // wires below still find their parts by index.
     const PLACE = { resistor: App.placeResistor, led: App.placeLED,
                     buzzer: App.placeBuzzer, button: App.placeButton };
-    const rebuilt = App.rebuildComponents(data.components, c => {
+    // Files saved before labels existed get them filled in, in list order.
+    const records = App.assignMissingLabels(data.components);
+    const rebuilt = App.rebuildComponents(records, c => {
       const before = state.components.length;
+      const opts   = { label: c.label };
       if (c.type === 'battery' && c.position) {
-        App.placeBattery(c.position.x, c.position.z, c.values);
+        App.placeBattery(c.position.x, c.position.z, c.values, opts);
       } else if (PLACE[c.type] && c.holeRefs?.length === 2) {
         const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
         const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-        if (hA && hB) PLACE[c.type](hA, hB, c.values);
+        if (hA && hB) PLACE[c.type](hA, hB, c.values, opts);
       }
       return state.components.length > before ? state.components[state.components.length - 1] : null;
     });
@@ -665,6 +675,13 @@
 
   // ── Markdown Export (human-readable for AI) ──────────────────
 
+  // Pin k of a part as the AI writes it: "BAT1.0" for a labelled part, the
+  // old "battery_0_pin0" only for one with no label.
+  function pinRef(comps, comp, k) {
+    const id = App.componentId(comps, comp);
+    return comp.label ? `${id}.${k}` : `${id}_pin${k}`;
+  }
+
   App.exportMarkdown = function () {
     function holeStr(ref) {
       if (!ref) return null;
@@ -696,8 +713,8 @@
           if (c.type === 'led') { pA += ' (cathode −)'; pB += ' (anode +)'; }
         } else {
           // Off-board battery — show the wire reference names the AI must use
-          pA = `off-board + → wire ref: ${id}_pin0`;
-          pB = `off-board − → wire ref: ${id}_pin1`;
+          pA = `off-board + → wire ref: ${pinRef(comps, c, 0)}`;
+          pB = `off-board − → wire ref: ${pinRef(comps, c, 1)}`;
         }
         md += `| ${id} | ${c.type} | ${App.formatValue(c) || '—'} | ${pA} | ${pB} |\n`;
       });
@@ -709,7 +726,7 @@
       md += '\n## Battery wiring (how to connect in add_wire actions)\n';
       batteries.forEach(b => {
         const id = App.componentId(comps, b);
-        md += `- **${id}**: positive terminal → use \`"from": "${id}_pin0"\`  |  negative terminal → use \`"from": "${id}_pin1"\`\n`;
+        md += `- **${id}**: positive terminal → use \`"from": "${pinRef(comps, b, 0)}"\`  |  negative terminal → use \`"from": "${pinRef(comps, b, 1)}"\`\n`;
       });
     }
 
@@ -723,10 +740,10 @@
       wires.forEach(w => {
         const from = w.startHole
           ? holeStr(w.startHole)
-          : (w.startComp ? `${App.componentId(comps, w.startComp)}_pin${w.startPinIdx}` : '?');
+          : (w.startComp ? pinRef(comps, w.startComp, w.startPinIdx) : '?');
         const to = w.endHole
           ? holeStr(w.endHole)
-          : (w.endComp ? `${App.componentId(comps, w.endComp)}_pin${w.endPinIdx}` : '?');
+          : (w.endComp ? pinRef(comps, w.endComp, w.endPinIdx) : '?');
         const colorHex = '#' + (w.group?.children?.[0]?.material?.color?.getHex?.() ?? 0xef4444).toString(16).padStart(6, '0');
         md += `| ${from} | ${to} | ${colorHex} |\n`;
       });
@@ -770,10 +787,10 @@
     const wires = state.wires.map(w => {
       const from = w.startHole
         ? holeStr(w.startHole)
-        : (w.startComp ? App.componentId(state.components, w.startComp) + '_pin' + w.startPinIdx : null);
+        : (w.startComp ? pinRef(state.components, w.startComp, w.startPinIdx) : null);
       const to = w.endHole
         ? holeStr(w.endHole)
-        : (w.endComp ? App.componentId(state.components, w.endComp) + '_pin' + w.endPinIdx : null);
+        : (w.endComp ? pinRef(state.components, w.endComp, w.endPinIdx) : null);
       return { from, to };
     });
 
@@ -825,6 +842,7 @@
     return {
       components: state.components.map(c => ({
         type:     c.type,
+        label:    c.label,
         values:   c.values,
         holeRefs: c.holeRefs,
         position: c.group ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) } : null,

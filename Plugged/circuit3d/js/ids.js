@@ -14,9 +14,11 @@
   if (root) Object.assign(root.App = root.App || {}, Ids);
 })(typeof window !== 'undefined' ? window : null, function () {
 
-  // "<type>_<n>", where n counts parts of that type only, so battery_0 is
-  // always the first battery however many other parts come before it.
+  // The part's label (R1, BAT1…) when it has one. Otherwise "<type>_<n>",
+  // where n counts parts of that type only, so battery_0 is always the first
+  // battery however many other parts come before it.
   function componentId(components, comp) {
+    if (comp.label) return String(comp.label);
     return comp.type + '_' + components.filter(c => c.type === comp.type).indexOf(comp);
   }
 
@@ -37,5 +39,31 @@
     return components.filter(c => c.type === type)[n] || null;
   }
 
-  return { componentId, parsePinRef, findComponent };
+  // Stable labels shown to people: R1, LED2, BAT1… A label stays with its
+  // part for life, so deleting R1 leaves R2 as R2. Unknown types share "U".
+  const LABEL_PREFIX = { resistor: 'R', led: 'LED', battery: 'BAT', buzzer: 'BZ', button: 'SW' };
+
+  function labelPrefix(type) {
+    return LABEL_PREFIX[type] || 'U';
+  }
+
+  // Prefix plus one more than the highest number in use for that prefix.
+  // Only labels that are exactly prefix + digits count.
+  function nextLabel(components, type) {
+    const prefix = labelPrefix(type);
+    const re = new RegExp('^' + prefix + '(\\d+)$', 'i');
+    let max = 0;
+    for (const c of components || []) {
+      const m = re.exec(c && c.label != null ? String(c.label) : '');
+      if (m) max = Math.max(max, +m[1]);
+    }
+    return prefix + (max + 1);
+  }
+
+  function findByLabel(components, label) {
+    const want = String(label).toLowerCase();
+    return (components || []).find(c => c && c.label != null && String(c.label).toLowerCase() === want) || null;
+  }
+
+  return { componentId, parsePinRef, findComponent, LABEL_PREFIX, nextLabel, findByLabel };
 });

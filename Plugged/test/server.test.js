@@ -15,6 +15,59 @@ test('finishAIReply drops malformed actions, fills an empty reply and flags an u
   assert.match(out.reply, /battery_0_pin0 is not wired/);
 });
 
+// ── Battery by label form (BAT1.0), issue #8 ───────────────────────────────
+
+// The recorded single-LED build, with the battery wired as ref(pin).
+const ledBuild = ref => [
+  { tool: 'delete_all' },
+  { tool: 'place_battery' },
+  { tool: 'add_wire', from: ref(0), to: 'tp_2', color: 'red' },
+  { tool: 'add_wire', from: ref(1), to: 'tn_8', color: 'black' },
+  { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
+  { tool: 'place_led', holeA: 'a8', holeB: 'a6' },
+  { tool: 'add_wire', from: 'tp_2', to: 'a2', color: 'red' },
+  { tool: 'add_wire', from: 'a8', to: 'tn_8', color: 'black' },
+];
+
+test('findCircuitProblems flags a short across BAT1.0 and BAT1.1', () => {
+  const out = Server.finishAIReply({ reply: 'Built it.', actions: [
+    { tool: 'delete_all' },
+    { tool: 'place_battery' },
+    { tool: 'add_wire', from: 'BAT1.0', to: 'BAT1.1', color: 'red' },
+  ] });
+  assert.match(out.reply, /Heads up/);
+  assert.match(out.reply, /short/i);
+  assert.doesNotMatch(out.reply, /not wired/, 'both battery pins are wired; the problem is the short');
+});
+
+test('a single LED wired from BAT1.0 and BAT1.1 has no problems', () => {
+  const out = Server.finishAIReply({ reply: 'Built it.', actions: ledBuild(k => `BAT1.${k}`) });
+  assert.equal(out.reply, 'Built it.');
+});
+
+test('the same LED wired from battery_0_pin0 and battery_0_pin1 still has no problems', () => {
+  const out = Server.finishAIReply({ reply: 'Built it.', actions: ledBuild(k => `battery_0_pin${k}`) });
+  assert.equal(out.reply, 'Built it.');
+});
+
+test('a battery with only BAT1.0 wired is flagged for its unwired negative pin', () => {
+  const out = Server.finishAIReply({ reply: 'Built it.', actions: [
+    { tool: 'place_battery' },
+    { tool: 'add_wire', from: 'BAT1.0', to: 'tp_2', color: 'red' },
+  ] });
+  assert.match(out.reply, /Heads up/);
+  assert.match(out.reply, /(BAT1\.1|battery_0_pin1) is not wired/);
+  assert.doesNotMatch(out.reply, /(BAT1\.0|battery_0_pin0) is not wired/, 'BAT1.0 is wired to tp_2');
+});
+
+test('the system prompt teaches the label form for battery pins', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'backend', 'server.js'), 'utf8');
+  const prompt = src.slice(src.indexOf('const SYSTEM_PROMPT'), src.indexOf("].join('\\n');", src.indexOf('const SYSTEM_PROMPT')));
+  assert.match(prompt, /BAT1\.0/);
+  assert.match(prompt, /BAT1\.1/);
+  assert.doesNotMatch(prompt, /battery_0_pin/);
+});
+
 test('requiring the server does not start it listening', () => {
   assert.ok(Server.server, 'server.js should export its http server');
   assert.equal(Server.server.listening, false);
