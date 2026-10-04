@@ -30,9 +30,9 @@ These are the prompts we send to Edison's AI to check that it builds circuits th
 | 15 | 0/3 | 0/3 | 45–164 | second LED never lit at the trough; one run failed only on the checker's false positive |
 | 16 | 0/3 | 0/3 | ~76 | no build at all (as 06) |
 
-Next steps are in `docs/TODO.md` (tasks 1–4).
+Next steps are in `docs/TODO.md` (tasks 1–3).
 
-- Known grader limits: the circuit checker puts a Heads up on correct builds of 07 and 15 (a false positive, pinned in `test/prompt-bank.test.js`), and 05, 06 and 10 need a stiff divider at these tolerances.
+- Known grader limits: 05, 06 and 10 need a stiff divider at these tolerances. (The circuit checker's Heads up on correct builds of 07 and 15, a false positive in the run above, is fixed in #3; `test/prompt-bank.test.js` pins that no clean build is flagged.)
 
 ## How a case is graded
 

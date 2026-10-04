@@ -29,7 +29,7 @@ The full detail of each task (why, files, steps, done-when) is in **`docs/TODO.m
 | 1 | Reasoning on by default, with the right model and limits | It doubled the pass rate (11 → 24 of 48). Cases 06 and 16 need a bigger `max_tokens`, and the 60 s/75 s timeouts must rise. Aarmen picks flash vs Pro from a Pro run. |
 | 2 | TL072 guide: a sine input sets the generator's amplitude | Case 11 built a DC input every time because our own guide says "offset = DC in". |
 | 3 | The repair loop: keep the best build, never send a half-finished one | Repairs often made builds worse; all 5 "parts, no wires" runs came from it. |
-| 4 | Checker false positives (superdiode, back-to-back LEDs) | They send correct builds into repair. |
+| 4 | Checker false positives (superdiode, back-to-back LEDs): **done in #3** | The clean BANK-07 and BANK-15 builds no longer get a Heads up. |
 | 5 | The op-amp repair checks (branch `aarmen/204-opamp-repair-checks`) | Built; waits for task 3. |
 | 6 | Wire on-board parts by pin name | Only if hole-level mistakes remain. |
 | 7 | Aarmen's call: the LED current floor in case 12 (4.9 mA vs a 5 mA floor) | |
@@ -51,7 +51,7 @@ Why builds failed, by impact:
 1. **Thinking was off** (fixed behind a switch; turning it on doubled the pass rate). The model is fast and cheap but didn't reason. Its mistakes were reasoning mistakes: op-amp inputs swapped, the meter on the wrong row of the TL072, wrong gain resistors.
 2. **The repair loop is our bug** (`docs/TODO.md` task 3). When the checker finds a problem, the model is told to rebuild the whole circuit from scratch. The first repair fixed 11 of 31 builds; the second fixed 2 of 13, and some repairs added problems. The 12-round cap cut second rebuilds off after the parts and before the wires.
 3. **Hole bookkeeping.** Every connection is a hole address, and a hole takes one lead. The leftover problems were mostly hole-level: wrong row (14 runs), two leads in one hole (6), supply unwired (5). `docs/TODO.md` task 6 removes this if it still matters after reasoning.
-4. **Our checker's false positives** on BANK-07 and BANK-15 (`docs/TODO.md` task 4).
+4. **Our checker's false positives** on BANK-07 and BANK-15 (fixed in #3).
 5. **Our own TL072 guide** taught "offset = DC input", so a sine was built as DC (task 2).
 6. **Reasoning can run out of tokens** before it builds anything (cases 06 and 16, task 1).
 

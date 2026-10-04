@@ -65,23 +65,6 @@ Where the test set stands: **11/48 with reasoning off, 24/48 with reasoning on**
   - a repair that fixes everything is returned.
 - Live: the test set beats its last run with no "parts, no wires" runs, and the demo check passes 3/3.
 
-## 4. Checker false positives on two correct circuits
-
-**Why.** The server's circuit checker (`findCircuitProblems` in `Plugged/backend/server.js`) flags two correct circuits. That adds a "Heads up" and sends a correct build into a repair that can break it:
-- **Case 07, the precision half-wave rectifier (superdiode):** the diode inside the op-amp's feedback is called backwards.
-- **Case 15, two LEDs back to back on the function generator:** the second LED is said to have no forward path, but it conducts on the negative half of the sine. One case-15 run with reasoning on failed on this warning alone.
-
-`Plugged/test/prompt-bank.test.js` pins this list today, so update it when the checker is fixed.
-
-**Steps.**
-1. A diode or LED whose path runs through a source that swings both ways (a function generator with amplitude > 0) has a forward path in one half of the wave: don't call it backwards or pathless.
-2. A diode inside an op-amp's feedback loop (between OUT and IN−, or OUT and the load) is judged by the simulator, not the graph.
-3. No new misses: an LED backwards on a DC supply is still caught (pin the existing cases).
-
-**Done when.**
-- The clean builds of 07 and 15 give no checker problems; the existing backwards-LED and no-path cases still do.
-- `prompt-bank.test.js`'s pinned list is empty.
-
 ## 5. The op-amp repair checks (built; branch `aarmen/204-opamp-repair-checks`)
 
 **What it is.** Four extra checks in the repair loop, built and unit-tested (2912 unit tests pass), on its own pushed branch:

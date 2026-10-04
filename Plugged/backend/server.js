@@ -894,12 +894,14 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // Every source the build places or wires to, as "<type>|<n>".
   const sources = new Map();
   const placed = new Map();   // def → how many the build places
+  const placeAction = new Map();   // "<type>|<n>" → its place action
   for (const a of actions) {
     const def = PART_BY_TOOL.get(a.tool);
     if (!SOURCES.includes(def)) continue;
     const n = placed.get(def) || 0;
     placed.set(def, n + 1);
     sources.set(`${def.type}|${n}`, { def, n });
+    placeAction.set(`${def.type}|${n}`, a);
   }
   for (const e of ends) { const p = sourcePin(e); if (p) sources.set(`${p.def.type}|${p.n}`, { def: p.def, n: p.n }); }
   const byOrder = (x, y) => SOURCES.indexOf(x.def) - SOURCES.indexOf(y.def) || x.n - y.n;
@@ -918,25 +920,45 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   };
   const srcPin = (def, n, k) => (isBattery(def) ? pinName(n, k) : `${def.prefix}${n + 1}.${k}`);
 
+  // #3: a source whose wave crosses 0 V (a sine's amplitude above
+  // |offset|) drives its + both above and below its −, so its pair is grown
+  // both ways. Its values are its place action's own keys, else the part's
+  // defaults. Returns { f } (the wave's frequency) or null.
+  const crossingWave = (def, a) => {
+    const values = {};
+    for (const [k, spec] of Object.entries(def.values || {})) values[k] = a && a[k] != null ? Number(a[k]) : spec.default;
+    let els = [];
+    try { els = def.elements(values, {}) || []; } catch { els = []; }
+    const w = els.map(el => el.kind === 'V' && el.wave).find(Boolean);
+    return w && w.amp > Math.abs(w.offset) ? { f: w.freq } : null;
+  };
+  let crossing = null;   // the first source whose wave crosses 0 V
+
   const pos = new Set(), neg = new Set();
+  // A crossing wave's reversed pair (COM as +, OUT as −) grows into its own
+  // sets: mixed into pos / neg, its tn would meet another source's growth
+  // and excuse a backwards LED on that source (#3).
+  const posR = new Set(), negR = new Set();
   const terminals = [];
-  // A terminal pair's reach into pos / neg: first each side without diodes,
-  // then grown through forward diodes without crossing into the other side:
-  // an LED that lit up one branch must not carry + round through the ground
-  // rail and hide a reversed LED elsewhere.
-  function growPair(plus, minus) {
+  // A terminal pair's reach into pos / neg (or `into`'s pair): first each
+  // side without diodes, then grown through forward diodes without crossing
+  // into the other side: an LED that lit up one branch must not carry +
+  // round through the ground rail and hide a reversed LED elsewhere.
+  function growPair(plus, minus, [P, N] = [pos, neg]) {
     const plusSide = reach(plus), minusSide = reach(minus);
     const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
     const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
-    for (const k of plusSide) pos.add(k);
-    for (const k of minusSide) neg.add(k);
-    for (const k of reach(plus, fromPlus, onlyMinus))  pos.add(k);
-    for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
+    for (const k of plusSide) P.add(k);
+    for (const k of minusSide) N.add(k);
+    for (const k of reach(plus, fromPlus, onlyMinus))  P.add(k);
+    for (const k of reach(minus, fromMinus, onlyPlus)) N.add(k);
   }
   const railPairs = new Map();   // "tp|tn" → the batteries wired to that rail pair
   for (const { def, n } of [...sources.values()].sort(byOrder)) {
     const key = k => sourceKey(def, n, k);
     const ref = def.pins.indexOf(def.ref);
+    const wave = crossingWave(def, placeAction.get(`${def.type}|${n}`));
+    if (wave && !crossing) crossing = wave;
     if (n < (placed.get(def) || 0)) {
       if (isBattery(def)) {
         if (!wired(key(0))) problems.push(`${pinName(n, 0)} is not wired to a positive rail (tp_N), so nothing on the board is powered.`);
@@ -965,6 +987,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
       if (isBattery(def) && !/^\||\|$/.test(pair)) railPairs.set(pair, [...(railPairs.get(pair) || []), n]);
 
       growPair(plus, minus);
+      if (wave) growPair(minus, plus, [posR, negR]);
     }
   }
 
@@ -1007,6 +1030,9 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // A diode with a breakdown voltage (vz, a Zener) is used reversed: its
   // cathode on + and anode on − is how it regulates, not a mistake.
   const reversedZener = d => d.el.vz !== undefined && pos.has(d.cathode) && neg.has(d.anode);
+  // Forward for some source's pair, or for a crossing wave's reversed pair
+  // on its own (#3).
+  const forward = d => (pos.has(d.anode) && neg.has(d.cathode)) || (posR.has(d.anode) && negR.has(d.cathode));
 
   // #77: the graph's "backwards" is only a candidate. A source with more
   // than one V element (the bench supply's com is the − of one pair and the
@@ -1015,20 +1041,21 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // V(anode) above REVERSE_VOLTS. A floating pin is bounded instead: an
   // anode by the simulator's cap (pinMax), a cathode from below by the off
   // diodes feeding its node (V(their anode) − vf). Unbounded is not
-  // reverse-biased. The simulation runs once, only when some part is a
-  // candidate; if it fails, the graph's verdict stands.
+  // reverse-biased. The simulation runs once per moment t (undefined: a
+  // plain solve, a wave at its offset), only when some part is a candidate;
+  // if it fails, the graph's verdict stands.
   const REVERSE_VOLTS = 0.5;
-  let simmed;   // undefined until needed; then { at: part index → PartResult }, or null
-  function simulated() {
-    if (simmed !== undefined) return simmed;
-    simmed = null;
+  const simmed = new Map();   // t → { at: part index → PartResult }, or null
+  function simulated(t) {
+    if (simmed.has(t)) return simmed.get(t);
+    simmed.set(t, null);
     try {
       const build = fromLastDeleteAll(actions);
-      if (!build) return simmed;
+      if (!build) return null;
       const { board, errors } = Board.apply(Board.empty(), build);
-      if (errors.length) return simmed;   // the sim would see a different build (e.g. old battery pin form)
+      if (errors.length) return null;   // the sim would see a different build (e.g. old battery pin form)
       const { components, wires: simWires } = Board.toSim(board);
-      const r = Sim.analyze(components, simWires);
+      const r = t === undefined ? Sim.analyze(components, simWires) : Sim.analyze(components, simWires, { dt: 1e-3, state: {}, t });
       const same = (p, holes) => p.holes && p.holes.length === holes.length
         && p.holes.every((h, k) => h === String(holes[k]).toLowerCase());
       const at = i => {
@@ -1038,9 +1065,9 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
         const res = part && r.parts && r.parts[part.label];
         return res ? res.r : null;
       };
-      simmed = { at };
-    } catch { simmed = null; }
-    return simmed;
+      simmed.set(t, { at });
+    } catch { simmed.set(t, null); }
+    return simmed.get(t);
   }
   const known = v => typeof v === 'number' && Number.isFinite(v);
   // The lowest a floating cathode node can sit: each off diode into it holds
@@ -1059,8 +1086,9 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   }
   // true / false from the simulation; null when it can't say (keep the graph's
   // verdict): no simulation, or a part dead in it with neither pin bounded.
-  function reverseBiased(d) {
-    const sim = simulated();
+  // t: the moment solved (undefined: the plain solve).
+  function reverseBiased(d, t) {
+    const sim = simulated(t);
     const res = sim && sim.at(d.i);
     if (!res) return null;
     const [ap, cp] = d.el.pins;
@@ -1069,6 +1097,12 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     if (!known(vc) && !known(va)) return null;
     return known(vc) && known(va) && vc - va > REVERSE_VOLTS;
   }
+  // #3: a plain solve reads a wave at its offset, where a diode at an
+  // op-amp output may be off as it should be on that half. With a wave that
+  // crosses 0 V, it is read at the peak and the trough (t = 1/(4f), 3/(4f))
+  // and is backwards only if reversed at both.
+  const moments = crossing && crossing.f > 0 ? [1 / (4 * crossing.f), 3 / (4 * crossing.f)] : [undefined];
+  const reversedAtOutput = d => moments.every(t => reverseBiased(d, t) === true);
 
   for (const { i, a, def, holeOf, pinNodes } of fullRebuild ? placedParts : []) {
     if (def.place.kind === 'footprint') {
@@ -1078,9 +1112,9 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     // At an op-amp output the graph can't tell + from −: only the simulator
     // says backwards, and nothing is said without it.
     const atOutput = diodes.find(d => d.i === i && d.outer && !reversedZener(d) && driven(d));
-    const backwards = atOutput ? (reverseBiased(atOutput) === true ? atOutput : null)
+    const backwards = atOutput ? (reversedAtOutput(atOutput) ? atOutput : null)
       : diodes.find(d => d.i === i && d.outer && !reversedZener(d)
-        && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode)
+        && !forward(d) && pos.has(d.cathode) && neg.has(d.anode)
         && reverseBiased(d) !== false);
     if (backwards) {
       const { el, holeOf } = backwards;
@@ -1096,7 +1130,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     }
     // On a path, but a diode on it faces the wrong way (e.g. both LEDs of a
     // series pair flipped, so neither reads as backwards on its own).
-    const stuck = !atOutput && diodes.find(d => d.i === i && d.outer && !reversedZener(d) && !(pos.has(d.anode) && neg.has(d.cathode)));
+    const stuck = !atOutput && diodes.find(d => d.i === i && d.outer && !reversedZener(d) && !forward(d));
     if (stuck) {
       problems.push(`The ${partName(def)} at ${a.holeA}/${a.holeB} has no forward path from + to −, so it cannot light. Check each diode on its path: cathode (holeA) toward −, anode (holeB) toward +.`);
     }
