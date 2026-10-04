@@ -69,6 +69,16 @@ html[data-ui="edison"] kbd { font-size: var(--t-13); background: var(--ed-sheet)
 
 /* ── Viewport (a bezel) and what floats on it ── */
 html[data-ui="edison"] #canvas-wrap { border: 1px solid rgba(0, 0, 0, 0.4); border-radius: 0; }
+/* The vignette (#188): the view's edges darkened up to half, over the canvas
+   and under everything else in the wrap. The wrap is its own stacking
+   context, so the canvas (-2) and the vignette (-1) sit below the overlays
+   (z-index auto). An SVG's radial fill, stretched to the view, draws it. */
+html[data-ui="edison"] #canvas-wrap { isolation: isolate; }
+html[data-ui="edison"] #canvas-wrap > canvas { z-index: -2; }
+html[data-ui="edison"] #canvas-wrap::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'><radialGradient id='v' gradientUnits='userSpaceOnUse' cx='50' cy='51' r='85' gradientTransform='scale(1 .941)'><stop offset='.55' stop-opacity='0'/><stop offset='1' stop-opacity='.5'/></radialGradient><rect width='100' height='100' fill='url(%23v)'/></svg>") center / 100% 100% no-repeat;
+}
 html[data-ui="edison"] #hint-box, html[data-ui="edison"] #hole-label, html[data-ui="edison"] #rotate-badge,
 html[data-ui="edison"] #clear-all-btn, html[data-ui="edison"] #reset-cam-btn {
   font-size: var(--t-13); background: var(--pad); border: 1px solid var(--border-dark);

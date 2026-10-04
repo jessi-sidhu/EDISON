@@ -1,0 +1,194 @@
+/* ─────────────────────────────────────────────
+   edison-hud.css — Lab HUD 1/4 (issue #189): the editor's chrome in the
+   landing's language. The top bar is a 40 px black instrument strip of
+   hairline cells, the parts sidebar is black, and the base font is DM Mono.
+   Loaded after theme-edison.css, and every rule is scoped to
+   html[data-ui="edison"], so classic is untouched. Mockup and source:
+   docs/design/editor-hud/. The caps labels are the design: this file (and
+   the later edison-hud-*.css) may use text-transform: uppercase, approved
+   by Aarmen (edison/DESIGN.md "Editor: Lab HUD"). The DOM text stays as
+   written. edison/skin.js adds the toggles' .hud-led and the RUNNING cell.
+───────────────────────────────────────────── */
+
+html[data-ui="edison"] {
+  --hud-k: #101010;      /* chrome */
+  --hud-rule: #242424;   /* hairlines between cells */
+  --hud-line: #676767;   /* 1 px outlines only (3.6:1 as text) */
+  --hud-ink: #F4F4F4;
+  --hud-grey: #8A8A8A;   /* grey text, 5.6:1 on --hud-k */
+  --hud-hover: #1A1A1A;
+  --hud-led-off: #3A3A3A;
+  --hud-pink: #FF3D7F;   /* status only: a fault */
+  --hud-blue: #3D7BFF;   /* status only: on */
+  --hud-mono: 'DM Mono', ui-monospace, Menlo, monospace;
+  --font-ui: var(--hud-mono);   /* the skin's base font */
+}
+
+/* ── Type ───────────────────────────────────── */
+html[data-ui="edison"] body, html[data-ui="edison"] button, html[data-ui="edison"] input,
+html[data-ui="edison"] textarea { font-family: var(--hud-mono); }
+html[data-ui="edison"] body { -webkit-font-smoothing: antialiased; }
+
+/* ── Top bar: one strip of hairline cells ───── */
+html[data-ui="edison"] #topbar {
+  display: flex; align-items: stretch; height: 40px; padding: 0;
+  background: var(--hud-k); color: var(--hud-ink);
+  border-bottom: 1px solid var(--hud-rule); box-shadow: none;
+}
+html[data-ui="edison"] #topbar .topbar-left-group {
+  display: flex; align-items: center; gap: 0; flex: 0 1 auto; min-width: 0;
+  border-right: 1px solid var(--hud-rule);
+}
+html[data-ui="edison"] #topbar .topbar-center,
+html[data-ui="edison"] #topbar .topbar-actions {
+  display: flex; align-items: stretch; gap: 0; flex: none; margin-left: auto;
+  border-left: 1px solid var(--hud-rule);
+}
+html[data-ui="edison"] #topbar .topbar-brand {
+  align-self: stretch; padding: 0 16px; border-right: 1px solid var(--hud-rule);
+  font: 500 13px/1 var(--hud-mono); letter-spacing: 0.14em; text-transform: uppercase;
+}
+html[data-ui="edison"] #topbar .topbar-brand svg { display: none; }
+/* The name cell: a FILE key, then the name (it shrinks first, with an ellipsis). */
+html[data-ui="edison"] #topbar .topbar-name-sep { flex: none; padding-left: 16px; font-size: 0; }
+html[data-ui="edison"] #topbar .topbar-name-sep::before {
+  content: 'File'; font: 400 11px/1 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--hud-grey);
+}
+html[data-ui="edison"] #topbar #circuit-name-field {
+  min-width: 0; max-width: none; margin: 0 12px 0 6px; padding: 3px 4px;
+  border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--hud-ink);
+  font: 400 11px/1.4 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+html[data-ui="edison"] #topbar #circuit-name-field:hover { border-color: var(--hud-rule); background: transparent; }
+html[data-ui="edison"] #topbar #circuit-name-field:focus { border-color: var(--hud-line); background: var(--hud-hover); box-shadow: none; }
+
+/* Every button is a cell. Caps from CSS only: the text is as written. */
+html[data-ui="edison"] #topbar button {
+  display: inline-flex; align-items: center; gap: 8px; flex: none; height: 100%; margin: 0; padding: 0 12px;
+  background: transparent; color: var(--hud-ink); border: 0; border-right: 1px solid var(--hud-rule); border-radius: 0;
+  font: 400 11px/1 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap;
+  box-shadow: none; transform: none;
+}
+html[data-ui="edison"] #topbar button:hover { background: var(--hud-hover); color: var(--hud-ink); border-color: var(--hud-rule); }
+html[data-ui="edison"] #topbar button:focus-visible { outline: 1px solid var(--hud-ink); outline-offset: -2px; }
+html[data-ui="edison"] #topbar button:disabled { color: var(--hud-grey); cursor: default; background: transparent; }
+html[data-ui="edison"] #topbar button svg { display: none; }
+/* The order of the mockup: transport, the three toggles, then the tools. */
+html[data-ui="edison"] #topbar .hud-run { order: 0; }
+html[data-ui="edison"] #topbar #sim-run-btn, html[data-ui="edison"] #topbar #sim-stop-btn { order: 1; }
+html[data-ui="edison"] #topbar #colouring-toggle { order: 2; }
+html[data-ui="edison"] #topbar #flow-dots-toggle { order: 3; }
+html[data-ui="edison"] #topbar #scope-toggle { order: 4; }
+html[data-ui="edison"] #topbar #thevenin-btn { order: 5; }
+html[data-ui="edison"] #topbar #csv-export-btn { order: 6; }
+/* Run is the one solid cell; Stop is an outlined square. */
+html[data-ui="edison"] #topbar #sim-run-btn { background: var(--hud-ink); color: var(--hud-k); }
+html[data-ui="edison"] #topbar #sim-run-btn:hover { background: #DCDCDC; color: var(--hud-k); }
+html[data-ui="edison"] #topbar #sim-run-btn::before {
+  content: ''; width: 0; height: 0; border-left: 7px solid currentColor;
+  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+}
+html[data-ui="edison"] #topbar #sim-stop-btn::before { content: ''; width: 8px; height: 8px; border: 1px solid currentColor; }
+/* The square "+" buttons: the tools, the labs menu and Download. The "+" is
+   hidden from screen readers, so each button keeps its name. */
+html[data-ui="edison"] #topbar #thevenin-btn::after, html[data-ui="edison"] #topbar #csv-export-btn::after,
+html[data-ui="edison"] #topbar #labs-menu-btn::after, html[data-ui="edison"] #topbar .topbar-actions > button::after {
+  content: '+'; content: '+' / ''; margin-left: 2px;
+}
+/* The toggles: a 6 px status LED (span.hud-led, from edison/skin.js), blue when on. */
+html[data-ui="edison"] #topbar button[aria-pressed="false"] { color: var(--hud-grey); }
+html[data-ui="edison"] #topbar .hud-led { display: inline-block; flex: none; width: 6px; height: 6px; background: var(--hud-led-off); }
+html[data-ui="edison"] #topbar button[aria-pressed="true"] > .hud-led { background: var(--hud-blue); }
+/* RUNNING and the sim clock (edison/skin.js), shown while simulating. */
+html[data-ui="edison"] #topbar .hud-run {
+  display: flex; align-items: center; gap: 10px; flex: none; padding: 0 12px; border-right: 1px solid var(--hud-rule);
+  font: 400 11px/1 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; color: var(--hud-grey);
+}
+html[data-ui="edison"] #topbar .hud-run .hud-led { background: var(--hud-blue); }
+html[data-ui="edison"] #topbar .hud-run .hud-led.bad { background: var(--hud-pink); }
+html[data-ui="edison"] #topbar .hud-run b { font-weight: 400; color: var(--hud-ink); font-variant-numeric: tabular-nums; }
+html[data-ui="edison"] #topbar .hud-run b:empty { display: none; }
+/* The labs menu hangs off its cell, black like the strip. */
+html[data-ui="edison"] #topbar .labs-menu-wrap { display: flex; height: 100%; }
+html[data-ui="edison"] #topbar #labs-menu {
+  top: 100%; padding: 0; background: var(--hud-k); color: var(--hud-ink);
+  border: 1px solid var(--hud-line); border-radius: 0; box-shadow: none;
+}
+html[data-ui="edison"] #topbar #labs-menu .labs-menu-item {
+  height: auto; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--hud-rule);
+  color: var(--hud-ink); font: 400 12px/1.4 var(--hud-mono); letter-spacing: 0; text-transform: none; white-space: normal;
+}
+html[data-ui="edison"] #topbar #labs-menu .labs-menu-item:last-child { border-bottom: 0; }
+html[data-ui="edison"] #topbar #labs-menu .labs-menu-item:hover,
+html[data-ui="edison"] #topbar #labs-menu .labs-menu-item:focus-visible { background: var(--hud-hover); outline: none; }
+/* hidden still hides: the toggles stay out until a run starts. */
+html[data-ui="edison"] #topbar [hidden] { display: none; }
+
+/* ── Parts sidebar: black, caps headers with a count ── */
+html[data-ui="edison"] #sidebar {
+  width: 232px; padding: 0 0 12px; gap: 0; background: var(--hud-k); color: var(--hud-ink);
+  border-right: 1px solid var(--hud-rule); scrollbar-color: #333333 var(--hud-k);
+}
+html[data-ui="edison"] #sidebar::-webkit-scrollbar-thumb { background: #333333; }
+html[data-ui="edison"] #part-search {
+  flex: none; height: 40px; margin: 0; padding: 0 16px; background: transparent; color: var(--hud-ink);
+  border: 0; border-bottom: 1px solid var(--hud-rule); border-radius: 0;
+  font: 400 11px var(--hud-mono); letter-spacing: 0.12em;
+}
+html[data-ui="edison"] #part-search::placeholder { color: var(--hud-grey); text-transform: uppercase; }
+html[data-ui="edison"] #part-search:focus { background: var(--hud-hover); border-color: var(--hud-line); }
+html[data-ui="edison"] #part-list, html[data-ui="edison"] .comp-group { gap: 0; }
+/* The count is CSS: the group's ::after comes after its items, so the counter is
+   complete; a search hides items (display: none), and they stop counting. */
+html[data-ui="edison"] .comp-group {
+  position: relative; padding-bottom: 6px; border-bottom: 1px solid var(--hud-rule); counter-reset: hud-parts;
+}
+html[data-ui="edison"] .comp-group .comp-item { counter-increment: hud-parts; }
+html[data-ui="edison"] .comp-group::after {
+  content: counter(hud-parts, decimal-leading-zero); position: absolute; top: 16px; right: 16px;
+  font: 400 11px/1.4 var(--hud-mono); letter-spacing: 0.12em; color: var(--hud-grey);
+}
+html[data-ui="edison"] .comp-group-label, html[data-ui="edison"] .sidebar-section-label {
+  padding: 16px 16px 8px; font: 400 11px/1.4 var(--hud-mono); letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--hud-ink);
+}
+html[data-ui="edison"] .sidebar-section-label { margin-top: 0 !important; }
+html[data-ui="edison"] .comp-item { gap: 12px; padding: 6px 16px; border: 0; border-radius: 0; }
+html[data-ui="edison"] .comp-item:not(.active):hover { background: var(--hud-hover); border-color: transparent; }
+html[data-ui="edison"] .comp-item.active { background: var(--hud-hover); outline: 1px solid var(--hud-ink); outline-offset: -1px; }
+html[data-ui="edison"] .comp-item-icon {
+  width: 36px; height: 36px; background: transparent; border: 1px solid var(--hud-rule); border-radius: 0; color: var(--hud-ink);
+}
+html[data-ui="edison"] .comp-item:hover .comp-item-icon { border-color: var(--hud-line); }
+html[data-ui="edison"] .comp-item.active .comp-item-icon { background: transparent; border-color: var(--hud-ink); color: var(--hud-ink); }
+html[data-ui="edison"] .comp-item-name { font: 400 12px/1.5 var(--hud-mono); color: var(--hud-ink); }
+html[data-ui="edison"] .comp-item-sub { font: 400 11px/1.5 var(--hud-mono); color: var(--hud-grey); }
+html[data-ui="edison"] .comp-item.active .comp-item-name { color: var(--hud-ink); }
+html[data-ui="edison"] .comp-item.active .comp-item-sub { color: var(--hud-grey); }
+html[data-ui="edison"] .sidebar-divider { margin: 0; background: var(--hud-rule); }
+html[data-ui="edison"] .color-swatches { padding: 0 16px 8px; }
+html[data-ui="edison"] .swatch { border-radius: 0; }
+html[data-ui="edison"] .swatch.active { border-color: var(--hud-ink); }
+html[data-ui="edison"] .sidebar-help { padding: 12px 16px 0; border-top-color: var(--hud-rule); }
+html[data-ui="edison"] .sidebar-help p { font: 400 11px/1.7 var(--hud-mono); color: var(--hud-grey); }
+html[data-ui="edison"] .sidebar-help strong { font-weight: 400; color: var(--hud-ink); }
+html[data-ui="edison"] #sidebar kbd {
+  background: transparent; border: 1px solid var(--hud-line); border-radius: 0; color: var(--hud-ink); font: 400 10px var(--hud-mono);
+}
+
+/* ── Narrower laptops: tighter cells, the name keeps its room ── */
+@media (max-width: 1366px) {
+  html[data-ui="edison"] #topbar button, html[data-ui="edison"] #topbar .hud-run { padding: 0 8px; }
+  html[data-ui="edison"] #topbar .topbar-brand { padding: 0 12px; }
+  html[data-ui="edison"] #topbar .topbar-name-sep { display: none; }
+}
+
+/* ── Stacked layout (style.css → RESPONSIVE): the sidebar is one row ── */
+@media (max-width: 1024px) and (min-height: 600px) {
+  html[data-ui="edison"] #sidebar { width: 100%; padding: 0 8px; gap: 6px; border-right: 0; border-top: 1px solid var(--hud-rule); }
+  html[data-ui="edison"] #part-search { width: 140px; height: 32px; padding: 0 8px; border: 1px solid var(--hud-rule); }
+  html[data-ui="edison"] .comp-group { padding: 0; border-bottom: 0; }
+  html[data-ui="edison"] .comp-group::after { display: none; }
+  html[data-ui="edison"] .comp-item { padding: 4px 8px; }
+}

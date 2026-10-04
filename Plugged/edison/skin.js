@@ -3,7 +3,8 @@
 //  "Edison's annotations", §5.4). With <html data-ui="edison"> it wraps
 //  the measured values in Edison's replies (B612 on --mask), draws a
 //  dashed leader from a reply to the first part it names, names the chat
-//  Edison, and sends a ?ask= request once. chat.js doesn't change; in
+//  Edison, sends a ?ask= request once, and gives the Lab HUD top bar its
+//  status LEDs and RUNNING cell (#189). chat.js doesn't change; in
 //  classic none of this runs. The pure half loads in Node for
 //  test/edison-skin.test.js.
 // ─────────────────────────────────────────────────────────────
@@ -134,10 +135,62 @@
     win.sparkyAsk();
   }
 
+  // ── The Lab HUD's top bar (issue #189; its look is circuit3d/css/edison-hud.css) ──
+  const HUD_TOGGLES = ['colouring-toggle', 'flow-dots-toggle', 'scope-toggle'];
+
+  // A toggle's 6 px status LED; CSS lights it from aria-pressed. colouring.js,
+  // flow-dots.js and scope.js relabel their toggle with textContent on every
+  // click, which drops it, so it goes back in after each relabel.
+  function hudLeds(win) {
+    const doc = win.document;
+    const ensure = btn => {
+      if (btn.querySelector('.hud-led')) return;
+      const led = doc.createElement('span');
+      led.className = 'hud-led';
+      led.setAttribute('aria-hidden', 'true');
+      btn.prepend(led);
+    };
+    for (const id of HUD_TOGGLES) {
+      const btn = doc.getElementById(id);
+      if (!btn) continue;
+      ensure(btn);
+      new win.MutationObserver(() => ensure(btn)).observe(btn, { childList: true });
+    }
+  }
+
+  // The RUNNING cell before Run/Stop: shown while simulating, with the time
+  // run's clock (each frame's plugged:sim carries t), pink on a short.
+  function hudClock(win) {
+    const doc = win.document;
+    const runBtn = doc.getElementById('sim-run-btn');
+    if (!runBtn) return;
+    const cell = doc.createElement('div');
+    cell.className = 'hud-run';
+    cell.hidden = true;
+    const led = doc.createElement('span');
+    led.className = 'hud-led';
+    led.setAttribute('aria-hidden', 'true');
+    const clock = doc.createElement('b');
+    cell.append(led, 'Running', clock);
+    runBtn.before(cell);
+    doc.addEventListener('plugged:sim', e => {
+      const d = e.detail || {};
+      // A first run that fails never starts the simulation (as colouring.js reads it).
+      const running = !!(win.App && win.App.simRunning) || !!(d.result && d.result.status === 'ok');
+      cell.hidden = !running;
+      if (!running) return;
+      clock.textContent = typeof d.t === 'number' ? `t ${d.t.toFixed(2)} s` : '';
+      led.classList.toggle('bad', !!(d.result && (d.result.status !== 'ok' || d.result.shorted)));
+    });
+    doc.addEventListener('plugged:sim-stop', () => { cell.hidden = true; });
+  }
+
   function wire(win) {
     const doc = win.document;
     const start = () => {
       rename(doc);
+      hudLeds(win);
+      hudClock(win);
       const log = doc.getElementById('sparky-messages');
       if (log) new win.MutationObserver(muts => {
         for (const m of muts) for (const n of m.addedNodes) {

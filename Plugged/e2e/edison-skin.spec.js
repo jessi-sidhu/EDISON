@@ -11,10 +11,12 @@
 // The page the builder matches:
 // - circuit3d/index.html loads edison/ui-flag.js, fonts.css and tokens.css in
 //   <head>, circuit3d/css/theme-edison.css, and edison/skin.js.
-// - With ?ui=edison: <html data-ui="edison">, body font Barlow, the top bar on
-//   --pad, the scene background --bezel (#1e2225), and the 3D view reads as the
-//   dark bezel: the default camera's far workbench (the top of the canvas,
-//   beige in classic) is dark.
+// - With ?ui=edison: <html data-ui="edison">, body font DM Mono (first family;
+//   the Lab HUD chrome, issue #189, circuit3d/css/edison-hud.css) and the top
+//   bar the HUD black #101010 (was Barlow on --pad before #189), the scene
+//   background --bezel (#1e2225), and the 3D view reads as the dark bezel: the
+//   default camera's far workbench (the top of the canvas, beige in classic)
+//   is dark. The value pins below (B612 on --mask) are the chat's, left for #192.
 // - An AI reply's values are <span class="ed-num ed-val"> in proportional B612
 //   (first family exactly "B612", not "B612 Mono", so "14.9" has no gap) on
 //   --mask; user messages are left alone.
@@ -28,7 +30,7 @@
 //   window.sparkyAsk, is how chat.js sends). chat.js doesn't change.
 const { test, expect } = require('@playwright/test');
 
-const PAD            = 'rgb(233, 239, 226)';   // --pad, #E9EFE2
+const HUD_BLACK      = 'rgb(16, 16, 16)';      // the Lab HUD's chrome, #101010 (issue #189)
 const MASK           = 'rgb(29, 106, 69)';     // --mask, #1D6A45
 const CLASSIC_TOPBAR = 'rgb(250, 249, 246)';   // classic --bg-topbar, #FAF9F6
 const REPLY          = 'LED1 gets 14.9 mA';
@@ -160,7 +162,7 @@ const farBench = page => page.evaluate(() => {
 const inside = (p, b, tol = 2) => p.x >= b.left - tol && p.x <= b.right + tol && p.y >= b.top - tol && p.y <= b.bottom + tol;
 const fmt = b => `[${Math.round(b.left)}..${Math.round(b.right)}] x [${Math.round(b.top)}..${Math.round(b.bottom)}]`;
 
-test('?ui=edison: pad chrome, bezel scene, and a reply\'s value highlighted with a leader to LED1', async ({ page }) => {
+test('?ui=edison: HUD chrome, bezel scene, and a reply\'s value highlighted with a leader to LED1', async ({ page }) => {
   test.setTimeout(60_000);   // the quiet poll and the camera move on top of the flow
   const errors = watchErrors(page);
   await stubAsk(page, REPLY);
@@ -168,9 +170,11 @@ test('?ui=edison: pad chrome, bezel scene, and a reply\'s value highlighted with
 
   const l = await look(page);
   expect(l.ui, '<html data-ui>').toBe('edison');
-  expect(l.font, 'body font').toContain('Barlow');
+  // The Lab HUD (#189): DM Mono first, on a black top bar. Soft, like the
+  // checks below: a chrome miss still lets the leader checks run and report.
+  expect.soft(l.font.split(',')[0].trim().replace(/^["']|["']$/g, ''), `body font's first family (computed: ${l.font})`).toBe('DM Mono');
   expect(l.scene, 'scene background (--bezel)').toBe('1e2225');
-  expect(l.topbar, 'top bar background (--pad)').toBe(PAD);
+  expect.soft(l.topbar, 'top bar background (the HUD black)').toBe(HUD_BLACK);
   // The viewport reads as the bezel: what the default camera shows at the top
   // of the canvas (classic's beige workbench, see the classic test) is dark.
   // Soft, like the value's font below: a style miss still lets the leader and

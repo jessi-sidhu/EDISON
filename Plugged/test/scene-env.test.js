@@ -1,5 +1,7 @@
 // Issue #187 (Scene A): flush hole sockets everywhere, and the Edison grid
 // floor groundwork with the instruments seated on a bench height.
+// Issue #188 (Scene B): the ruled graphite slab's ruler; its tick maths is
+// the pure rulerTicks() (section 3).
 //
 // Run with:  npm test
 //
@@ -16,8 +18,8 @@
 //
 // 2. circuit3d/js/scene-env.js, UMD like board-geometry.js. The API these
 //    tests are written against:
-//      Node:    module.exports = { shouldRun, BENCH_Y }  (loads with no window
-//               or THREE; BENCH_Y reads BOARD_THICK from board-geometry.js)
+//      Node:    module.exports = { shouldRun, BENCH_Y, rulerTicks }  (loads with
+//               no window or THREE; BENCH_Y reads BOARD_THICK from board-geometry.js)
 //      Browser: window.SceneEnv, the same object. When shouldRun(<html>'s
 //               dataset) is true it builds the 'scene-env' group, hides
 //               'ground' and sets App.BENCH_Y = BENCH_Y.
@@ -25,6 +27,12 @@
 //                           data-mode="hero".
 //      BENCH_Y            → -(BOARD_THICK + 0.025), the bench height off-board
 //                           parts sit on in Edison.
+//      rulerTicks(cols, first = 1) → one tick per column first…cols:
+//                           [{ col, x, inches, kind, len, label }], x the
+//                           column's world x, inches (col-1)/10, kind 'inch'
+//                           every 10th column from column 1, 'half' every 5th
+//                           between, else 'tenth'; len 0.70 / 0.42 / 0.22;
+//                           label '0', '1' … on inch ticks, else null.
 
 const assert = require('node:assert');
 const fs     = require('node:fs');
@@ -138,4 +146,79 @@ test('BENCH_Y is -(BOARD_THICK + 0.025), read from board-geometry.js', () => {
   assert.strictEqual(typeof BENCH_Y, 'number', `SceneEnv.BENCH_Y is a number (got ${BENCH_Y})`);
   const want = -(GEOMETRY.BOARD_THICK + 0.025);
   expect(BENCH_Y, `BENCH_Y (expected ${want}, got ${BENCH_Y})`).toBeCloseTo(want, 9);
+});
+
+// ── 3. The ruler's ticks (#188) ──────────────────────────────
+
+// The issue's tick lengths, in from the front border.
+const TICK_LEN = { inch: 0.70, half: 0.42, tenth: 0.22 };
+
+function rulerTicks() {
+  const mod = SceneEnv();
+  assert.strictEqual(typeof mod.rulerTicks, 'function', `SceneEnv.rulerTicks is a function (exports: ${Object.keys(mod).join(', ')})`);
+  return mod.rulerTicks;
+}
+
+test('rulerTicks(COLS): one tick per board column, 0 at column 1, inches every 10th column and halves every 5th', () => {
+  const { COLS, HS } = GEOMETRY;
+  const ticks = rulerTicks()(COLS);
+  expect(ticks.map(t => t.col), `one tick per column 1…${COLS}`).toEqual(Array.from({ length: COLS }, (_, i) => i + 1));
+
+  // Pin: the issue's landmarks, on this 63-column board (column 1 at x -12.4, column 63 at +12.4).
+  const at   = col => ticks.find(t => t.col === col);
+  const COL1 = -(COLS - 1) / 2 * HS;   // column 1's x, as breadboard.js lays the holes out
+  const want = [
+    // col  x                 inches            kind     label
+    [1,     COL1,             0,                'inch',  '0'],
+    [2,     COL1 + HS,        0.1,              'tenth', null],
+    [6,     COL1 + 5 * HS,    0.5,              'half',  null],
+    [11,    COL1 + 10 * HS,   1,                'inch',  '1'],
+    [COLS,  -COL1,            (COLS - 1) / 10,  'tenth', null],
+  ];
+  expect(at(1).x, 'column 1 is at x -12.4').toBeCloseTo(-12.4, 9);
+  expect(at(COLS).x, `column ${COLS} is at x 12.4`).toBeCloseTo(12.4, 9);
+  for (const [col, x, inches, kind, label] of want) {
+    const t = at(col);
+    expect(t.x, `column ${col}'s x (expected ${x}, got ${t.x})`).toBeCloseTo(x, 9);
+    expect(t.inches, `column ${col}'s inches (expected ${inches}, got ${t.inches})`).toBeCloseTo(inches, 9);
+    expect({ kind: t.kind, len: t.len, label: t.label }, `column ${col}`).toEqual({ kind, len: TICK_LEN[kind], label });
+  }
+
+  // Every column: the kind cycles by ten from column 1, its length and label follow it.
+  for (const t of ticks) {
+    const n = t.col - 1;
+    const kind = n % 10 === 0 ? 'inch' : n % 10 === 5 ? 'half' : 'tenth';
+    expect(t.kind, `column ${t.col}'s kind`).toBe(kind);
+    expect(t.len, `column ${t.col}'s length (${kind})`).toBe(TICK_LEN[kind]);
+    expect(t.label, `column ${t.col}'s label`).toBe(kind === 'inch' ? String(n / 10) : null);
+    expect(t.inches, `column ${t.col}'s inches`).toBeCloseTo(n / 10, 9);
+  }
+});
+
+test('the ruler lines up with the board: each tick is at its column\'s hole x in breadboard.js, one hole pitch (HS) apart', () => {
+  const { COLS, HS } = GEOMETRY;
+  const ticks = rulerTicks()(COLS);
+  for (let i = 1; i < ticks.length; i++) {
+    expect(ticks[i].x - ticks[i - 1].x, `the pitch between columns ${i} and ${i + 1} is HS = ${HS}`).toBeCloseTo(HS, 9);
+  }
+  // The holes as breadboard.js lays them out (its col is 0-based).
+  const holeX = new Map(buildBoard().holeData.map(h => [h.col + 1, h.x]));
+  expect(holeX.size, 'breadboard.js has a hole x for every column').toBe(COLS);
+  for (const t of ticks) {
+    expect(t.x, `column ${t.col}'s tick is at its holes' x (expected ${holeX.get(t.col)}, got ${t.x})`).toBeCloseTo(holeX.get(t.col), 9);
+  }
+});
+
+test('rulerTicks(cols, first) starts at column first, also left of column 1, where inches go negative', () => {
+  const { HS } = GEOMETRY;
+  const ticks = rulerTicks()(11, -9);
+  expect(ticks.map(t => t.col), 'columns -9…11').toEqual(Array.from({ length: 21 }, (_, i) => i - 9));
+  const col1 = ticks.find(t => t.col === 1);
+  const left = ticks[0];   // column -9: ten columns left of column 1, an inch tick
+  expect(left.x - col1.x, 'column -9 is 10 pitches left of column 1').toBeCloseTo(-10 * HS, 9);
+  expect(left.inches).toBeCloseTo(-1, 9);
+  expect({ kind: left.kind, len: left.len }).toEqual({ kind: 'inch', len: TICK_LEN.inch });
+  expect(left.label, 'the inch left of 0 reads minus one').toMatch(/^[-\u2212]1$/);
+  expect(ticks.find(t => t.col === -4).kind, 'column -4, half an inch left of 0').toBe('half');
+  expect(ticks.find(t => t.col === 0).kind, 'column 0').toBe('tenth');
 });

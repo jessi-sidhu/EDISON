@@ -18,9 +18,9 @@ Researched 2026-10-01. Sources: Developers Digest's 16 vibe-coded patterns, the 
 | 01 / 02 / 03 decoration | Numbers only where the content is a sequence (lab steps, textbook sections) |
 | Fade-up on every section, count-up stats, bounce easing, arrows on buttons, "Get started / Elevate / Seamless" | One load moment (the demo circuit wires itself once); motion only in reply to actions; buttons named for what they do ("Open Lab 2") |
 
-**Guard:** `test/edison-design-guard.test.js` scans `Plugged/edison/**` and `circuit3d/css/theme-edison.css`. It fails on:
+**Guard:** `test/edison-design-guard.test.js` scans `Plugged/edison/**`, `circuit3d/css/theme-edison.css` and the Lab HUD's `circuit3d/css/edison-hud*.css`. It fails on:
 - a banned font family;
-- `text-transform: uppercase`;
+- `text-transform: uppercase` (allowed in `edison-hud*.css` only: see "Editor: Lab HUD" below);
 - `backdrop-filter`;
 - `background-clip: text`;
 - a `linear-gradient`/`radial-gradient` outside an allow-list (the pad grid is the only allowed one);
@@ -140,3 +140,14 @@ The landing page doesn't follow the pad tokens above, and it knowingly breaks tw
 - **Phone (720 px and under):** a 16 px HUD gutter, the title block kept, the inset hidden. No sideways scroll at 390 px.
 
 v2's giant outlined EDISON, the three sections below the hero (line art, "+" buttons, the 3-column grid) and the dark/light toggle are gone.
+
+## Editor: Lab HUD (since #189)
+
+The editor's Edison skin (`?ui=edison`) carries the landing's language into its chrome, on Aarmen's pick of the Lab HUD pitch (2026-10-03). Mockups and their source are in `docs/design/editor-hud/`. Like the landing, it knowingly overrides §3 in one place.
+
+- **The override:** caps labels. `text-transform: uppercase` is allowed in `circuit3d/css/edison-hud.css` and the later `edison-hud-*.css` files only; the design guard still bans it everywhere else. The DOM text stays as written ("ENSC 220 Labs", "Colours on", "Passives"): tests match it and classic shares the DOM.
+- **Scope:** every HUD rule starts with `html[data-ui="edison"]` (the guard checks it), so classic is untouched. `edison-hud.css` loads after `theme-edison.css`.
+- **Palette:** the landing's black: `#101010` chrome, `#242424` hairlines between cells, `#676767` for 1 px outlines only, `#F4F4F4` ink, `#8A8A8A` grey text. Neon only for status: `#3D7BFF` blue for on, `#FF3D7F` pink for a fault.
+- **Type:** DM Mono is the skin's base font (`--font-ui`, loaded by `edison/fonts.css`). Labels are 11 px, letter-spacing 0.12em; part names 12 px with grey sublines.
+- **The top bar (H1):** a 40 px strip of hairline cells: EDISON, FILE and the name (it shrinks first, with an ellipsis), RUNNING with the sim clock, Run (the one solid cell) or Stop, the Colours, Dots and Scope toggles, then the square "+" buttons Thévenin, Export CSV, ENSC 220 Labs and Download. Each toggle holds a 6 px `span.hud-led`, blue while `aria-pressed="true"`. `edison/skin.js` adds the LEDs (and puts them back after each relabel) and the RUNNING cell.
+- **The parts sidebar (H1):** black, caps section headers with a CSS count ("PASSIVES 03"), and the part icons exactly as each part file draws them.

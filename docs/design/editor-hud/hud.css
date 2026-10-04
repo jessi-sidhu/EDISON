@@ -1,0 +1,216 @@
+/* Direction 1 — "Lab HUD": the landing's language carried into the editor. */
+html[data-ui] {
+  --k: #101010; --rule: #242424; --line: #676767; --ink: #F4F4F4; --grey: #8A8A8A;
+  --pink: #FF3D7F; --blue: #3D7BFF; --mono: 'DM Mono', ui-monospace, Menlo, monospace;
+  --bg-canvas: #0B0D0F;
+}
+html[data-ui] body, html[data-ui] body button, html[data-ui] body input, html[data-ui] body textarea,
+html[data-ui] body #sparky-panel { font-family: var(--mono); }
+html[data-ui] body { background: var(--k); color: var(--ink); -webkit-font-smoothing: antialiased; }
+html[data-ui] body .hud-caps { text-transform: uppercase; letter-spacing: 0.12em; }
+
+/* ── Top bar: one thin instrument strip of cells ── */
+html[data-ui] body #topbar {
+  display: flex; height: 40px; padding: 0; background: var(--k);
+  border-bottom: 1px solid var(--rule); box-shadow: none;
+}
+html[data-ui] body #topbar .hud-cell {
+  display: flex; align-items: center; gap: 10px; height: 100%; padding: 0 16px;
+  border-right: 1px solid var(--rule); font-size: 11px; letter-spacing: 0.12em; white-space: nowrap;
+}
+html[data-ui] body #topbar .hud-spacer { flex: 1; border-right: 1px solid var(--rule); height: 100%; }
+html[data-ui] body .topbar-brand { font: 500 13px var(--mono); letter-spacing: 0.14em; color: var(--ink); }
+html[data-ui] body .topbar-brand svg, html[data-ui] body .topbar-name-sep { display: none; }
+html[data-ui] body #circuit-name-field {
+  font: 400 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink);
+  border: 0; padding: 0; max-width: none;
+}
+html[data-ui] body .hud-file-k { color: var(--grey); }
+html[data-ui] body #topbar button,
+html[data-ui] body #topbar .btn-colouring, html[data-ui] body #topbar .btn-secondary,
+html[data-ui] body #topbar .btn-simulate, html[data-ui] body #topbar .btn-stop {
+  display: inline-flex; align-items: center; gap: 8px; height: 100%; margin: 0; padding: 0 16px;
+  background: transparent; color: var(--ink); border: 0; border-right: 1px solid var(--rule); border-radius: 0;
+  font: 400 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; box-shadow: none;
+}
+html[data-ui] body #topbar button:hover { background: #1A1A1A; }
+html[data-ui] body #topbar button svg { display: none; }
+html[data-ui] body #topbar .hud-plus::after { content: '+'; margin-left: 2px; color: var(--ink); }
+/* toggles: a square LED, lit blue when on */
+html[data-ui] body #topbar button[aria-pressed]::before {
+  content: ''; width: 6px; height: 6px; background: #3A3A3A; flex-shrink: 0;
+}
+html[data-ui] body #topbar button[aria-pressed="true"]::before { background: var(--blue); }
+html[data-ui] body #topbar button[aria-pressed="true"] { color: var(--ink); }
+html[data-ui] body #topbar button[aria-pressed="false"] { color: var(--grey); }
+/* transport */
+html[data-ui] body #topbar .btn-stop { color: var(--ink); }
+html[data-ui] body #topbar .btn-stop::before { content: ''; width: 8px; height: 8px; border: 1px solid var(--ink); }
+html[data-ui] body .hud-run { color: var(--grey); }
+html[data-ui] body .hud-run b { font-weight: 400; color: var(--ink); font-variant-numeric: tabular-nums; }
+html[data-ui] body .hud-led { width: 6px; height: 6px; background: var(--blue); display: inline-block; }
+html[data-ui] body .hud-led.bad { background: var(--pink); }
+html[data-ui] body #topbar .labs-menu-wrap { height: 100%; }
+html[data-ui] body #topbar .topbar-left-group, html[data-ui] body #topbar .topbar-center,
+html[data-ui] body #topbar .topbar-actions { display: contents; }
+
+/* ── Parts ── */
+html[data-ui] body #sidebar {
+  width: 232px; padding: 0 0 12px; gap: 0; background: var(--k); border-right: 1px solid var(--rule);
+}
+html[data-ui] body #part-search {
+  height: 40px; margin: 0; padding: 0 16px; background: transparent; color: var(--ink);
+  border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; font: 400 11px var(--mono); letter-spacing: 0.12em;
+}
+html[data-ui] body #part-search::placeholder { color: var(--grey); text-transform: uppercase; }
+html[data-ui] body #part-list, html[data-ui] body .comp-group { gap: 0; }
+html[data-ui] body .comp-group { border-bottom: 1px solid var(--rule); padding-bottom: 6px; }
+html[data-ui] body .comp-group-label, html[data-ui] body .sidebar-section-label {
+  display: flex; justify-content: space-between; padding: 16px 16px 8px;
+  font: 400 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink);
+}
+html[data-ui] body .comp-group-label i { font-style: normal; color: var(--grey); }
+html[data-ui] body .comp-item {
+  gap: 12px; padding: 6px 16px; border: 0; border-radius: 0; position: relative;
+}
+html[data-ui] body .comp-item:not(.active):hover { background: #181818; }
+html[data-ui] body .comp-item-icon {
+  width: 36px; height: 36px; background: transparent; border: 1px solid var(--rule); border-radius: 0; color: var(--ink);
+}
+html[data-ui] body .comp-item:hover .comp-item-icon { border-color: var(--line); }
+html[data-ui] body .comp-item-name { font: 400 12px var(--mono); color: var(--ink); }
+html[data-ui] body .comp-item-sub { font: 400 11px var(--mono); color: var(--grey); }
+html[data-ui] body .sidebar-help p { font: 400 11px/1.7 var(--mono); color: var(--grey); }
+html[data-ui] body kbd { background: transparent; border: 1px solid var(--line); border-radius: 0; color: var(--ink); font: 400 10px var(--mono); }
+html[data-ui] body .sidebar-divider { background: var(--rule); margin: 0; }
+html[data-ui] body .sidebar-help { border-top-color: var(--rule); padding: 12px 16px 0; }
+html[data-ui] body #sidebar::-webkit-scrollbar-thumb { background: #333; }
+
+/* ── The canvas: a HUD stage ── */
+html[data-ui] body #canvas-wrap { border: 0; background: #0B0D0F; }
+html[data-ui] body .hud-br { position: absolute; z-index: 5; width: 20px; height: 20px; border: 0 solid var(--line); pointer-events: none; }
+html[data-ui] body .hud-br.tl { top: 16px; left: 16px; border-top-width: 1px; border-left-width: 1px; }
+html[data-ui] body .hud-br.tr { top: 16px; right: 16px; border-top-width: 1px; border-right-width: 1px; }
+html[data-ui] body .hud-br.bl { bottom: 16px; left: 16px; border-bottom-width: 1px; border-left-width: 1px; }
+html[data-ui] body .hud-br.br { bottom: 16px; right: 16px; border-bottom-width: 1px; border-right-width: 1px; }
+html[data-ui] body .hud-title { position: absolute; z-index: 5; top: 13px; left: 52px; pointer-events: none; }
+html[data-ui] body .hud-title p { margin: 0; white-space: nowrap; }
+html[data-ui] body .hud-title .n { font-size: 17px; line-height: 22px; letter-spacing: 0.1em; }
+html[data-ui] body .hud-title .s { margin-top: 6px; font-size: 11px; letter-spacing: 0.12em; color: var(--grey); }
+html[data-ui] body .hud-title .s .on { color: var(--ink); }
+html[data-ui] body .hud-title .s .sl { margin: 0 0.4em; }
+html[data-ui] body #hint-box {
+  top: auto; bottom: 14px; left: 52px; transform: none; max-width: 60%; width: auto;
+  padding: 0; background: transparent; border: 0; box-shadow: none; text-align: left;
+  font: 400 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--grey);
+}
+html[data-ui] body #clear-all-btn, html[data-ui] body #reset-cam-btn {
+  height: 28px; padding: 0 12px; background: var(--k); border: 1px solid var(--line); border-radius: 0;
+  font: 400 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink); box-shadow: none;
+}
+html[data-ui] body #clear-all-btn svg, html[data-ui] body #reset-cam-btn svg { display: none; }
+html[data-ui] body #clear-all-btn { top: 13px; right: 52px; }
+html[data-ui] body #clear-all-btn:hover { border-color: var(--pink); color: var(--pink); background: var(--k); }
+html[data-ui] body #reset-cam-btn { bottom: 9px; right: 52px; }
+html[data-ui] body #reset-cam-btn::after { content: '+'; }
+
+/* Results and mistakes: HUD callouts pinned to parts (placed by hud.js). */
+html[data-ui] body #sim-results, html[data-ui] body #mistakes-panel {
+  position: absolute; min-width: 0; width: auto; max-width: 300px; max-height: none; overflow: visible;
+  padding: 0; background: transparent; border: 0; box-shadow: none; color: var(--ink);
+  font: 400 11px/1.6 var(--mono); letter-spacing: 0.04em;
+}
+html[data-ui] body #sim-results .sim-line { padding: 0; color: var(--grey); white-space: nowrap; }
+html[data-ui] body #sim-results .sim-line:first-child, html[data-ui] body #sim-results .hud-k {
+  color: var(--ink); text-transform: uppercase; letter-spacing: 0.12em;
+}
+html[data-ui] body #sim-results .sim-clock { border: 0; margin: 0; padding: 0; }
+html[data-ui] body #sim-results .sim-err, html[data-ui] body #sim-results .sim-warn { color: var(--pink); }
+html[data-ui] body .mistake-row { padding: 0; border: 0 !important; border-radius: 0; }
+html[data-ui] body .mistake-row:hover { background: transparent; }
+html[data-ui] body .mistake-icon { display: inline-block; width: 6px; height: 6px; margin: 0 8px 1px 0; background: var(--pink); color: transparent; overflow: hidden; vertical-align: middle; font-size: 0; }
+html[data-ui] body .mistake-info .mistake-icon { background: var(--blue); }
+html[data-ui] body .mistake-labels { font-weight: 400; color: var(--ink); letter-spacing: 0.12em; text-transform: uppercase; }
+html[data-ui] body .mistake-why, html[data-ui] body .mistake-info .mistake-why { padding-left: 14px; color: var(--grey); white-space: normal; letter-spacing: 0.02em; }
+html[data-ui] body .hud-callout { background: rgba(16,16,16,0.0); }
+
+/* Scope: a framed instrument with a caps caption */
+html[data-ui] body #scope {
+  bottom: 52px; right: 52px; padding: 0; background: transparent; border: 0; box-shadow: none;
+  font: 400 11px/1.7 var(--mono); letter-spacing: 0.06em; color: var(--ink);
+}
+html[data-ui] body #scope::before { content: 'SCOPE'; display: block; margin-bottom: 6px; letter-spacing: 0.12em; }
+html[data-ui] body #scope-canvas { border: 1px solid var(--line); border-radius: 0; }
+html[data-ui] body #scope-ch1 { color: #E6B72E; }
+html[data-ui] body #scope-ch2 { color: #38B2D4; }
+html[data-ui] body #scope-probe-btn { height: 24px; margin-top: 4px; padding: 0 10px; background: transparent; border: 1px solid var(--line); border-radius: 0; color: var(--ink); font: 400 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
+html[data-ui] body #meter-display { background: var(--k); border: 1px solid var(--line); border-radius: 0; color: var(--ink); }
+
+/* The skin's leader (chat reply → part): a grey hairline ending in a dot, as on the landing */
+html[data-ui] body .ed-leader { border-top: 1px solid var(--line); border-bottom: 0; }
+html[data-ui] body .ed-leader::after { width: 7px; height: 7px; right: -4px; top: -4px; background: var(--ink); border: 0; }
+
+/* ── Chat: a clean log ── */
+html[data-ui] body #sparky-panel { width: 340px; background: var(--k); border-left: 1px solid var(--rule); color: var(--ink); }
+html[data-ui] body .hud-chat-head {
+  display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 16px;
+  border-bottom: 1px solid var(--rule); flex-shrink: 0;
+}
+html[data-ui] body .hud-chat-head p { margin: 0; font-size: 11px; letter-spacing: 0.12em; }
+html[data-ui] body .hud-chat-head .g { color: var(--grey); }
+html[data-ui] body #sparky-messages { background: var(--k); background-image: none; padding: 20px 16px; gap: 22px; }
+html[data-ui] body .chat-msg {
+  max-width: 100%; align-self: stretch; padding: 0; background: transparent !important; border: 0 !important;
+  border-radius: 0; color: var(--ink); font: 400 13px/1.65 var(--mono); letter-spacing: 0;
+}
+html[data-ui] body .chat-msg::before {
+  display: block; margin-bottom: 6px; font-size: 11px; letter-spacing: 0.12em; color: var(--grey);
+}
+html[data-ui] body .chat-msg.user::before { content: 'YOU'; }
+html[data-ui] body .chat-msg.ai::before { content: 'EDISON'; color: var(--ink); }
+html[data-ui] body .chat-msg.ai, html[data-ui] body .chat-msg.user { color: var(--ink); }
+html[data-ui] body .chat-msg.user { padding-left: 12px !important; border-left: 1px solid var(--line) !important; color: #D6D6D6; }
+html[data-ui] body .chat-msg.ai .ed-val {
+  font: 400 13px var(--mono); color: var(--ink); text-decoration: underline dotted var(--grey); text-underline-offset: 4px;
+}
+html[data-ui] body .chat-msg.ai strong { font-weight: 500; }
+html[data-ui] body .hud-tag { display: inline-block; padding: 0 4px; border: 1px solid var(--line); line-height: 1.35; font-size: 12px; }
+html[data-ui] body #sparky-pending-bar {
+  display: flex !important; align-items: center; gap: 0; padding: 0; background: var(--k);
+  border-top: 1px solid var(--rule); height: 44px;
+}
+html[data-ui] body .hud-pend { flex: 1; padding: 0 16px; font-size: 11px; letter-spacing: 0.12em; color: var(--grey); white-space: nowrap; }
+html[data-ui] body .pending-accept, html[data-ui] body .pending-decline {
+  flex: none; height: 100%; padding: 0 16px !important; border: 0; border-left: 1px solid var(--rule); border-radius: 0;
+  font: 400 11px var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+}
+html[data-ui] body .pending-accept { background: var(--ink); color: var(--k); }
+html[data-ui] body .pending-accept::after { content: ' +'; }
+html[data-ui] body .pending-decline { background: transparent; color: var(--ink); }
+html[data-ui] body #sparky-input-row { gap: 0; padding: 16px; background: var(--k); border-top: 1px solid var(--rule); align-items: stretch; }
+html[data-ui] body .hud-ask { display: flex; flex: 1; border: 1px solid var(--line); min-height: 44px; }
+html[data-ui] body #photo-btn {
+  width: 44px; height: 100%; background: transparent; border: 0; border-right: 1px solid var(--line); border-radius: 0;
+  color: var(--ink); font-size: 0; display: flex; align-items: center; justify-content: center;
+}
+html[data-ui] body #photo-wrap { display: flex; }
+html[data-ui] body #sparky-input {
+  flex: 1; padding: 12px; background: transparent; border: 0; border-radius: 0; color: var(--ink);
+  font: 400 13px/1.5 var(--mono);
+}
+html[data-ui] body #sparky-input::placeholder { color: var(--grey); }
+html[data-ui] body .hud-send {
+  padding: 0 14px; background: transparent; border: 0; border-left: 1px solid var(--line); color: var(--ink);
+  font: 400 11px var(--mono); letter-spacing: 0.12em; cursor: pointer;
+}
+html[data-ui] body .hud-co { position: absolute; z-index: 6; max-width: 280px; pointer-events: none; font: 400 11px/1.6 var(--mono); }
+html[data-ui] body .hud-co p { margin: 0; }
+html[data-ui] body .hud-co .t { display: flex; align-items: center; gap: 8px; color: var(--ink); letter-spacing: 0.12em; white-space: nowrap; }
+html[data-ui] body .hud-co[style*="right"] .t { justify-content: flex-end; }
+html[data-ui] body .hud-co .s { margin-top: 3px; color: var(--grey); letter-spacing: 0.02em; }
+html[data-ui] body .hud-co.bad .t { color: var(--ink); }
+html[data-ui] body .hud-title .s .pk { color: var(--pink); }
+
+html[data-ui] body #sim-results, html[data-ui] body #mistakes-panel, html[data-ui] body .ed-leader { display: none !important; }
+html[data-ui] body .hud-co { padding: 6px 10px 7px; background: rgba(16, 16, 16, 0.88); }
+html[data-ui] body #sparky-input { white-space: nowrap; overflow: hidden; height: 44px !important; }

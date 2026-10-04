@@ -2,7 +2,11 @@
 // into the "obvious AI UI" tells of spec §3 (docs/superpowers/specs/
 // 2026-10-01-edison-ui-revamp-design.md), and holds the spec §4 palette.
 // Scans every .css, .html and .js file under edison/ plus the editor skin
-// circuit3d/css/theme-edison.css once it exists (E2).
+// circuit3d/css/theme-edison.css once it exists (E2), and the Lab HUD
+// stylesheets circuit3d/css/edison-hud*.css (issue #189, Lab HUD 1/4).
+// The HUD's caps labels are its design: text-transform: uppercase is allowed
+// in edison-hud*.css only (approved by Aarmen, edison/DESIGN.md "Editor: Lab
+// HUD"); every other rule holds there too.
 //
 // Run with:  npm test
 //
@@ -15,6 +19,11 @@ const fs   = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
+// The Lab HUD stylesheets (issue #189): circuit3d/css/edison-hud.css and the
+// later HUD issues' own edison-hud-*.css files.
+const HUD_CSS = 'circuit3d/css/edison-hud.css';
+const isHud = f => /^edison-hud(?:-[\w-]+)?\.css$/.test(path.basename(f)) &&
+  path.relative(ROOT, path.resolve(ROOT, f)).split(path.sep).join('/').startsWith('circuit3d/css/');
 const files = () => {
   const out = [];
   const walk = d => { for (const f of fs.readdirSync(d, { withFileTypes: true })) {
@@ -25,6 +34,8 @@ const files = () => {
   if (fs.existsSync(edison)) walk(edison);
   const skin = path.join(ROOT, 'circuit3d/css/theme-edison.css');
   if (fs.existsSync(skin)) out.push(skin);
+  const css = path.join(ROOT, 'circuit3d/css');
+  for (const f of fs.readdirSync(css).map(n => path.join(css, n))) if (isHud(f)) out.push(f);
   return out;
 };
 const scanned = () => {
@@ -50,7 +61,8 @@ const RULES = [
     bad: ["@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');",
       '<link href="https://fonts.googleapis.com/css2?family=Barlow&family=Space+Grotesk:wght@500" rel="stylesheet">'],
     good: "@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600&display=swap');" },
-  { re: /text-transform\s*:\s*uppercase/i, what: 'all-caps text',
+  // Allowed in the Lab HUD stylesheets only (issue #189, approved by Aarmen).
+  { re: /text-transform\s*:\s*uppercase/i, what: 'all-caps text', allowIn: isHud,
     bad: '.label { text-transform: uppercase; }', good: '.label { text-transform: none; }' },
   { re: /backdrop-filter/i, what: 'glass blur',
     bad: '.panel { backdrop-filter: blur(8px); }', good: '.panel { background: var(--pad); }' },
@@ -99,10 +111,27 @@ const hexes = text => [...text.matchAll(/#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4}
 
 test('Edison files exist', () => { expect(files().length).toBeGreaterThan(0); });
 
-test.each(RULES)('no $what', ({ re, what, bad, good }) => {
+// Issue #189: the HUD stylesheet exists and the guard reads it, so every rule
+// below (gradients, box-shadow, purple, fonts...) holds there too.
+test('the Lab HUD stylesheet circuit3d/css/edison-hud.css exists and is scanned', () => {
+  expect(fs.existsSync(path.join(ROOT, HUD_CSS)), `${HUD_CSS} exists`).toBe(true);
+  expect(scanned().map(rel), `the guard scans ${HUD_CSS}`).toContain(HUD_CSS);
+});
+
+// The uppercase exception covers the HUD stylesheets and nothing else.
+test('the uppercase exception is the HUD stylesheets only', () => {
+  for (const f of [HUD_CSS, 'circuit3d/css/edison-hud-chat.css', 'circuit3d/css/edison-hud-canvas.css'])
+    expect(isHud(f), `${f} is a HUD stylesheet`).toBe(true);
+  for (const f of ['circuit3d/css/theme-edison.css', 'edison/tokens.css', 'edison/edison-hud.css', 'edison/landing.css',
+    'circuit3d/css/edison-hud.js', 'circuit3d/css/my-edison-hud.css', 'circuit3d/css/edison-hudx.css'])
+    expect(isHud(f), `${f} is not a HUD stylesheet`).toBe(false);
+  expect(RULES.filter(r => r.allowIn).map(r => r.what), 'only the all-caps rule has an exception').toEqual(['all-caps text']);
+});
+
+test.each(RULES)('no $what', ({ re, what, bad, good, allowIn }) => {
   for (const s of [bad].flat()) expect(re.test(s), `the ${what} rule catches: ${s}`).toBe(true);
   for (const s of [good].flat()) expect(re.test(s), `the ${what} rule allows: ${s}`).toBe(false);
-  const hits = scanned().filter(f => re.test(fs.readFileSync(f, 'utf8'))).map(rel);
+  const hits = scanned().filter(f => !(allowIn && allowIn(f)) && re.test(fs.readFileSync(f, 'utf8'))).map(rel);
   expect(hits, `${what} in`).toEqual([]);
 });
 
@@ -184,14 +213,39 @@ test('every rule in the tokens file is scoped to html[data-ui="edison"], so clas
   expect(loose).toEqual([]);
 });
 
+// Issue #189: classic shares the editor's DOM, so every HUD rule needs the
+// Edison scope. The mockup's hud.css used html[data-ui], which matches classic
+// too. Keyframe steps (0%, to...) are not selectors.
+const unscoped = text => {
+  const css = text.replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, '');
+  const selectors = [...css.matchAll(/([^{}]+)\{/g)].map(m => m[1].trim()).filter(s => !s.startsWith('@'));
+  return { count: selectors.length,
+    loose: selectors.flatMap(s => s.split(',').map(x => x.trim())).filter(s => !s.startsWith('html[data-ui="edison"]')) };
+};
+test('every rule in the HUD stylesheets is scoped to html[data-ui="edison"], so classic is untouched', () => {
+  expect(unscoped('html[data-ui] body #topbar { height: 40px; }').loose, 'html[data-ui] alone is caught')
+    .toEqual(['html[data-ui] body #topbar']);
+  expect(unscoped('@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }\n' +
+    '@media (max-width: 1024px) { html[data-ui="edison"] #topbar { height: 40px; } }').loose, 'keyframes and @media are fine').toEqual([]);
+  const hud = scanned().filter(isHud);
+  expect(hud.map(rel), 'the HUD stylesheets').toContain(HUD_CSS);
+  for (const f of hud) {
+    const { count, loose } = unscoped(fs.readFileSync(f, 'utf8'));
+    expect(count, `${rel(f)} has rules`).toBeGreaterThan(0);
+    expect(loose, `unscoped selectors in ${rel(f)}`).toEqual([]);
+  }
+});
+
 // B612 is the proportional family (issue #148), at 400 and 700 (values are
 // bold); B612 Mono may stay or go, but "family=B612+Mono" is not B612.
-test('the fonts file loads Barlow, B612 and STIX Two Text from Google Fonts', () => {
+// DM Mono is the Lab HUD's base font (issue #189).
+test('the fonts file loads Barlow, B612, STIX Two Text and DM Mono from Google Fonts', () => {
   const FONTS = path.join(ROOT, 'edison/fonts.css');
   expect(fs.existsSync(FONTS), `${rel(FONTS)} exists`).toBe(true);
   const css = fs.readFileSync(FONTS, 'utf8');
   expect(css).toMatch(/fonts\.googleapis\.com/);
-  for (const family of ['Barlow', 'Barlow\\+Condensed', 'Barlow\\+Semi\\+Condensed', 'B612', 'STIX\\+Two\\+Text'])
+  for (const family of ['Barlow', 'Barlow\\+Condensed', 'Barlow\\+Semi\\+Condensed', 'B612', 'STIX\\+Two\\+Text', 'DM\\+Mono'])
     expect(css, `the fonts file loads family=${family.replace(/\\/g, '')}`).toMatch(new RegExp(`family=${family}[:&'")]`));
   const b612 = /family=B612(?::([^&'")]*))?[&'")]/;
   expect(b612.test('family=B612+Mono:wght@400;700&display=swap'), 'B612 Mono does not count as B612').toBe(false);
