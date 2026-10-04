@@ -21,6 +21,7 @@ const { execFile } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const Board = require('../circuit3d/js/board-model.js');
 
 const FIXTURE_DIR = path.join(__dirname, '..', 'test', 'fixtures', 'ask');
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'sonnet';
@@ -226,6 +227,10 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
   const actions = [];
   let reply = '';
   let repairs = 0;
+  // Each build the model ended its turn on, checked (issue #6): its actions
+  // with the wire fixes folded in, its reply, its problem count and the
+  // repairs sent before it. The best one is returned.
+  const attempts = [];
   // "Fix it." is judged on the whole board after the edit, not only on the
   // problems the edit adds (issue #85).
   const check = { fullCheck: isFixRequest(userMsg) };
@@ -237,15 +242,16 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
       // The model ended its turn. A build or edit the server finds problems
       // in goes back to it with those problems, at most MAX_REPAIRS times,
       // and only while a round is left for the answer.
-      const canRepair = !!ctx.checkBuild && repairs < MAX_REPAIRS && round + 1 < DEEPSEEK_MAX_ROUNDS;
-      const problems  = canRepair || (ctx.checkBuild && repairs > 0) ? safeCheck(ctx.checkBuild, actions, board, check) : [];
+      if (!ctx.checkBuild) break;
+      const build    = foldWireFixes(actions, board);
+      const problems = safeCheck(ctx.checkBuild, build, board, check);
+      attempts.push({ build, reply, problems: problems.length, round: repairs });
       if (repairs > 0) console.log(`[repair] after round ${repairs}: ${problems.length ? `${problems.length} problems left` : 'clean'}`);
-      if (!canRepair || !problems.length) break;
+      if (!problems.length || repairs >= MAX_REPAIRS || round + 1 >= DEEPSEEK_MAX_ROUNDS) break;
       repairs++;
       console.log(`[repair] round ${repairs}: ${problems.length} problems`);
       messages.push(assistantTurn(m, ctx));
-      const heading = actions.some(a => a && a.tool === 'delete_all') ? REPAIR_HEADING : EDIT_REPAIR_HEADING;
-      messages.push({ role: 'user', content: `${heading}\n${problems.map(p => `- ${p}`).join('\n')}` });
+      messages.push({ role: 'user', content: repairMessage(problems, actions, board) });
       continue;
     }
 
@@ -267,7 +273,8 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
         result = text;
       } else {
         const action = { tool: c.function.name, ...args };
-        const dup = ctx.duplicate ? ctx.duplicate(action, actions, board) : null;   // a wire already there (#85)
+        // A wire already there (#85); one this build added and then deleted is not (#6).
+        const dup = ctx.duplicate ? ctx.duplicate(action, foldWireFixes(actions, board), board) : null;
         const why = dup ? null : ctx.refusal ? ctx.refusal(action, actions, board) : null;
         if (dup) result = `Refused: ${dup}`;
         else if (why) result = `Refused: ${why} Nothing was queued; fix it and place it again.`;
@@ -279,7 +286,73 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
       messages.push({ role: 'tool', tool_call_id: c.id, content: result });
     }
   }
-  return { reply, actions };
+  // The best checked build (#6), so a repair that made things worse, or one
+  // the round cap cut off, is never sent. With none checked, as before.
+  return keptAttempt(attempts) || { reply, actions };
+}
+
+// The attempt with the fewest problems, a tie going to the later one, as
+// { reply, actions }, logged; null when there are none.
+function keptAttempt(attempts) {
+  if (!attempts.length) return null;
+  const best = attempts.reduce((b, a) => (a.problems <= b.problems ? a : b));
+  console.log(`[repair] kept round ${best.round}: ${best.problems} problems`);
+  return { reply: best.reply, actions: best.build };
+}
+
+// A board-model board as the browser sends it (issue #84).
+const isBoard = b => !!b && Array.isArray(b.parts) && Array.isArray(b.wires);
+
+// The actions from the last delete_all on, or null without one.
+function lastBuild(actions) {
+  let i = -1;
+  actions.forEach((a, k) => { if (a && a.tool === 'delete_all') i = k; });
+  return i < 0 ? null : actions.slice(i);
+}
+
+// The actions with their wire fixes folded in (#6): a delete_wire of a wire
+// an earlier add_wire here made is dropped with that add_wire, so the checker
+// (which ignores delete_wire) and the page's preview see the board the steps
+// leave. A delete_wire of a wire on the sent board is an edit, kept. Wire ids
+// are Board.apply's, on the sent board. Always a new array; the actions as
+// they are if the board can't be read.
+function foldWireFixes(actions, board) {
+  if (!actions.some(a => a && a.tool === 'delete_wire')) return actions.slice();
+  try {
+    let now = isBoard(board) ? board : Board.empty();
+    const madeBy = new Map();   // a live wire's id → the index of the add_wire that made it
+    const drop = new Set();
+    actions.forEach((a, i) => {
+      const tool = a && a.tool;
+      if (tool === 'delete_wire' && madeBy.has(a.wire)) drop.add(madeBy.get(a.wire)).add(i);
+      const had = new Set(now.wires.map(w => w.id));
+      now = Board.apply(now, [a]).board;
+      const live = new Set(now.wires.map(w => w.id));
+      for (const id of madeBy.keys()) if (!live.has(id)) madeBy.delete(id);
+      if (tool === 'add_wire') for (const id of live) if (!had.has(id)) madeBy.set(id, i);
+    });
+    return actions.filter((_, i) => !drop.has(i));
+  } catch {
+    return actions.slice();
+  }
+}
+
+// The repair message (#6). A build is asked for fixes: its problems, its
+// wires with the ids delete_wire takes (as Board.apply numbers them: a
+// rebuild from its last delete_all, an edit on the sent board), and the fix
+// tools. A rebuild with nothing powered, or with a part to turn or move
+// (decision 2: its checker can't see a delete_part), gets the rebuild
+// message instead.
+function repairMessage(problems, actions, board) {
+  const list = problems.map(p => `- ${p}`).join('\n');
+  const rebuild = lastBuild(actions);
+  if (rebuild && problems.some(p => UNPOWERED.test(p) || movesAPart(p))) return `${REPAIR_HEADING}\n${list}`;
+  let wires = [];
+  try {
+    wires = Board.apply(rebuild || !isBoard(board) ? Board.empty() : board, rebuild || actions).board.wires;
+  } catch { /* a board that can't be read: no wires listed */ }
+  const table = wires.length ? ['| id | from | to |', ...wires.map(w => `| ${w.id} | ${w.from} | ${w.to} |`)] : ['None.'];
+  return [EDIT_REPAIR_HEADING, list, '', 'Its wires now:', ...table, '', FIX_TOOLS].join('\n');
 }
 
 // A chat turn is resent in full each round, so this bounds the cost of a
@@ -288,9 +361,28 @@ const DEEPSEEK_MAX_ROUNDS = 12;
 // Repair rounds a build or edit gets when checkBuild finds problems. They
 // count toward DEEPSEEK_MAX_ROUNDS.
 const MAX_REPAIRS = 2;
+// A checker problem only a part turned or moved fixes (#6, decision 2): a
+// backwards part, no forward path, a part not placed, or a stacked hole
+// whose leads include no wire.
+function movesAPart(p) {
+  if (PART_MOVE.test(p)) return true;
+  const stacked = STACKED_HOLE.exec(p);
+  return !!stacked && !/\bwires?\b/.test(stacked[1]);
+}
+
+// The heading for a rebuild with nothing powered or a part to move (#6): not fixed in place.
 const REPAIR_HEADING = 'Your build has problems. Rebuild it with these fixed (delete_all first, then the whole corrected circuit):';
-// The heading for an edit (no delete_all so far): fix in place (issue #85).
+// The heading for every other build or edit: fix in place (issues #85, #6).
 const EDIT_REPAIR_HEADING = 'Your build has problems. Fix only these, keeping everything else:';
+// The fix message's last line (#6), after the build's wires.
+const FIX_TOOLS = 'Fix them with delete_wire (by the id above), add_wire and set_value steps.';
+// A checker problem that says a supply powers nothing: a battery's + or a
+// bench supply not wired to a rail.
+const UNPOWERED = /not wired to a .*rail.*nothing on the board is powered/;
+// The checker's part-level wording, and its stacked-hole sentence with the
+// leads it names: "Hole b10 holds 2 leads (2 LEDs)".
+const PART_MOVE    = /backwards|Swap holeA|forward path|not placed/i;
+const STACKED_HOLE = /^Hole \S+ holds \d+ leads \(([^)]*)\)/;
 // An explain ask whose answer has no text (issue #169).
 const EXPLAIN_FALLBACK = "I couldn't explain that just now.";
 // Added to an explain ask's user message (not the system prompt, #169): with

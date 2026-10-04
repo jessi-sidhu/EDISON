@@ -27,25 +27,6 @@ Where the test set stands: **11/48 with reasoning off, 24/48 with reasoning on**
 - The recipes still simulate to their expected outputs.
 - With reasoning on, case 11 passes.
 
-## 3. The repair loop: keep the best build, never send a half-finished one
-
-**Why.** When the server's checker finds a problem in a build, `askDeepSeek`'s loop (`Plugged/backend/ai-providers.js`) tells the model to rebuild the whole circuit from scratch (`REPAIR_HEADING`). On the reasoning-off run:
-- **Repairs barely help.** 31 first builds had a problem. The first repair cleaned 11; the second cleaned 2 of 13, and some repairs raised the problem count (1→2, 7→8).
-- **Cut-off rebuilds get sent.** All 5 "parts placed, no wires" runs were a second rebuild cut off by the 12-round cap (`DEEPSEEK_MAX_ROUNDS`). Those runs log `[repair] round 2` with no `after round 2`, and `fromLastDeleteAll` then keeps only the unfinished rebuild.
-
-**Steps.**
-1. Each time the model ends its turn, keep that build and its problem count. When the loop ends (the model is done, repairs are used up, or the round cap hits), return the build with the fewest problems; a tie goes to the later one.
-2. Never return a rebuild the round cap cut off. If the rounds run out after a repair's `delete_all`, return the best earlier build.
-3. Ask for repairs as fixes, not rebuilds: list the build's wires with ids, as the board markdown's Wires table does, and ask for `delete_wire`, `add_wire` and `set_value` steps. Keep the rebuild wording only when the problems say the build is unusable (for example, nothing wired to a supply).
-4. Log which build was kept: `[repair] kept round N: K problems`.
-
-**Done when.**
-- Unit tests with a scripted model:
-  - a repair that makes things worse gets the first build back;
-  - a rebuild cut off at the cap is never returned;
-  - a repair that fixes everything is returned.
-- Live: the test set beats its last run with no "parts, no wires" runs, and the demo check passes 3/3.
-
 ## 5. The op-amp repair checks (built; branch `aarmen/204-opamp-repair-checks`)
 
 **What it is.** Four extra checks in the repair loop, built and unit-tested (2912 unit tests pass), on its own pushed branch:

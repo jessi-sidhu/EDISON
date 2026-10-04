@@ -8,7 +8,7 @@
 
 - **`main`** = `dev`, promoted in PR #211: Edison UI, Lab HUD, the parts redo, the photo feature, and the 2026-10-03 bug-fix round below. This is the demo branch.
 - **`dev`** is the workspace; promote it to `main` with `/promote` at natural points.
-- **Branch `aarmen/204-opamp-repair-checks`** (pushed, not on dev): the op-amp repair checks, held until the repair loop is fixed (`docs/TODO.md` tasks 3 and 5).
+- **Branch `aarmen/204-opamp-repair-checks`** (pushed, not on dev): the op-amp repair checks, held until the repair loop was fixed (`docs/TODO.md` task 5; the repair loop is done in #6). It was pushed to the old `myproject` repo, not this one.
 - **Reasoning is on by default** (#205, #4): 32 000 `max_tokens`, a 240 s server deadline and a 255 s page timeout. `DEEPSEEK_THINKING=0` turns it off (see "Running the AI test set" below).
 
 ### The 2026-10-03 bug-fix round (on `main` since PR #211)
@@ -28,7 +28,7 @@ The full detail of each task (why, files, steps, done-when) is in **`docs/TODO.m
 |---|---|---|
 | 1 | Done (#4): reasoning on by default | 32 000 `max_tokens` (cases 06 and 16 ran out at 16 000), 240 s server / 255 s page timeouts; `DEEPSEEK_THINKING=0` turns it off. Left: a `deepseek-v4-pro` run, then Aarmen picks flash vs Pro. |
 | 2 | TL072 guide: a sine input sets the generator's amplitude | Case 11 built a DC input every time because our own guide says "offset = DC in". |
-| 3 | The repair loop: keep the best build, never send a half-finished one | Repairs often made builds worse; all 5 "parts, no wires" runs came from it. |
+| 3 | Done (#6): the repair loop keeps the best build | The fewest problems wins (a tie goes to the later one), a build the round cap cut off is never sent, and wire fixes are asked for and folded into the build. |
 | 4 | Checker false positives (superdiode, back-to-back LEDs): **done in #3** | The clean BANK-07 and BANK-15 builds no longer get a Heads up. |
 | 5 | The op-amp repair checks (branch `aarmen/204-opamp-repair-checks`) | Built; waits for task 3. |
 | 6 | Wire on-board parts by pin name | Only if hole-level mistakes remain. |
@@ -49,7 +49,7 @@ Measured on the AI test set, 16 cases × 3 runs, graded in the simulator with wi
 
 Why builds failed, by impact:
 1. **Thinking was off** (now on by default, #4; turning it on doubled the pass rate). The model is fast and cheap but didn't reason. Its mistakes were reasoning mistakes: op-amp inputs swapped, the meter on the wrong row of the TL072, wrong gain resistors.
-2. **The repair loop is our bug** (`docs/TODO.md` task 3). When the checker finds a problem, the model is told to rebuild the whole circuit from scratch. The first repair fixed 11 of 31 builds; the second fixed 2 of 13, and some repairs added problems. The 12-round cap cut second rebuilds off after the parts and before the wires.
+2. **The repair loop was our bug** (fixed in #6). When the checker finds a problem, the model is told to rebuild the whole circuit from scratch. The first repair fixed 11 of 31 builds; the second fixed 2 of 13, and some repairs added problems. The 12-round cap cut second rebuilds off after the parts and before the wires.
 3. **Hole bookkeeping.** Every connection is a hole address, and a hole takes one lead. The leftover problems were mostly hole-level: wrong row (14 runs), two leads in one hole (6), supply unwired (5). `docs/TODO.md` task 6 removes this if it still matters after reasoning.
 4. **Our checker's false positives** on BANK-07 and BANK-15 (fixed in #3).
 5. **Our own TL072 guide** taught "offset = DC input", so a sine was built as DC (task 2).
