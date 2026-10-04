@@ -300,9 +300,14 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
 - `ledsOn` and `buzzersOn` are gone (#26): the page reads `parts[label].m` and calls each part's `view.update`. `'no-source'` replaced `'no-battery'`.
 - **Optional third argument `{ dt, state }`** (additive): `analyze(components, wires, { dt, state })` runs one time step of length `dt`.
   - Each `C` starts at its voltage in `state` (0 V when missing, i.e. discharged).
-  - `result.state` holds each capacitor's voltage after the step.
+  - `state` and `result.state` are keyed `"<label>.<elementId>"` (e.g. `"C1.c"`), in volts, + from the `C`'s pin `a` to pin `b`.
+  - `result.state` holds each capacitor's voltage after the step. Early returns (short wire across a source, parallel-source fight, unsolvable, unsettled, current source with no path) carry **no** `state`; the caller keeps its previous state.
+  - Each capacitor's current is `result.parts[label].r.current[elementId]`, in mA, + from `a` to `b`.
+  - A capacitor carrying current (≥ 1 µA) counts as a complete path, so "Circuit open — no complete path." is not shown while one charges or discharges.
   - Without `dt`, a `C` is an open circuit.
   - Called without the third argument on a board with no `C` elements, it behaves exactly as today.
+- **`Sim.pickDt(tauMin)`** → the page's step in seconds: `tauMin / 50`, clamped to 10 µs–10 ms; 1 ms when `tauMin` is not a positive finite number.
+- **The page's time run (#103):** Run on a board with any `C` starts a `requestAnimationFrame` loop instead of one solve. It steps up to 200 times per frame at `dt = pickDt(τ)` (τ estimated as the smallest R × the smallest C), carrying `state`, so sim time keeps pace with real time (`(slowed)` when it can't). Each frame shows `t = <s> s` at the top of `#sim-results`, then sends `plugged:sim` with that frame's result. A control change keeps `state`; Stop cancels the loop and clears it. A board with no `C` solves once, as before.
 
 ### `Readings` (`circuit3d/js/readings.js`)
 - **Owner:** readings (`circuit3d/js/readings.js`). A plain module that loads in Node, like `simulate.js`. It never changes the solver.

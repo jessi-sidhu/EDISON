@@ -40,7 +40,7 @@
 //  Browser: window.App.runSimulation() / App.stopSimulation(), unchanged.
 //  Node:    module.exports = the pure solver (UnionFind, bbNodeId,
 //           buildGraph, solveLinear, settleModes, analyze,
-//           simulationSummary) so a test runner can call it.
+//           simulationSummary, pickDt) so a test runner can call it.
 //  Everything above the "Presentation" divider is pure: no document,
 //  no THREE, no audio.
 // ─────────────────────────────────────────────────────────────
@@ -705,7 +705,10 @@
     });
 
     const flowing = sourceAmps.some(a => a > OPEN_AMPS);
-    if (!flowing && !outputs && !explained) {
+    // A capacitor charging or discharging is a complete path, even with
+    // the battery supplying nothing.
+    const capFlowing = caps.some(({ e }) => Math.abs(elementAmps(e, sol)) >= OPEN_AMPS);
+    if (!flowing && !capFlowing && !outputs && !explained) {
       lines.push({ text: '  Circuit open — no complete path.', cls: 'sim-warn' });
       sources.forEach(src => {
         const linked = graph.some(g => g !== src && g.nodes.some(n => src.nodes.includes(n)));
@@ -716,6 +719,39 @@
     }
 
     return done(Object.assign({ status: 'ok', lines: withHeads(results), nodeVoltages, currents, shorted: false, voltageAt, parts }, timedState), extra);
+  }
+
+  // ── Pure: time step size ─────────────────────────────────────
+  //  pickDt(tauMin): the step for a time run, τ/50 seconds clamped to
+  //  10 µs–10 ms; 1 ms when τ can't be estimated.
+  const DT_MIN = 1e-5, DT_MAX = 1e-2, DT_UNKNOWN = 1e-3;
+  function pickDt(tauMin) {
+    if (typeof tauMin !== 'number' || !Number.isFinite(tauMin) || tauMin <= 0) return DT_UNKNOWN;
+    return Math.min(DT_MAX, Math.max(DT_MIN, tauMin / 50));
+  }
+
+  // A cheap guess at the board's fastest time constant: the smallest R
+  // times the smallest C. undefined when there is no R or no C.
+  function estimateTau(components) {
+    let rMin = Infinity, cMin = Infinity;
+    components.forEach(comp => {
+      const def = comp ? partDef(comp.type) : null;
+      if (!def || typeof def.elements !== 'function') return;
+      def.elements(partValues(def, comp), partControls(def, comp)).forEach(el => {
+        if (el.kind === 'R' && el.ohms > 0) rMin = Math.min(rMin, el.ohms);
+        if (el.kind === 'C' && el.farads > 0) cMin = Math.min(cMin, el.farads);
+      });
+    });
+    return Number.isFinite(rMin) && Number.isFinite(cMin) ? rMin * cMin : undefined;
+  }
+
+  // Does the board hold a C element? Then Run starts the time loop.
+  function hasCapacitor(components) {
+    return components.some(comp => {
+      const def = comp ? partDef(comp.type) : null;
+      if (!def || typeof def.elements !== 'function') return false;
+      return def.elements(partValues(def, comp), partControls(def, comp)).some(el => el.kind === 'C');
+    });
   }
 
   // ── Pure: simulationSummary ──────────────────────────────────
@@ -832,14 +868,16 @@
   }
 
   // ── Results overlay ─────────────────────────────────────────
-  function showResults(lines) {
+  //  clock (optional): the time run's "t = 1.23 s" line, shown first.
+  function showResults(lines, clock) {
     let box = document.getElementById('sim-results');
     if (!box) {
       box = document.createElement('div');
       box.id = 'sim-results';
       document.getElementById('canvas-wrap').appendChild(box);
     }
-    box.innerHTML = lines.map(l =>
+    const top = clock ? `<div class="sim-line sim-clock">${clock}</div>` : '';
+    box.innerHTML = top + lines.map(l =>
       `<div class="sim-line ${l.cls || ''}">${l.text}</div>`
     ).join('');
     box.style.display = 'block';
@@ -857,8 +895,14 @@
   function runSimulation() {
     const { components, wires } = App.state;
 
+    // A time run already going: the next frame re-reads the board, and the
+    // capacitors keep their charge.
+    if (_time) { _time.dirty = true; return; }
+
     // Switch to select mode so the user can click parts during simulation
     if (!App.simRunning && App.setMode) App.setMode('select');
+
+    if (hasCapacitor(components)) { startTimeRun(); return; }
 
     const result = analyze(components, wires);
     showResults(result.lines);
@@ -875,8 +919,85 @@
     }
   }
 
+  // ── Time run ─────────────────────────────────────────────────
+  //  A board with a C keeps simulating: each animation frame takes up to
+  //  MAX_STEPS steps of dt, carrying each C's volts (state) forward, so sim
+  //  time keeps pace with real time (or falls behind, "(slowed)"). Then the
+  //  frame renders the latest result and announces it, like a single run.
+  const MAX_STEPS = 200;
+  let _time = null;   // { raf, dt, state, t, budget, last, slowed, dirty, result }
+
+  function timedStep(run) {
+    const { components, wires } = App.state;
+    const result = analyze(components, wires, { dt: run.dt, state: run.state });
+    if (result.state) run.state = result.state;   // early returns carry none
+    run.t += run.dt;
+    run.result = result;
+    return result;
+  }
+
+  function renderTimed(run) {
+    const { components, wires } = App.state;
+    const result = run.result;
+    const clock  = `t = ${run.t.toFixed(2)} s` + (run.slowed ? ' (slowed)' : '');
+    showResults(result.lines, clock);
+    showParts(components, result.status === 'ok' && !result.shorted ? result.parts : {});
+    const readings = window.Readings ? window.Readings.from(result, { components, wires }) : null;
+    document.dispatchEvent(new CustomEvent('plugged:sim', { detail: { result, readings } }));
+  }
+
+  function startTimeRun() {
+    const run = { raf: 0, dt: pickDt(estimateTau(App.state.components)), state: {}, t: 0,
+                  budget: 0, last: performance.now(), slowed: false, dirty: false, result: null };
+    const result = timedStep(run);
+    run.budget = -run.dt;   // that first step is paid back by the first frames
+    if (result.status !== 'ok') {
+      // Nothing to run: shown once, as a single run would.
+      showResults(result.lines);
+      showParts(App.state.components, {});
+      const readings = window.Readings ? window.Readings.from(result, App.state) : null;
+      document.dispatchEvent(new CustomEvent('plugged:sim', { detail: { result, readings } }));
+      return;
+    }
+    _time = run;
+    App.simRunning = true;
+    document.getElementById('sim-run-btn').style.display  = 'none';
+    document.getElementById('sim-stop-btn').style.display = 'inline-flex';
+    renderTimed(run);
+    run.raf = requestAnimationFrame(timeFrame);
+  }
+
+  function timeFrame(now) {
+    const run = _time;
+    if (!run) return;
+    // The last capacitor deleted: back to a single solve.
+    if (!hasCapacitor(App.state.components)) {
+      _time = null;
+      runSimulation();
+      return;
+    }
+    if (run.dirty) run.dt = pickDt(estimateTau(App.state.components));
+    run.budget += Math.max(0, now - run.last) / 1000;
+    run.last = now;
+    let n = Math.floor(run.budget / run.dt + 1e-9);
+    run.slowed = n > MAX_STEPS;
+    if (run.slowed) { n = MAX_STEPS; run.budget = 0; } else run.budget -= n * run.dt;
+    if (run.dirty && n === 0) n = 1;   // a changed board shows at once
+    run.dirty = false;
+    for (let i = 0; i < n; i++) timedStep(run);   // a step ahead is paid back (budget < 0)
+    renderTimed(run);
+    run.raf = requestAnimationFrame(timeFrame);
+  }
+
+  function stopTimeRun() {
+    if (!_time) return;
+    cancelAnimationFrame(_time.raf);
+    _time = null;
+  }
+
   // ── Public: stopSimulation ──────────────────────────────────
   function stopSimulation() {
+    stopTimeRun();
     resetControls(App.state.components);
     resetParts(App.state.components);
     hideResults();
@@ -896,5 +1017,5 @@
     App.simulationSummary = simulationSummary;
   }
 
-  return { UnionFind, bbNodeId, buildGraph, solveLinear, settleModes, analyze, simulationSummary, install };
+  return { UnionFind, bbNodeId, buildGraph, solveLinear, settleModes, analyze, simulationSummary, pickDt, install };
 });

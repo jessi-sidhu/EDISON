@@ -231,3 +231,58 @@ test('clicking the meter body in 3D turns the dial V → A → Ω', async ({ pag
   expect(await meterMode(page)).toBe('Ω');
   expect(errors).toEqual([]);
 });
+
+// Issue #108: meter leads are red from MM1.red and black from MM1.black,
+// whatever wire colour is picked; other wires keep the picked colour.
+// A wire's colour is its arc's: the TubeGeometry mesh in wire.group.
+// The probe wires are found by their meter pin (0 = red, 1 = black).
+function leadColours(page) {
+  return page.evaluate(() => {
+    const tubeHex = w => {
+      const tube = w.group.children.find(o => o.isMesh && o.geometry && o.geometry.type === 'TubeGeometry');
+      return tube ? tube.material.color.getHex() : null;
+    };
+    const onMeter = (w, k) => (w.startComp && w.startComp.type === 'multimeter' && w.startPinIdx === k)
+                           || (w.endComp && w.endComp.type === 'multimeter' && w.endPinIdx === k);
+    const lead = k => { const w = App.state.wires.find(x => onMeter(x, k)); return w ? tubeHex(w) : 'no wire'; };
+    const plain = App.state.wires.find(w => w.id === window.__plainWireId);
+    return { red: lead(0), black: lead(1), plain: plain ? tubeHex(plain) : 'no wire', picked: App.state.wireColor };
+  });
+}
+
+test('probe leads are red and black whatever wire colour is picked; a later wire keeps the picked colour', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openDemo(page);
+  const holes = await demoHoles(page);
+
+  // Pick blue the way a person does: the Wire tool, then the Blue swatch.
+  await page.locator('#wire-tool-btn').click();
+  await page.locator('#wire-color-row .swatch[title="Blue"]').click();
+  expect(await page.evaluate(() => App.state.wireColor), 'Blue swatch picked').toBe(0x3b82f6);
+
+  await placeMeter(page, 'V', holes.r1[0], holes.r1[1]);
+  // A plain hole-to-hole wire drawn after the meter's leads.
+  await page.evaluate(() => {
+    const end = s => { const { col, row } = App.parseHole(s); const h = App.state.breadboard.getHole(col, row); return { world: h.world.clone(), holeRef: { col: h.col, row: h.row }, pinMesh: null }; };
+    App.state.wireStart = end('a50');
+    App.finishWire(end('a54'));
+    window.__plainWireId = App.state.wires[App.state.wires.length - 1].id;
+  });
+
+  const BLUE = 0x3b82f6, RED = 0xef4444, BLACK = 0x000000;
+  const hex = n => (typeof n === 'number' ? '0x' + n.toString(16).padStart(6, '0') : String(n));
+  let c = await leadColours(page);
+  expect(hex(c.red), 'lead from MM1.red is red').toBe(hex(RED));
+  expect(hex(c.black), 'lead from MM1.black is black').toBe(hex(BLACK));
+  expect(hex(c.plain), 'a normal wire keeps the picked colour').toBe(hex(BLUE));
+  expect(hex(c.picked), 'the picked colour is unchanged').toBe(hex(BLUE));
+
+  // Save/load round trip: undo then redo rebuilds the board from its saved
+  // record (serializeBoard -> rebuildBoard), colours included.
+  await page.evaluate(() => { App.undo(); App.redo(); });
+  c = await leadColours(page);
+  expect(hex(c.red), 'after a rebuild: red lead').toBe(hex(RED));
+  expect(hex(c.black), 'after a rebuild: black lead').toBe(hex(BLACK));
+  expect(hex(c.plain), 'after a rebuild: normal wire still blue').toBe(hex(BLUE));
+  expect(errors).toEqual([]);
+});

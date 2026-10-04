@@ -595,6 +595,7 @@ canvas {
 .sim-on    { color: #15803d; font-weight: 700; font-size: 13px; }
 .sim-warn  { color: #b45309; }
 .sim-err   { color: #dc2626; font-weight: 600; }
+.sim-clock { color: #555; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--border); margin-bottom: 4px; padding-bottom: 3px; }
 
 /* ── SCROLLBAR ──────────────────────────────── */
 

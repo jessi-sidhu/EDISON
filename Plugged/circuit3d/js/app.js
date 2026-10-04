@@ -452,8 +452,9 @@
     const sPm = state.wireStart.pinMesh;
     const ePm = endPin.pinMesh || null;
 
-    // Build the wire visual (coloured arc with leg stubs into holes)
-    const wireGroup = buildWireGroup(startWorld, endWorld, state.wireColor);
+    // Build the wire visual (coloured arc with leg stubs into holes).
+    // A meter lead is red or black like a real probe (#108), whatever colour is picked.
+    const wireGroup = buildWireGroup(startWorld, endWorld, probeColor(sPm) ?? probeColor(ePm) ?? state.wireColor);
     App.scene.add(wireGroup);
 
     // Reset start-pin highlight
@@ -476,6 +477,14 @@
     App.setHint(MODE_HINTS['wire']);
     refreshCounts();
   };
+
+  // A multimeter probe socket's lead colour, or null for any other pin.
+  function probeColor(pm) {
+    const comp = pm?.userData.ownerComp;
+    if (comp?.type !== 'multimeter') return null;
+    const pin = Parts.get(comp.type)?.pins?.[pm.userData.pinIndex];
+    return pin === 'red' ? 0xef4444 : pin === 'black' ? 0x000000 : null;
+  }
 
   App.cancelWire = function () {
     if (state.wireStart?.pinMesh) {
