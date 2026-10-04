@@ -36,7 +36,8 @@
 //   and `states`, whatever holes the AI chose. Never a second supply.
 // - ai.recipe: the inverting −10 on PS1 at ±12 V (V+ pin 8 to tp, V− pin 4
 //   to bn), Rin 10 kΩ from the input into IN1− (pin 2), Rf 100 kΩ from IN1−
-//   to OUT1 (pin 1), IN1+ (pin 3) to COM, input FG1 with |Vin| 0.1–1 V.
+//   to OUT1 (pin 1), IN1+ (pin 3) to COM, input FG1 with |Vin| 0.1–1 V
+//   (a sine input, issue #5, read at its peak).
 //   Op-amp 2 is left unused.
 // - scripts/ai-eval-cases.js gains three cases, tagged 'opamp' (so
 //   `npm run ai-eval -- --only opamp` runs all three), not 'demo':
@@ -237,11 +238,12 @@ function recipeFor(id) {
 const recipe = () => recipeFor('OPAMP-inverting');
 
 // Actions → applied board → simulated, with readings. Every action applies.
-function simulate(actions) {
+// `step` ({ dt, state, t }) solves one time step instead of a plain solve.
+function simulate(actions, step) {
   const applied = Board.apply(Board.empty(), actions.map(a => ({ ...a })));
   assert.deepStrictEqual(applied.errors, [], 'every action applies to the board model');
   const board = Board.toSim(applied.board);
-  const result = Sim.analyze(board.components, board.wires);
+  const result = step ? Sim.analyze(board.components, board.wires, step) : Sim.analyze(board.components, board.wires);
   assert.strictEqual(result.status, 'ok', `status ${result.status}: ${(result.lines || []).map(l => l.text).join(' | ')}`);
   assert.strictEqual(result.shorted, false, 'shorted');
   return { board: applied.board, result, readings: Readings.from(result, board) };
@@ -249,7 +251,11 @@ function simulate(actions) {
 
 test('recipe: the inverting −10 on PS1 at ±12 V: Rin 10 kΩ into IN1− (pin 2), Rf 100 kΩ IN1− to OUT1 (pin 1), IN1+ (pin 3) at COM; Vout1 = −10 × Vin; op-amp 2 unused; no problems', () => {
   const ex = recipe();
-  const { board, result, readings } = simulate(recipeActions(ex));
+  // A sine input (FG1 amplitude > 0, issue #5) is read at its peak, t = 1/(4f):
+  // a plain solve reads its offset, 0 V. A DC input is read by a plain solve.
+  const fg = ((ex.parts.find(p => p.type === 'function_generator') || {}).values) || {};
+  const peak = fg.amplitude > 0 ? { dt: 1e-3, state: {}, t: 1 / (4 * (fg.frequency || 1)) } : undefined;
+  const { board, result, readings } = simulate(recipeActions(ex), peak);
   const chips = board.parts.filter(p => p.type === 'tl072');
   assert.strictEqual(chips.length, 1, 'one TL072');
   const [out1, in1n, in1p, vneg, , , , vpos] = chips[0].holes;

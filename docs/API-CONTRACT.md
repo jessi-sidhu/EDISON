@@ -121,9 +121,9 @@ The element `pins` name the part's pins, or internal nodes written `'#name'` (pr
 | `low` | `lo` behind `rout` | `u ≤ lo` and `|I| ≤ ilim` |
 | `isrc+` | `I = +ilim` | `V(out+) ≤ clamp(u, lo, hi) − rout·ilim` (the clipped drive would push more) |
 | `isrc−` | `I = −ilim` | `V(out+) ≥ clamp(u, lo, hi) + rout·ilim` |
-| `open` | `I = 0` (drives nothing) | Unpowered: a `rails` pin reaches no source through wires and the other elements (the E's own output pair doesn't count). Not a mode block; set before the solve, never flipped. |
+| `open` | `I = 0` (drives nothing) | Not a mode block; never flipped. Set for one of two reasons. **Unpowered**, before the solve: a `rails` pin reaches no source's `ref` pin through wires and the non-`E` elements (`unpoweredEs` leaves out every `E`, so no op-amp's output counts as a supply; an open `SW`, or a `C` outside a time step, doesn't join either). **A floating input** (#1), only when the first solve fails: an `E` with `rails` that has a `ctrl` pin no other pin reaches (only this E's own inputs on its node, through holes and wires) and an `out+` that reaches another part's pin. The board is solved once more with those open too, and each one is named in its part's `r.floatingInputs`. |
 
-An `E` with `rails` whose rail pin isn't connected to any source has its output open (`open` above), so a chip with no supply drives nothing. Boards with no E with `rails` are unaffected.
+An `E` with `rails` whose rail pin isn't connected to any source has its output open (`open` above), so a chip with no supply drives nothing. When a board can't be solved, an `E` with a floating input and its output wired to another part is opened too, and the board is solved once more; "cannot be solved" only if that also fails (#1). A board that solves first time is unchanged. Boards with no E with `rails` are unaffected.
 
 A board with no `E` solves exactly as before.
 
@@ -144,6 +144,8 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
   current: { d: 14.9 },                       // mA, by element id (or index), + in pin order
   modes:   { d: 'on' },                       // mode blocks only
   open:    { d: 9.00 },                       // volts across each mode block with every mode block off
+  swings?: true,                              // on every part when the board holds a sine that crosses 0 V (amplitude > |offset|)
+  floatingInputs?: { op2: true },             // E ids the simulator opened for a floating input (#1, the `open` mode); absent when none
 }
 ```
 
@@ -226,10 +228,10 @@ The board as plain data, no THREE or DOM, so an AI build can be applied and simu
 ### `POST /api/ask` (#84)
 - Request: `{ markdown, message, history, board?, explain? }`. `board` is `App.exportBoard()`. A request without it (an older client) behaves as before #84.
 - `explain` (#169), optional boolean: `true` asks for an answer only, never an edit. On DeepSeek every request of that ask leaves the `tools` and `tool_choice` keys out (not `tools: []`), the request goes at temperature 0, the system prompt is as without it, the user message gets one instruction after the question (`EXPLAIN_NOTE` in `ai-providers.js`: answer only from the Simulation section, whose list of problems is complete; name each problem, its part and holes and how to fix it by hand; suggest no other wiring changes; if it lists none, say so and what to check by hand; write no tool calls), the log says `[ask] explain: no tools` instead of the `[ask] tools: …` list, and the response is `{ reply, actions: [] }`: a tool call the model makes anyway queues nothing, tool-call markup written as text (DeepSeek DSML blocks, tags named after a tool such as `<delete_wire … />`) is cut from the reply, and a reply with no text left becomes `"I couldn't explain that just now."`. No repair round and no finish step run. Absent or `false`: unchanged. The Gemini, claude and fixture providers ignore it. The page sends it only from the photo's Build it with nothing typed (`sparkyAsk(msg, { context, explain: true })`); a typed question and every chat send go without it.
-- Errors (#129): a DeepSeek ask past its deadline (`DEEPSEEK_TIMEOUT_MS`, default 60000, shared by every round, repairs included) → 504 `{ reply: 'The AI took too long — try again.', actions: [], code: 'AI_TIMEOUT' }`. Any other AI failure → 502 `{ reply, actions: [] }`. The page gives up on its own after `SparkyChat.ASK_TIMEOUT_MS` (75000) with the same message.
-- Fallback model (#130): when one DeepSeek request takes longer than `DEEPSEEK_PRIMARY_TIMEOUT_MS` (default 25000), or answers 5xx, or can't be reached, the whole ask restarts once on `DEEPSEEK_FALLBACK_MODEL` (default `deepseek-v4-pro`; empty turns it off) inside the same `DEEPSEEK_TIMEOUT_MS` deadline. A 4xx never falls back. The response shape is unchanged; only the server log adds ` (fallback <model>)`.
+- Errors (#129): a DeepSeek ask past its deadline (`DEEPSEEK_TIMEOUT_MS`, default 240000 since #4, shared by every round, repairs included) → 504 `{ reply: 'The AI took too long — try again.', actions: [], code: 'AI_TIMEOUT' }`, unless the current run (the fallback's restart included, which keeps nothing from the primary's) has already ended a turn on a build (#7): then the attempt the repair loop would keep (below) is sent as a normal 200 reply, with a Heads up if it still has problems, and the server logs `[repair] deadline: kept round N: K problems`. Any other AI failure → 502 `{ reply, actions: [] }`. The page gives up on its own after `SparkyChat.ASK_TIMEOUT_MS` (255000) with the same message.
+- Fallback model (#130): when one DeepSeek request takes longer than `DEEPSEEK_PRIMARY_TIMEOUT_MS` (default 25000), or answers 5xx, or can't be reached, the whole ask restarts once on `DEEPSEEK_FALLBACK_MODEL` (default `deepseek-v4-pro`; empty turns it off) inside the same `DEEPSEEK_TIMEOUT_MS` deadline. The restart after `DEEPSEEK_PRIMARY_TIMEOUT_MS` applies with reasoning off (`DEEPSEEK_THINKING=0`) or in explain mode only; with reasoning on (#4), only a 5xx or a network error falls back. A 4xx never falls back. The response shape is unchanged; only the server log adds ` (fallback <model>)`.
 - Every live wire has an id `W<n>` (highest in use + 1, never renumbered; after the AI's `delete_all` it starts again at W1). The markdown Wires table is `| id | from | to | color |`.
-- Server checks: a reply with `delete_all` is checked from its last one, as before. An edit with a `board` is checked on `Board.apply(board, actions).board`, rebuilt by `Board.toActions` so it gets the full checker and the simulator, with the rebuild's labels mapped back to the board's own in the problems. An edit reports only the problems it introduces: the board after it minus the board before, compared in the board's own labels, so unfinished wiring already on the board is never reported. The repair loop and the Heads up both use this. An edit without a `board` is not checked. The actions sent back are always the reply's own.
+- Server checks: a reply with `delete_all` is checked from its last one, as before. An edit with a `board` is checked on `Board.apply(board, actions).board`, rebuilt by `Board.toActions` so it gets the full checker and the simulator, with the rebuild's labels mapped back to the board's own in the problems. An edit reports only the problems it introduces: the board after it minus the board before, compared in the board's own labels, so unfinished wiring already on the board is never reported. The repair loop and the Heads up both use this. An edit without a `board` is not checked. The actions sent back are the reply's own, or, with a repair loop (#6), the attempt with the fewest problems (a tie to the later one, never one the round cap cut off; an attempt whose board has no part, such as a `delete_all` alone, never beats one with parts, #7), with any `delete_wire` of a wire the same build added folded out together with that `add_wire`.
 
 ### Placed-part record (runtime) and saved record
 ```js
@@ -368,13 +370,13 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
   - `voltage(hole | net)` → volts, or `null` when floating
   - `part(label)` → `{ V, I, P, rating, over, energy?, opamps?, channels? }`
     - `channels: [{ name, V }]` only from a part's `reading` hook: an independent bench supply gives `[{ name: 'CH1', V: pos − com }, { name: 'CH2', V: com2 − neg }]`, and its V is CH1's. In series its V is pos − neg, with no `channels`.
-    - A part with `E` elements (an op-amp) has `opamps: [{ pin, vout, mode, iout, ilim, unused }]`, one per E: its `out+` pin, Vout there (V vs ground, signed), the E's mode, Iout (mA, + sourcing out of `out+`), `ilim` (mA), and `unused` (both `ctrl` pins floating: a half nobody wired). Its V and I are op-amp 1's Vout and Iout, P is `null`.
+    - A part with `E` elements (an op-amp) has `opamps: [{ pin, vout, mode, iout, ilim, unused, floating }]`, one per E: its `out+` pin, Vout there (V vs ground, signed), the E's mode, Iout (mA, + sourcing out of `out+`), `ilim` (mA), `unused` (both `ctrl` pins floating: a half nobody wired), and `floating` (`true` when its PartResult's `floatingInputs` names this E: the simulator opened it because an input connects to nothing and its output is wired (#1); `false` otherwise, an unpowered chip included). Its V and I are op-amp 1's Vout and Iout, P is `null`.
     - V is the voltage across the part's outer pins, I is its current, and P = V·I, in W (I is in mA, so P = V × I ÷ 1000).
     - `rating` comes from the part's own values where it has one. Resistors are rated **¼ W**. A part with no rating has none.
     - `energy` is ½CV², in µJ, for capacitors only.
   - `kcl(net)` → `[{ label, pin, amps }]`: each element current into the net, signed, in mA. It sums to 0 within 1 µA. An `E` enters at its `out` pins: +Iout into the `out+` net, −Iout into the `out−` net.
   - `thevenin(a, b)` → `{ Vth, Rth, In }` or `{ why }`. It solves copies of the board when called, never on every solve. `{ why }` when there is no source, or when a and b are on the same net.
-  - `problems()` → `[{ kind, labels[], why, info? }]`, built from the simulation result. It covers shorts, LEDs with no resistor, backwards parts, open circuits and parts over their rating, and op-amps: `no-supply`, `output-shorted` (an output at its current limit: tied straight to ground, a rail or the other output, or a load that takes too much current), and `clipped`, the only row with `info: true` (a note, never an error: a comparator clips on purpose; an unused half gives none). `why` is plain English.
+  - `problems()` → `[{ kind, labels[], why, info? }]`, built from the simulation result. It covers shorts, LEDs with no resistor, backwards parts, open circuits and parts over their rating, and op-amps: `no-supply`, `output-shorted` (an output at its current limit: tied straight to ground, a rail or the other output, or a load that takes too much current), `floating-input` (one row per chip with a half the simulator opened because an input connects to nothing, its `opamps[].floating` (#1); `why` is the chip's own warning(s) under one "U1: " lead; an unpowered chip is `no-supply` only, #8), and `clipped`, the only row with `info: true` (a note, never an error: a comparator clips on purpose; an unused half gives none). `why` is plain English.
   - `lines()` → `[{ label, title, sub: [string…], level }]`, one entry per part with something to say, for the Edison callouts (#191, `edison/result-callouts.js`). `level` is `'fault'` when a problem that isn't info names the part, `'warn'` when only an info one does, else `'ok'`. A fault or warn takes its title from the problem's kind ("No supply") and its `sub` from the `why`; an ok part takes its part name as the title and its own results-panel text (headline, line, or the ON line) as `sub`. A part with neither has no entry. Faults first, then warn, then ok, each in board order. No new wording for the physics.
 - **`Readings.nets(board)`:** which holes and pins are joined, with no solve needed (for the connection highlight). `board` is `{ components, wires }`, as for `Readings.from`.
 - **Errors:** never throws. `voltage` gives `null` when floating; `thevenin` gives `{ why }`; `part(label)` for an unknown label and `netOf(hole)` for a hole not on the board give `null`.
@@ -743,6 +745,34 @@ A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `
 - `POST /api/course/canvas/sync` → `200 { ok: true, demo: true, syncedAt: <ISO> }`
 - `GET /api/course/ta-feed` → `200 { demo: true, events: [{ at: <ISO>, lab, step, label, text }] }` (sample events, timestamps relative to now)
 - Callers fall back to `CourseData` sample data when these 404 (deployed hosting has no Node server).
+
+## Voice (V1, #12)
+The student talks to Edison and hears the answer. ElevenLabs does the speech behind the server, so **the key never reaches the page**. The hold-to-talk UI is V2, a later issue.
+
+### `POST /api/voice/stt` and `POST /api/voice/tts`
+- **Owner:** `backend/voice.js` (`{ parseAudioDataUrl, voiceMode, transcribe, speak, VOICE_REPLY }`; `transcribe(clip, { env, fetch })` and `speak(text, { env, fetch })` default to `process.env` and the global `fetch`), routed by `backend/server.js`. **Called by:** the chat's voice UI (V2).
+- **`/api/voice/stt` request:** `{ audio }`, a base64 data URL `data:audio/<webm|ogg|mp4|mpeg|wav>[;codecs=…];base64,…`, inside JSON as `/api/photo` sends its image (`readBody` decodes UTF-8, so raw binary would be corrupted). **Response 200:** `{ text }`, the transcript.
+- **`/api/voice/tts` request:** `{ text }`, 1 to 600 characters after trimming. **Response 200:** `audio/mpeg` (`mp3_44100_128`), streamed as ElevenLabs sends it, `Cache-Control: no-store`.
+- **Errors:** JSON `{ reply, code }`.
+
+| Status | `code` | When | `reply` |
+|---|---|---|---|
+| 400 | `BAD_AUDIO` | stt: `audio` missing or not a base64 audio data URL of a listed type, or the body isn't JSON | `"That recording could not be read. Try again."` |
+| 400 | `BAD_TEXT` | tts: `text` missing, not a string, blank, or over 600 characters after trimming, or the body isn't JSON | `"Nothing to say."` |
+| 413 | `TOO_LARGE` | stt: the body is over 2 MB + 64 KB (about a minute of opus); tts: over 8 KB | `"That recording is too long."` / `"That reply is too long to speak."` |
+| 429 | `RATE_LIMITED` | more than 20 voice requests a minute from one IP (stt and tts share one map, separate from `/api/ask`'s; `TRUST_PROXY` as for `/api/ask`), checked before the body is read | `"Too many voice requests. Wait a moment."` |
+| 502 | `VOICE_FAILED` | ElevenLabs answered an error (its body is never read or passed on) or couldn't be reached | `"Voice failed. Try again or type your question."` |
+| 503 | `VOICE_OFF` | `voiceMode()` is `'off'` | `"Voice is off on this server."` |
+| 504 | `VOICE_TIMEOUT` | ElevenLabs past `VOICE_TIMEOUT_MS` (default 10000); the call is aborted | `"I didn't catch that in time. Try again."` |
+
+- **Providers:** `VOICE_PROVIDER` = `elevenlabs | fixture | off`, read per request. Unset or blank, it is `elevenlabs` when `ELEVENLABS_API_KEY` is set, otherwise `off`; `elevenlabs` with no key is `off`. The names are in `.env.example`.
+  - STT: `POST https://api.elevenlabs.io/v1/speech-to-text`, multipart `file` (the clip) and `model_id` (`ELEVENLABS_STT_MODEL`, default `scribe_v2`), the key in the `xi-api-key` header (no hand-set `Content-Type`: fetch writes the boundary). The 200's JSON `text` is the transcript.
+  - TTS: `POST https://api.elevenlabs.io/v1/text-to-speech/<voice>/stream?output_format=mp3_44100_128`, JSON `{ text, model_id }` (`ELEVENLABS_TTS_MODEL`, default `eleven_flash_v2_5`), the key in `xi-api-key`. The voice is `ELEVENLABS_VOICE_ID`, default `JBFqnCBsd6RMkjVDRZzb`.
+  - **Deadline:** one per ElevenLabs call, `VOICE_TIMEOUT_MS` (default 10000), on `setTimeout` and an `AbortController`. STT's covers reading the transcript; TTS's ends when the audio starts.
+- **Fixtures** (`Plugged/test/fixtures/voice/`): `VOICE_PROVIDER=fixture` answers stt with `stt.json`'s `text` and tts with `tts.mp3`, never calling out, even with a key set. The Playwright server runs with it and unit tests stub `fetch`, so no test reaches ElevenLabs.
+- **Health:** `GET /api/health` → `{ status, model, voice }`, `voice` being `voiceMode()`: `'elevenlabs'`, `'fixture'` or `'off'`. Never the key.
+- **Logging:** one line per request that reached a provider, e.g. `[voice] stt 200 840 ms`, `[voice] stt 504 VOICE_TIMEOUT 10003 ms`, `[voice] tts 200 310 ms to first byte`. Never the audio, the transcript, an upstream body or the key.
+- **Mock:** stt `{ text: 'Why is my output flat?' }`; tts the bytes of `tts.mp3`.
 
 ## Testing contract (a part is done when all of these pass)
 1. **Registry check**, automatic for every part: every rule in `PartDefinition` and `Placement`.

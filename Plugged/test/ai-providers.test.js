@@ -56,11 +56,17 @@ test('toOpenAITools turns the Gemini tool list into OpenAI function tools', () =
   ]);
 });
 
-test('askDeepSeek sends one non-thinking chat request with the tools, history and board', async () => {
+// Reasoning is on by default (issue #4); DEEPSEEK_THINKING=0 is the
+// non-thinking request this test pins. test/deepseek-thinking.test.js owns
+// the thinking settings.
+test('askDeepSeek with DEEPSEEK_THINKING=0 sends one non-thinking chat request with the tools, history and board', async () => {
+  const saved = process.env.DEEPSEEK_THINKING;
+  process.env.DEEPSEEK_THINKING = '0';
   const fetch = fakeFetch(200, { choices: [{ message: { content: 'Hi!', tool_calls: null } }] });
   const out = await P.askDeepSeek('BOARD MD', 'What is this?',
     [{ role: 'user', text: 'hello' }, { role: 'model', text: 'hey' }],
-    { SYSTEM_PROMPT: 'SYS', CIRCUIT_TOOLS: TOOLS, fetch, apiKey: 'sk-test' });
+    { SYSTEM_PROMPT: 'SYS', CIRCUIT_TOOLS: TOOLS, fetch, apiKey: 'sk-test' })
+    .finally(() => { if (saved === undefined) delete process.env.DEEPSEEK_THINKING; else process.env.DEEPSEEK_THINKING = saved; });
 
   assert.deepEqual(out, { reply: 'Hi!', actions: [] });
   const [call] = fetch.calls;

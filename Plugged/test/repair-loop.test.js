@@ -20,10 +20,12 @@
 //   problems, fewer than 2 repair rounds so far, and rounds left under
 //   DEEPSEEK_MAX_ROUNDS, it adds one user message:
 //     "Your build has problems. Rebuild it with these fixed (delete_all first, then the whole corrected circuit):"
-//     then "- <problem>" per problem, and carries on. The heading matches
-//   today's prompt rule (a fix is a delete_all rebuild) until the
-//   edit-in-place issue changes the rules. Repair-round actions are
-//   appended; the reply is the model's latest non-empty text.
+//     then "- <problem>" per problem, and carries on. Since issue #6 (decision
+//   2) a rebuild keeps this message only when a problem needs a part turned
+//   or moved (a backwards LED, as here) or nothing is powered; a wire-level
+//   rebuild gets the fix message (test/repair-best-build.test.js).
+//   Repair-round actions are appended; the attempt with the fewest problems
+//   is returned (a tie: the later one, with its reply).
 // - finishAIReply still runs after the loop, so what is still wrong shows as
 //   today's "Heads up, this build has a problem:".
 //

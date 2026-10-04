@@ -9,7 +9,9 @@
 //  elements (one per op-amp), each from its OUT to V− with rails
 //  [V−, V+]: it amplifies, clips 1.5 V inside its rails, and limits its
 //  output to 20 mA. The inputs draw no current (JFET inputs). With
-//  either rail unsupplied, the simulator leaves both outputs open.
+//  either rail unsupplied, the simulator leaves both outputs open. A half
+//  with an input that connects to nothing and its output wired is opened
+//  too, when the board won't solve otherwise (issue #1).
 //
 //  The AI (#118): its pack goes only with place_tl072 (keywords below),
 //  and it is listed in the catalogue only then (ai.listed 'in-play'), so
@@ -38,6 +40,7 @@
   const ILIM     = 0.02;    // A
 
   const PINS = ['out1', 'in1n', 'in1p', 'vneg', 'in2p', 'in2n', 'out2', 'vpos'];
+  const LABELS = ['OUT1', 'IN1−', 'IN1+', 'V−', 'IN2+', 'IN2−', 'OUT2', 'V+'];   // datasheet names (U+2212 minus)
   const OPS  = [{ id: 'op1', out: 'out1', plus: 'in1p', minus: 'in1n' },
                 { id: 'op2', out: 'out2', plus: 'in2p', minus: 'in2n' }];
 
@@ -65,9 +68,10 @@
   const plainV = (v, d) => (v < 0 ? '−' : '') + Math.abs(v).toFixed(d) + ' V';
 
   // One op-amp's state in words: its Vout, or why it's pinned. A half
-  // with both inputs floating is unused, not clipped.
-  function state(v, mode, unused) {
-    if (mode === 'open') return 'no supply (output open)';
+  // with both inputs floating is unused, not clipped. An open half was
+  // opened because an input connects to nothing (inputsOut), or has no supply.
+  function state(v, mode, unused, inputsOut) {
+    if (mode === 'open') return inputsOut ? 'inputs not connected (output open)' : 'no supply (output open)';
     if (unused) return 'unused';
     if (mode === 'isrc+' || mode === 'isrc−') return `current-limited at ${ILIM * 1000} mA`;
     if (v === null) return 'floating';
@@ -75,19 +79,40 @@
     return plainV(Math.abs(v) < 0.005 ? 0 : v, 2);
   }
 
-  const unpowered = m => m.mode1 === 'open' || m.mode2 === 'open';
+  // The simulator says which halves it opened for a floating input
+  // (r.floatingInputs, issue #1); any other open half has no supply.
+  const floats    = (r, k) => !!(r.floatingInputs && r.floatingInputs[OPS[k - 1].id]);
+  const unpowered = (r, m) => (m.mode1 === 'open' && !floats(r, 1)) || (m.mode2 === 'open' && !floats(r, 2));
+  const states    = (r, m) => [1, 2].map(k => state(m['vout' + k], m['mode' + k], m['unused' + k], floats(r, k)));
+
+  // A half opened for a floating input: its output and the inputs that read null.
+  function floatingWarning(r, o) {
+    const out = LABELS[PINS.indexOf(o.out)];
+    const ins = [o.plus, o.minus].filter(p => r.pins[p] === null).map(p => LABELS[PINS.indexOf(p)]);
+    if (!ins.length) return null;
+    const one = ins.length === 1;
+    return `${r.label}: ${ins.join(' and ')} connect${one ? 's' : ''} to nothing, so ${out} drives nothing. ` +
+           `Wire ${one ? 'that input' : 'its inputs'} or clear ${out}'s column.`;
+  }
 
   function warnings(r, m) {
-    return unpowered(m) ? ['the op-amp has no supply: wire V+ (pin 8) and V− (pin 4)'] : [];
+    if (unpowered(r, m)) return ['the op-amp has no supply: wire V+ (pin 8) and V− (pin 4)'];
+    return OPS.filter((o, k) => floats(r, k + 1)).map(o => floatingWarning(r, o)).filter(Boolean);
   }
 
+  // A half opened for a floating input drops "(output open)" when the line
+  // would run past 80 characters; its warning says so.
   function report(r, m) {
-    if (unpowered(m)) return 'no supply: both outputs open';
-    return `op-amp 1 ${state(m.vout1, m.mode1, m.unused1)}; op-amp 2 ${state(m.vout2, m.mode2, m.unused2)}`.slice(0, 80);
+    if (unpowered(r, m)) return 'no supply: both outputs open';
+    const [s1, s2] = states(r, m), full = `op-amp 1 ${s1}; op-amp 2 ${s2}`;
+    return (full.length > 80 ? full.replace(/ \(output open\)/g, '') : full).slice(0, 80);
   }
 
-  const line = (r, m) => (unpowered(m) ? null
-    : { text: `  🔺 TL072 ${r.label}: op-amp 1 ${state(m.vout1, m.mode1, m.unused1)} · op-amp 2 ${state(m.vout2, m.mode2, m.unused2)}`, cls: 'sim-on' });
+  const line = (r, m) => {
+    if (unpowered(r, m)) return null;
+    const [s1, s2] = states(r, m);
+    return { text: `  🔺 TL072 ${r.label}: op-amp 1 ${s1} · op-amp 2 ${s2}`, cls: 'sim-on' };
+  };
 
   // ── The model: a DIP-8 across the gap. A matte black epoxy body that
   //  tapers to its top and bottom from the parting line, the pin-1 notch
@@ -198,7 +223,7 @@
     place:    { kind: 'footprint', legs: LEGS, straddle: true, rotations: [0, 180] },
     // The inspector's top-view diagram (#132), in pin order (U+2212 minus).
     pinout:   { title: 'TL072 (top view)', style: 'dip',
-                labels: ['OUT1', 'IN1−', 'IN1+', 'V−', 'IN2+', 'IN2−', 'OUT2', 'V+'] },
+                labels: LABELS },
 
     elements,
     measure,
@@ -217,15 +242,17 @@
       keywords: ['op-amp', 'op amp', 'opamp', 'amplifier', 'comparator', 'tl072', 'follower', 'buffer'],
       listed:   'in-play',
       guide:    'Pins 1 OUT1, 2 IN1−, 3 IN1+, 4 V−, 5 IN2+, 6 IN2−, 7 OUT2, 8 V+; hole=fC, right: 1-4 fC..fC+3, 8-5 eC..eC+3. ' +
-                'One place_bench_supply PS1; ±12: V+ tp, V− bn. Input: one place_function_generator FG1, COM to tn, ' +
-                'OUT to input, offset = DC in. Inverting: FG1.0→Rin→IN1−, −Rf/Rin (place_resistor). Follower: ' +
-                'FG1.0→IN1+, OUT1→IN1−. Comparator: 12 V (V− tn), FG1.0→IN1+, divider→IN1−, OUT1→R→place_led→tn.',
+                'One place_bench_supply PS1; ±12: V+ tp, V− bn. FG1 place_function_generator, COM tn; ' +
+                'sine: amplitude=peak V, freq, offset 0; DC: offset, amp 0. Inverting −Rf/Rin; divider→Rin: stiff, R ≤ Rin/10. ' +
+                'Follower: FG1.0→IN1+, OUT1→IN1−. Comparator: V− tn, divider→IN1−, OUT1→place_resistor→place_led.',
       recipe:   {
-        // Vout1 = −(100k/(10k + 50 Ω))·0.5 V = −4.975 V (the generator's 50 Ω; finite gain: < 1 mV off).
-        name:  'inverting amplifier, gain −10, on ±12 V: FG1 (offset 0.5 V) through Rin 10 kΩ into IN1− (pin 2), ' +
-               'Rf 100 kΩ from IN1− to OUT1 (pin 1), IN1+ (pin 3) to COM: OUT1 ≈ −5 V',
+        // The 0.5 V sine (#5): Vout1 = −(100k/(10k + 50 Ω))·Vin, −4.975 V at the peak (t = 1/4 s) and
+        // +4.975 V at the trough (t = 3/4 s) (the generator's 50 Ω; finite gain: < 1 mV off). A plain
+        // solve reads the offset, 0 V, so `expect` reads OUT1 at 0 V.
+        name:  'inverting amplifier, gain −10, on ±12 V: FG1 (a 0.5 V sine) through Rin 10 kΩ into IN1− (pin 2), ' +
+               'Rf 100 kΩ from IN1− to OUT1 (pin 1), IN1+ (pin 3) to COM: OUT1 ≈ −5 V at the peak',
         parts: [{ type: 'bench_supply', label: 'PS1', values: { voltage: 12 } },
-                { type: 'function_generator', label: 'FG1', values: { amplitude: 0, offset: 0.5, frequency: 1 } },
+                { type: 'function_generator', label: 'FG1', values: { amplitude: 0.5, offset: 0, frequency: 1 } },
                 { type: 'tl072', label: 'U1', holes: ['f30', 'f31', 'f32', 'f33', 'e33', 'e32', 'e31', 'e30'] },
                 { type: 'resistor', label: 'R1', holes: ['g27', 'g31'], values: { resistance: 10000 } },     // Rin
                 { type: 'resistor', label: 'R2', holes: ['h31', 'h35'], values: { resistance: 100000 } }],  // Rf
@@ -233,7 +260,7 @@
                 ['FG1.1', 'tn_61'],                                  // the generator's COM on ground
                 ['tp_30', 'a30'], ['bn_33', 'j33'],                  // V+ (pin 8) +12 V, V− (pin 4) −12 V
                 ['FG1.0', 'h27'], ['i35', 'i30'], ['j32', 'tn_32']], // input into Rin, Rf to OUT1, IN1+ to COM
-        expect: { U1: { vout1: [-5.0, -4.95], mode1: 'linear', unused2: true } },
+        expect: { U1: { vout1: [-0.01, 0.01], mode1: 'linear', unused2: true } },
       },
       // One worked build per op-amp request (the AI copies the nearest one),
       // in the same layout: the chip at f30, op-amp 2 unused.

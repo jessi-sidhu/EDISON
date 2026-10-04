@@ -331,10 +331,9 @@ module.exports = [
   // (t = 0.25 s, the main checks) and the trough (t = 0.75 s). Instrument
   // counts follow the doc's Parts column; ±3 % and the like are the doc's.
   // test/prompt-bank.test.js passes a hand-built clean build of each (the
-  // numbers below) and fails a wrong one. The server's checker puts a
-  // "Heads up" on the clean builds of BANK-07 (it calls the superdiode's
-  // diode backwards) and BANK-15 (an LED the generator only forward-biases
-  // on the trough), so those two can't pass live until it learns them.
+  // numbers below) and fails a wrong one. The server's checker finds
+  // nothing in any clean build, BANK-07's superdiode and BANK-15's
+  // back-to-back LEDs included (#3), so no clean build gets a "Heads up".
   {
     // −Rf/(Rin + 50 Ω): 20k/10.05k × 1 V = −1.990 V at the peak, +1.990 V at the trough.
     id: 'BANK-01', tags: ['bank'], lab: { wires: 10 },

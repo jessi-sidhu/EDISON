@@ -46,11 +46,12 @@
   const ratingText = r => (r.W !== undefined ? (FRACTIONS[r.W] || r.W) + ' W'
                          : r.mA !== undefined ? r.mA + ' mA' : r.V + ' V');
 
-  // One op-amp's line: its signed Vout and current, or why it's pinned.
+  // One op-amp's line: its signed Vout and current, or why it's pinned. An
+  // open half with its supply wired (floating) was opened for a floating input.
   const signed = (v, d) => (Number(fixed(v, d)) < 0 ? '−' : Number(fixed(v, d)) > 0 ? '+' : '') + fixed(Math.abs(v), d) + ' V';
   function opampLine(o, k) {
     const head = `op-amp ${k + 1}: `;
-    if (o.mode === 'open') return head + 'no supply (output open)';
+    if (o.mode === 'open') return head + (o.floating ? 'inputs not connected (output open)' : 'no supply (output open)');
     if (o.unused) return head + 'unused';
     if (o.mode === 'isrc+' || o.mode === 'isrc−') {
       return head + `current-limited at ${o.ilim} mA` + (o.vout !== null ? ` (${signed(o.vout, 1)})` : '');

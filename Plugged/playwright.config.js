@@ -27,6 +27,7 @@ module.exports = defineConfig({
     reuseExistingServer: false,
     // PHOTO_PROVIDERS=fixture: no photo route reaches Gemini through a
     // GEMINI_API_KEY in the shell, whatever a spec forgets to stub.
-    env: { PORT: String(PORT), AI_PROVIDER: 'fixture', PHOTO_PROVIDERS: 'fixture' },
+    // VOICE_PROVIDER=fixture: the same for /api/voice and ElevenLabs (#12).
+    env: { PORT: String(PORT), AI_PROVIDER: 'fixture', PHOTO_PROVIDERS: 'fixture', VOICE_PROVIDER: 'fixture' },
   },
 });

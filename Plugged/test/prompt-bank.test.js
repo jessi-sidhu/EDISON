@@ -350,15 +350,14 @@ test('sanity: the clean builds give the hand-computed numbers (finite gain moves
   assert.ok(r.parts.D4.r.pins.anode < 1.7, `N23 with L3 low sits at ${r.parts.D4.r.pins.anode} V, under the LED's 2.0 V`);
 });
 
-// The server's checker (findCircuitProblems; the eval's Heads up) passes the
-// clean builds, bar two it can't yet read: BANK-07's diode inside the
-// op-amp's loop (it calls it backwards) and BANK-15's second LED, which only
-// the generator's trough forward-biases. A Heads up fails noHeadsUp, so
-// those two cases can't pass live until the checker learns them; when it
-// does, this test says so (drop the note in ai-eval-cases.js).
-test('pin: the server checker finds nothing in the clean builds except BANK-07 and BANK-15 (its known false positives)', () => {
+// The server's checker (findCircuitProblems; the eval's Heads up) passes
+// every clean build. A Heads up fails noHeadsUp, so a flagged clean build
+// can't pass live. BANK-07's diode inside the op-amp's loop and BANK-15's
+// second LED, which only the generator's trough forward-biases, were its
+// false positives until issue #3 (test/checker-sine.test.js).
+test('the server checker finds nothing in any clean build (BANK-07 and BANK-15 included)', () => {
   const flagged = IDS.filter(id => Server.findCircuitProblems(CLEAN[id]().map(a => ({ ...a }))).length);
-  assert.deepStrictEqual(flagged, ['BANK-07', 'BANK-15']);
+  assert.deepStrictEqual(flagged, []);
 });
 
 // ── Set-up: every generator at 1 Hz ───────────────────────────────────────

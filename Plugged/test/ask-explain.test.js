@@ -322,15 +322,21 @@ test.each([
   assert.equal(await explainReply(message), FALLBACK);
 });
 
-// An explain ask goes at temperature 0; any other ask keeps 0.3 on every round.
+// An explain ask goes at temperature 0; any other ask with reasoning off
+// keeps 0.3 on every round. Reasoning is on by default (issue #4) and then
+// sends no temperature, so this pin turns it off with DEEPSEEK_THINKING=0.
 test.each([
   ['explain: true',    0,   { explain: true }],
   ['no explain field', 0.3, {}],
   ['explain: false',   0.3, { explain: false }],
-])('pin: %s sends every DeepSeek request at temperature %s', async (_, want, extra) => {
+])('pin: with DEEPSEEK_THINKING=0, %s sends every DeepSeek request at temperature %s', async (_, want, extra) => {
   const fetch = scriptedDeepSeek([{ content: '', tool_calls: [call('f1', 'delete_part', { part: 'LED1' })] }, says('Removed LED1.')]);
   vi.stubGlobal('fetch', fetch);
-  const res = await post(extra);
+  const saved = process.env.DEEPSEEK_THINKING;
+  process.env.DEEPSEEK_THINKING = '0';
+  const res = await post(extra).finally(() => {
+    if (saved === undefined) delete process.env.DEEPSEEK_THINKING; else process.env.DEEPSEEK_THINKING = saved;
+  });
 
   assert.equal(res.status, 200, JSON.stringify(res.json));
   assert.ok(fetch.calls.length >= 1, 'DeepSeek was asked');
