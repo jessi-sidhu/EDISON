@@ -1,0 +1,117 @@
+/* ─────────────────────────────────────────────
+   Inspector (issue #29): the selected part's values and controls, at the
+   top of the right-hand panel above the chat. Built by js/inspector.js.
+───────────────────────────────────────────── */
+
+#inspector {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  max-height: 45%;
+  overflow-y: auto;
+}
+#inspector[hidden] { display: none; }
+
+.inspector-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inspector-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+#inspector-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+#inspector-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inspector-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inspector-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.inspector-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inspector-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.inspector-input:focus { border-color: var(--accent); }
+
+.inspector-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.inspector-check {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.inspector-check:disabled { cursor: not-allowed; }
+
+.inspector-unit {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.inspector-hint {
+  font-size: 11px;
+  color: #15803d;
+}
+
+.inspector-error {
+  font-size: 11px;
+  color: var(--danger);
+}
+
+.inspector-hint[hidden],
+.inspector-error[hidden] { display: none; }
+
+.inspector-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+}

@@ -4,7 +4,10 @@
 //
 //  KEY BEHAVIOURS
 //  • Place mode: hover shows a transparent ghost; click places component.
-//    R key rotates the ghost 90°.
+//    R key rotates the ghost 90°. A footprint part (3+ legs) is anchored
+//    on the hovered hole, R cycles its allowed rotations, and one sphere per
+//    leg shows where it lands: red, with the reason as the hint, when
+//    Parts.checkPlacement refuses it.
 //  • Wire mode:  click any breadboard HOLE or component pin sphere to start
 //    a wire; click again to complete it.  The wire plugs into both holes.
 //  • Select mode: click a component body or wire tube to select it.
@@ -58,6 +61,12 @@
       return !!(def && def.place.kind === 'offboard');
     }
 
+    // A part placed from an anchor hole and a rotation (3 or more legs).
+    function isFootprint(type) {
+      const def = Parts.get(type);
+      return !!(def && def.place.kind === 'footprint');
+    }
+
     // ── Ghost management ─────────────────────────────────────
     // The ghost preview group, recreated when type or rotation changes.
     let ghostGroup   = null;
@@ -67,7 +76,7 @@
     function syncGhost() {
       const t = state.pickedType;
       const r = state.placementRotation;
-      if (state.mode !== 'place' || !t) {
+      if (state.mode !== 'place' || !t || isFootprint(t)) {
         destroyGhost();
         return;
       }
@@ -88,17 +97,21 @@
       ghostType = ghostRot = null;
     }
 
-    // Holes under the current ray: the anchor hole and the far end of the
-    // component footprint. Hover and click both resolve through this, so a tap
-    // that never produced a hover still commits the hole it landed on.
-    function holesUnderRay(type) {
+    // The hole under the current ray, or null.
+    function holeUnderRay() {
       const bbBody = scene.getObjectByName('bb-body');
       if (!bbBody) return null;
       const hits = raycaster.intersectObject(bbBody, false);
       if (!hits.length) return null;
+      const pt = hits[0].point;
+      return state.breadboard.getNearestHole(pt.x, pt.z, null);
+    }
 
-      const pt    = hits[0].point;
-      const holeA = state.breadboard.getNearestHole(pt.x, pt.z, null);
+    // Holes under the current ray: the anchor hole and the far end of the
+    // component footprint. Hover and click both resolve through this, so a tap
+    // that never produced a hover still commits the hole it landed on.
+    function holesUnderRay(type) {
+      const holeA = holeUnderRay();
       if (!holeA) return null;
 
       const span  = App.SPANS[type] || App.SPANS.resistor;
@@ -113,6 +126,96 @@
       const midZ = (holeA.z + holeB.z) / 2;
       ghostGroup.position.set(midX, 0, midZ);
       ghostGroup.visible = true;
+    }
+
+    // ── Footprint parts ─────────────────────────────────────
+    // The rotation starts at the part's first allowed one each time a part
+    // is picked (App.setMode('place')), and R steps through the rest.
+    let fpType = null;
+    let fpStep = 0;
+
+    function footprintRotation(type) {
+      const rots = Parts.get(type).place.rotations;
+      if (fpType !== type) { fpType = type; fpStep = 0; }
+      return rots[fpStep % rots.length];
+    }
+
+    // The footprint part's legs from the hovered hole: { legs, holes, check,
+    // rotation }, where holes[i] is leg i's board hole (null off the board)
+    // and check is Parts.checkPlacement's answer. null off the body holes.
+    function footprintUnderRay(type) {
+      const anchor = holeUnderRay();
+      if (!anchor) return null;
+      const rotation = footprintRotation(type);
+      const legs = Parts.footprintLegs(type, { col: anchor.col, row: anchor.row }, rotation);
+      if (!legs) return null;
+      const holes = legs.map(l => (l.row ? state.breadboard.getHole(l.col, l.row) : null));
+      const G     = App.BOARD_GEOMETRY;
+      const check = Parts.checkPlacement(type, legs, App.holeMap(), { cols: G.COLS, bodyRows: G.BODY_ROWS });
+      return { anchor, legs, holes, check, rotation };
+    }
+
+    // One hover sphere per leg on the board, red when the placement is refused.
+    const LEG_OK  = new THREE.MeshLambertMaterial({ color: 0x22cc55, emissive: 0x115522, emissiveIntensity: 0.9 });
+    const LEG_BAD = new THREE.MeshLambertMaterial({ color: 0xef4444, emissive: 0x551111, emissiveIntensity: 0.9 });
+    const legSpheres = [];
+
+    function showLegs(holes, refused) {
+      holes.forEach((h, i) => {
+        if (!legSpheres[i]) {
+          const m = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 12), LEG_OK);
+          m.name = 'hover-leg';
+          scene.add(m);
+          legSpheres[i] = m;
+        }
+        legSpheres[i].material = refused ? LEG_BAD : LEG_OK;
+        legSpheres[i].position.set(h.x, 0.12, h.z);
+        legSpheres[i].visible = true;
+      });
+      for (let i = holes.length; i < legSpheres.length; i++) legSpheres[i].visible = false;
+    }
+
+    // The footprint ghost: the part's own view.build, in ghost materials, at
+    // its legs. Rebuilt only when the legs move.
+    let fpGhost    = null;
+    let fpGhostKey = null;
+
+    function showFootprintGhost(type, fp) {
+      const key = `${type}|${fp.rotation}|${fp.anchor.col}|${fp.anchor.row}`;
+      if (key === fpGhostKey) { if (fpGhost) fpGhost.visible = true; return; }
+      hideFootprintGhost();
+      const built = App.buildPart(type, fp.legs, undefined, { ghost: true });
+      if (!built || !built.group) return;
+      fpGhost = built.group;
+      fpGhostKey = key;
+      scene.add(fpGhost);
+    }
+
+    function hideFootprintGhost() {
+      if (fpGhost) scene.remove(fpGhost);
+      fpGhost = fpGhostKey = null;
+    }
+
+    function clearFootprint() {
+      showLegs([], false);
+      hideFootprintGhost();
+    }
+
+    // A refused footprint placement shows its reason as the hint; once the
+    // part fits again the place-mode hint comes back.
+    let placeHint   = '';
+    let refusalHint = null;   // the refusal the hint shows now, or null
+
+    function showRefusal(text) {
+      if (refusalHint === text) return;
+      refusalHint = text;
+      App.setHint(text);
+    }
+
+    function clearRefusal() {
+      if (refusalHint === null) return;
+      refusalHint = null;
+      App.setHint(placeHint);
     }
 
     // ── Drag detection ──────────────────────────────────────
@@ -171,6 +274,9 @@
     // Highlighted wire-start pin (stored so we can reset it)
     let wireStartPinMesh = null;
 
+    // The last pointer move, so R can redraw the footprint where it is.
+    let lastPointer = null;
+
     // ── pointermove ─────────────────────────────────────────
     canvas.addEventListener('pointermove', e => {
       if (downPos && e.pointerId === downPointerId) {
@@ -178,10 +284,12 @@
         const dy = e.clientY - downPos.y;
         if (dx * dx + dy * dy > DRAG_THRESH * DRAG_THRESH) wasDragged = true;
       }
+      lastPointer = e;
       handleHover(e);
     });
 
-    function handleHover(e) {
+    // quiet: leave the hint alone (R has just set it).
+    function handleHover(e, quiet) {
       const mode = state.mode;
       updateRay(e);
 
@@ -189,6 +297,30 @@
       if (mode === 'place') {
         syncGhost();
         const type = state.pickedType;
+
+        if (isFootprint(type)) {
+          hoverSphere.visible  = false;
+          hoverSphereB.visible = false;
+          const fp = footprintUnderRay(type);
+          if (!fp) {
+            clearFootprint();
+            holeLabel.style.display = 'none';
+            if (!quiet) clearRefusal();
+            return;
+          }
+          const onBoard = fp.holes.filter(Boolean);
+          showLegs(onBoard, !fp.check.ok);
+          if (onBoard.length === fp.holes.length) showFootprintGhost(type, fp);
+          else hideFootprintGhost();
+          if (!quiet) {
+            if (fp.check.ok) clearRefusal();
+            else showRefusal(`${App.nextLabel(state.components, type)} can't go here: ${fp.check.reason}`);
+          }
+          holeLabel.style.display = 'block';
+          holeLabel.textContent   = `Col ${fp.anchor.col + 1}  Row ${fp.anchor.row.toUpperCase()}  ·  ${fp.rotation}°`;
+          return;
+        }
+        clearFootprint();
 
         if (isOffboard(type)) {
           hoverSphere.visible  = false;
@@ -247,6 +379,7 @@
       // ── WIRE mode ───────────────────────────────────────
       if (mode === 'wire') {
         destroyGhost();
+        clearFootprint();
         hoverSphere.visible  = false;
         hoverSphereB.visible = false;
         holeLabel.style.display = 'none';
@@ -290,6 +423,7 @@
 
       // ── SELECT mode ─────────────────────────────────────
       destroyGhost();
+      clearFootprint();
       hoverSphere.visible  = false;
       hoverSphereB.visible = false;
       holeLabel.style.display = 'none';
@@ -343,6 +477,19 @@
           const pt  = new THREE.Vector3();
           const hit = raycaster.ray.intersectPlane(boardPlane, pt);
           if (hit) App.placePart(type, { x: pt.x, z: pt.z });
+          return;
+        }
+
+        if (isFootprint(type)) {
+          const fp = footprintUnderRay(type);
+          if (!fp) return;
+          if (!fp.check.ok) {
+            const text = `${App.nextLabel(state.components, type)} not placed: ${fp.check.reason}`;
+            refusalHint = text;
+            App.setHint(text, 6000);
+            return;
+          }
+          App.placePart(type, fp.holes);
           return;
         }
 
@@ -458,6 +605,16 @@
       }
       if (e.ctrlKey || e.metaKey) return;   // leave browser shortcuts alone
 
+      if ((e.key === 'r' || e.key === 'R') && state.mode === 'place' && isFootprint(state.pickedType)) {
+        // Step through the part's allowed rotations, and redraw it in place.
+        const type = state.pickedType;
+        footprintRotation(type);
+        fpStep++;
+        refusalHint = null;
+        if (lastPointer) handleHover(lastPointer, true);
+        App.setHint(`Rotation: ${footprintRotation(type)}° · R to rotate`, 1800);
+        return;
+      }
       if (e.key === 'r' || e.key === 'R') {
         // Toggle rotation (0 ↔ 1)
         state.placementRotation = state.placementRotation === 0 ? 1 : 0;
@@ -503,6 +660,10 @@
     App.setMode = function (m) {
       _origSetMode(m);
       if (m !== 'place') destroyGhost();
+      clearFootprint();
+      fpType      = null;   // a (re)picked footprint part starts at its first rotation
+      refusalHint = null;
+      placeHint   = document.getElementById('hint-text').textContent;
       hoverSphere.visible  = false;
       hoverSphereB.visible = false;
       holeLabel.style.display = 'none';

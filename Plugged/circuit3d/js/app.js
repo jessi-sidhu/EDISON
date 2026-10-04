@@ -90,19 +90,22 @@
 
   // ── Sidebar ──────────────────────────────────────────────────
 
+  // The part items are generated from the registry (sidebar.js); one
+  // listener on #sidebar serves them and the hand-written Wire tool.
   function initSidebar() {
-    document.querySelectorAll('.comp-item').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const type = btn.dataset.type;
-        if (type === 'wire') {
-          setMode('wire');
-          document.getElementById('wire-color-row').style.display = 'block';
-        } else {
-          state.pickedType = type;
-          setMode('place');
-          document.getElementById('wire-color-row').style.display = 'none';
-        }
-      });
+    Sidebar.render(document.getElementById('part-list'), document.getElementById('part-search'), Parts.all());
+    document.getElementById('sidebar').addEventListener('click', e => {
+      const btn = e.target.closest('.comp-item[data-type]');
+      if (!btn) return;
+      const type = btn.dataset.type;
+      if (type === 'wire') {
+        setMode('wire');
+        document.getElementById('wire-color-row').style.display = 'block';
+      } else {
+        state.pickedType = type;
+        setMode('place');
+        document.getElementById('wire-color-row').style.display = 'none';
+      }
     });
 
     document.querySelectorAll('.mode-btn[data-mode]').forEach(btn => {
@@ -251,10 +254,12 @@
   // records one undo step (inside an AI build's batch, the build's one step).
 
   // Draws a part's model again, for its current values, where it stands.
+  // A selected part stays selected (the inspector stays on it).
   function redrawPart(comp) {
     const def = Parts.get(comp.type);
     if (!def) return;
-    if (state.selected && state.selected.item === comp) App.deselect();
+    const wasSelected = !!(state.selected && state.selected.item === comp);
+    if (wasSelected) App.deselect();
     (comp.pinMeshes || []).forEach(pm => App.scene.remove(pm));
     if (comp.group) App.scene.remove(comp.group);
     let built;
@@ -269,6 +274,7 @@
     comp.pins = built.pinPositions;
     comp.pinMeshes = [];
     addPinMarkers(comp);
+    if (wasSelected) App.selectItem(comp, 'component');
   }
 
   // values: already checked with Parts.checkValue, e.g. { resistance: 1000 }.
@@ -311,22 +317,43 @@
     pushHistory:  () => { if (gestureSaved) pushHistory(); },
   });
 
+  // One tick of a gesture on control `key`: next(now, spec) is its new setting.
+  function controlTick(comp, key, kind, next) {
+    const spec = Parts.get(comp.type).controls[key];
+    gestureSaved = spec.saved;
+    gestures.tick(kind, () => {
+      comp.controls = comp.controls || {};
+      const now = Object.hasOwn(comp.controls, key) ? comp.controls[key] : spec.default;
+      comp.controls[key] = next(now, spec);
+    });
+  }
+
   // kind: 'click' | 'scroll'; dir: +1 / −1 for a scroll. false when comp
   // has no control for that gesture.
   App.partGesture = function (comp, kind, dir) {
     const def = comp && Parts.get(comp.type);
     const key = def && def.gestures && def.gestures[kind];
     if (!key) return false;
-    const spec = def.controls[key];
-    gestureSaved = spec.saved;
-    gestures.tick(kind, () => {
-      comp.controls = comp.controls || {};
-      const now = Object.hasOwn(comp.controls, key) ? comp.controls[key] : spec.default;
-      comp.controls[key] = spec.type === 'slider'
-        ? Math.min(spec.max, Math.max(spec.min, now + (dir || 1) * spec.step))
-        : !now;
-    });
+    controlTick(comp, key, kind, (now, spec) => (spec.type === 'slider'
+      ? Math.min(spec.max, Math.max(spec.min, now + (dir || 1) * spec.step))
+      : !now));
     if (kind === 'click') gestures.release();
+    return true;
+  };
+
+  // The inspector's controls, through the same dispatcher: a toggle is one
+  // tick and done; a slider drag ticks on every move and is done on release
+  // (one undo step for a saved control, a throttled re-simulation). A
+  // momentary control moves only while simulating, like a click. false when
+  // nothing changed.
+  App.controlEdit = function (comp, key, value, done) {
+    const def  = comp && Parts.get(comp.type);
+    const spec = def && def.controls && Object.hasOwn(def.controls, key) ? def.controls[key] : null;
+    if (!spec) return false;
+    if (spec.type === 'momentary' && !App.simRunning) return false;
+    controlTick(comp, key, 'drag', () => value);
+    if (done) gestures.release();
+    if (spec.saved) scheduleAutoSave();
     return true;
   };
 
@@ -448,6 +475,7 @@
     if (kind === 'component' && item && item.unknown) return;   // not drawn, can't be picked
     App.deselect();
     state.selected = { item, kind };
+    if (kind === 'component') Inspector.show(item);
 
     if (kind === 'component') {
       const label = App.formatValue(item);
@@ -466,6 +494,7 @@
   };
 
   App.deselect = function () {
+    Inspector.hide();
     if (!state.selected) return;
     const { item } = state.selected;
     const root = item.group;
@@ -562,16 +591,21 @@
       name,
       thumbnail: captureIsometricThumb(),
       // A part this build doesn't know is written back as it was loaded.
-      components: App.recordsFor(state.components, c => ({
-        type:     c.type,
-        id:       App.componentId(state.components, c),
-        label:    c.label,             // on each part, never at file level
-        values:   c.values,
-        holeRefs: App.saveHoleRefs(c), // with pin names; null for battery
-        position: c.group
-          ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) }
-          : null,
-      })),
+      components: App.recordsFor(state.components, c => {
+        const rec = {
+          type:     c.type,
+          id:       App.componentId(state.components, c),
+          label:    c.label,             // on each part, never at file level
+          values:   c.values,
+          holeRefs: App.saveHoleRefs(c), // with pin names; null for battery
+          position: c.group
+            ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) }
+            : null,
+        };
+        const controls = savedControls(c);   // saved ones only, never a button's pressed
+        if (controls) rec.controls = controls;
+        return rec;
+      }),
       wires: wireRecords(),
     };
 
@@ -636,7 +670,14 @@
         const holes = refs.map(r => r && bb.getHole(r.col, r.row));
         if (holes.every(Boolean)) App.placePart(c.type, holes, c.values, opts);
       }
-      return state.components.length > before ? state.components[state.components.length - 1] : null;
+      const placed = state.components.length > before ? state.components[state.components.length - 1] : null;
+      // Saved controls come back as saved; the rest start at their defaults.
+      if (placed && placed.controls && c.controls) {
+        for (const [key, spec] of Object.entries(def.controls || {})) {
+          if (spec.saved && Object.hasOwn(c.controls, key)) placed.controls[key] = c.controls[key];
+        }
+      }
+      return placed;
     }, knows);
     state.components = rebuilt.filter(Boolean);   // placeholders included, in saved order
 
@@ -783,7 +824,12 @@
       comps.forEach(c => {
         const id = App.componentId(comps, c);
         let pA = '—', pB = '—';
-        if (c.holeRefs) {
+        if (c.holeRefs && c.holeRefs.length > 2) {
+          // 3+ legs: every leg as "hole (pin)", the first in pin_A, the rest in pin_B.
+          const legs = Parts.legsOf(c).map(l => `${l.row ? holeStr(l) : '?'} (${l.pin})`);
+          pA = legs[0];
+          pB = legs.slice(1).join(', ');
+        } else if (c.holeRefs) {
           pA = holeStr(c.holeRefs[0]);
           pB = holeStr(c.holeRefs[1]);
           // A one-way part says which leg is which, from its pin names.
@@ -925,15 +971,30 @@
   // unchanged, and the wires kept for it follow the drawn ones.
   function serializeBoard() {
     return {
-      components: App.recordsFor(state.components, c => ({
-        type:     c.type,
-        label:    c.label,
-        values:   c.values,
-        holeRefs: App.saveHoleRefs(c),
-        position: c.group ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) } : null,
-      })),
+      components: App.recordsFor(state.components, c => {
+        const rec = {
+          type:     c.type,
+          label:    c.label,
+          values:   c.values,
+          holeRefs: App.saveHoleRefs(c),
+          position: c.group ? { x: +c.group.position.x.toFixed(3), z: +c.group.position.z.toFixed(3) } : null,
+        };
+        const controls = savedControls(c);
+        if (controls) rec.controls = controls;
+        return rec;
+      }),
       wires: wireRecords(),
     };
+  }
+
+  // A part's saved controls (ControlSpec saved: true), or null for none.
+  function savedControls(c) {
+    const specs = (Parts.get(c.type) || {}).controls || {};
+    const out = {};
+    for (const [key, spec] of Object.entries(specs)) {
+      if (spec.saved && c.controls && Object.hasOwn(c.controls, key)) out[key] = c.controls[key];
+    }
+    return Object.keys(out).length ? out : null;
   }
 
   // Every wire as a saved record: the drawn ones, then the ones kept for
@@ -974,9 +1035,14 @@
     history.clear();
   }
 
+  // A part selected before the undo (or redo) is selected again, found by
+  // its label, so the inspector shows its restored values.
   function applySnapshot(snap) {
+    const sel = state.selected && state.selected.kind === 'component' ? state.selected.item.label : null;
     clearBoard();
     restoreBoard(snap);
+    const again = sel && state.components.find(c => c.label === sel && !c.unknown);
+    if (again) App.selectItem(again, 'component');
     state.circuitId   = snap.id;
     state.circuitName = snap.name;
     const nf = document.getElementById('circuit-name-field');
@@ -1051,8 +1117,17 @@
     scheduleAutoSave();
   }
 
+  // ── Inspector ────────────────────────────────────────────────
+  // Controls follow each run and Stop (a momentary one is enabled only
+  // while simulating, and Stop resets it).
+  const _runSimulation  = App.runSimulation;
+  const _stopSimulation = App.stopSimulation;
+  App.runSimulation  = function () { _runSimulation();  Inspector.sync(); };
+  App.stopSimulation = function () { _stopSimulation(); Inspector.sync(); };
+
   // ── Boot ─────────────────────────────────────────────────────
   // Must run AFTER all App.* methods are defined above.
+  Inspector.mount(document.getElementById('inspector'));
   state.breadboard = App.createBreadboard();
   App.scene.add(state.breadboard.group);
   App.initInteraction();

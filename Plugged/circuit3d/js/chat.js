@@ -75,16 +75,41 @@
     return out;
   }
 
-  // A registry part's placement, checked against the board as it is now
+  // A registry part's legs, checked against the board as it is now
   // (docs/API-CONTRACT.md → Parts.checkPlacement). The refusal, or null.
-  function placementRefusal(type, holes, board) {
-    const legs  = Parts.legsOf({ type, holeRefs: holes.map(h => ({ col: h.col, row: h.row })) });
+  function placementRefusal(type, legs, board) {
     const map   = board.holeMap ? board.holeMap() : new Map();
     const check = Parts.checkPlacement(type, legs, map, { cols: GEOMETRY.COLS, bodyRows: GEOMETRY.BODY_ROWS });
     return check.ok ? null : `${Ids.nextLabel(board.components(), type)} not placed: ${check.reason}`;
   }
 
   const note = (board, text) => { if (board.note) board.note(text); };
+
+  // A footprint part's direction as its rotation (docs/API-CONTRACT.md → AI tools).
+  const ROTATION = { right: 0, down: 90, left: 180, up: 270 };
+
+  // A footprint part's holes, one per pin, from { hole, direction }, or null
+  // after a note saying why not.
+  function footprintHoles(def, a, board) {
+    const who = Ids.nextLabel(board.components(), def.type);
+    const dir = String(a.direction == null ? '' : a.direction).toLowerCase();
+    if (!(dir in ROTATION)) { note(board, `${who} not placed: direction must be right, left, up or down; got ${JSON.stringify(a.direction)}.`); return null; }
+    if (!def.place.rotations.includes(ROTATION[dir])) {
+      const can = Object.keys(ROTATION).filter(d => def.place.rotations.includes(ROTATION[d]));
+      const name = def.name.split(' ').map(w => (/^[A-Z0-9-]{2,}$/.test(w) ? w : w.toLowerCase())).join(' ');
+      note(board, `${who} not placed: the ${name} can't face ${dir}; use ${can.join(' or ')}.`);
+      return null;
+    }
+    let anchor = null;
+    try { anchor = board.parseHole(a.hole); } catch { anchor = null; }
+    const legs = anchor && Parts.footprintLegs(def.type, anchor, ROTATION[dir]);
+    if (!legs) { note(board, `${who} not placed: ${JSON.stringify(a.hole)} is not a body hole (a1–j${GEOMETRY.COLS}).`); return null; }
+    // Checked before the holes are looked up: a leg past the edge has none.
+    const refusal = placementRefusal(def.type, legs, board);
+    if (refusal) { note(board, refusal); return null; }
+    const holes = legs.map(l => board.getHole(l.col, l.row));
+    return holes.every(Boolean) ? holes : null;
+  }
 
   // place_<type> for any registry part: its holes (one per pin), or the
   // board's spot for an off-board part.
@@ -102,10 +127,12 @@
     } else if (def.place.kind === 'span') {
       where = [holeOf(a.holeA, board), holeOf(a.holeB, board)];
       if (!where.every(Boolean)) return false;
-      const refusal = placementRefusal(def.type, where, board);
+      const legs = Parts.legsOf({ type: def.type, holeRefs: where.map(h => ({ col: h.col, row: h.row })) });
+      const refusal = placementRefusal(def.type, legs, board);
       if (refusal) { note(board, refusal); return false; }
     } else {
-      return false;   // footprint parts arrive later
+      where = footprintHoles(def, a, board);
+      if (!where) return false;
     }
     const refused = [];
     const values = partValues(a, refused);
@@ -206,7 +233,7 @@
     });
   }
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, partFor, partValues, colorHex, EDITS };
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, partFor, partValues, colorHex, EDITS, ROTATION };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -342,6 +369,12 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
           ghost = App.buildPreview(def.type, App.SPANS[def.type] || def.place.span.default, bb.HS, rotation, Chat.partValues(a));
           ghost.position.set((hA.hole.x + hB.hole.x) / 2, 0, (hA.hole.z + hB.hole.z) / 2);
         }
+      } else if (def && def.place.kind === 'footprint') {
+        // Drawn at its legs, when they all land on the board.
+        let anchor = null;
+        try { anchor = App.parseHole(a.hole); } catch { anchor = null; }
+        const legs = anchor && Parts.footprintLegs(def.type, anchor, Chat.ROTATION[String(a.direction || '').toLowerCase()]);
+        if (legs && legs.every(l => bb.getHole(l.col, l.row))) ghost = App.buildPart(def.type, legs, Chat.partValues(a), { ghost: true }).group;
       } else if (a.tool === 'add_wire') {
         ghost = buildWireGhost(a.from, a.to, a.color, pendingPins);
       } else if (Chat.EDITS.includes(a.tool)) {

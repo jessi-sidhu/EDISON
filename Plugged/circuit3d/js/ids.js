@@ -40,11 +40,21 @@
   }
 
   // Stable labels shown to people: R1, LED2, BAT1… A label stays with its
-  // part for life, so deleting R1 leaves R2 as R2. Unknown types share "U".
+  // part for life, so deleting R1 leaves R2 as R2. A registry part uses its
+  // own prefix; LABEL_PREFIX is the fallback for a type the registry doesn't
+  // know (or a page without it), and anything else shares "U".
   const LABEL_PREFIX = { resistor: 'R', led: 'LED', battery: 'BAT', buzzer: 'BZ', button: 'SW' };
 
+  // Looked up when called: in a page, parts/registry.js sets window.Parts.
+  function registry() {
+    if (typeof window !== 'undefined') return window.Parts || null;
+    try { return require('./parts/registry.js'); } catch { return null; }
+  }
+
   function labelPrefix(type) {
-    return LABEL_PREFIX[type] || 'U';
+    const Parts = registry();
+    const def = Parts && Parts.get(type);
+    return (def && def.prefix) || LABEL_PREFIX[type] || 'U';
   }
 
   // Prefix plus one more than the highest number in use for that prefix.

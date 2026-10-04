@@ -80,6 +80,7 @@ const r1Bands = page => page.evaluate(([body, lead]) => {
 }, [BODY, LEAD]);
 
 test('"make the resistor 1k": set_value previews as a note, Accept gives 7.0 mA and new bands, one Ctrl+Z gives back 14.9 mA', async ({ page }) => {
+  test.setTimeout(90_000);   // slow CI runner (software WebGL): ~0.45 s per action
   await openWithAI(page, {
     reply: 'Sure, swapping in a bigger resistor.',
     actions: [{ tool: 'set_value', part: 'R1', resistance: 1000 }],
@@ -106,6 +107,7 @@ test('"make the resistor 1k": set_value previews as a note, Accept gives 7.0 mA 
 });
 
 test('delete_part R1 previews as a note, Accept removes it and the LED goes dark, one Ctrl+Z brings it back', async ({ page }) => {
+  test.setTimeout(90_000);   // slow CI runner (software WebGL): ~0.45 s per action
   await openWithAI(page, {
     reply: 'Taking the resistor out.',
     actions: [{ tool: 'delete_part', part: 'R1' }],

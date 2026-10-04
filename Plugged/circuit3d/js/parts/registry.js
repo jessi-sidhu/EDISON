@@ -538,6 +538,14 @@
     const bodyRows = (board && board.bodyRows) || BODY_ROWS;
 
     if (!Array.isArray(legs) || legs.length !== n) return fail(`${partPhrase(def)} needs ${n} leads, one per pin.`);
+    // A footprint leg past row a or j (Parts.footprintLegs gives it row null).
+    const anchor = legs[0];
+    if (def.place.kind === 'footprint' && anchor && typeof anchor.row === 'string' && Number.isInteger(anchor.col)
+        && legs.some(l => l && l.row == null && Number.isInteger(l.col))) {
+      if (def.place.straddle) return fail('a chip must sit across the centre gap (rows e and f).');
+      const edge = bodyRows.indexOf(anchor.row) < bodyRows.length / 2 ? bodyRows[0] : bodyRows[bodyRows.length - 1];
+      return fail(`${partPhrase(def, n + '-pin')} at ${anchor.hole || holeName(anchor.col, anchor.row)} would run past row ${edge}.`);
+    }
     if (legs.some(l => !l || typeof l.row !== 'string' || !Number.isInteger(l.col))) return fail(`${partPhrase(def)} needs every lead in a hole.`);
     const holes = legs.map(l => l.hole || holeName(l.col, l.row));
 
@@ -599,5 +607,32 @@
     return legs;
   }
 
-  return { PartDefinitionError, define, get, all, reset, nearestKit, checkValue, checkPlacement, legsOf };
+  // A footprint part's legs from an anchor hole (pin 0) and a rotation, one
+  // { pin, col, row, hole } per pin in pin order. Offsets turn clockwise as
+  // seen on the board (+col right, +row toward j): 0 (dc, dr), 90 (−dr, dc),
+  // 180 (−dc, −dr), 270 (dr, −dc). Legs off the board still come back, so
+  // checkPlacement can say why: a column outside the board as it is, a row
+  // past a or j as row null. hole is null for a leg left of column 1 or
+  // past a or j. anchor: "e20" or { col, row }.
+  // null for a non-footprint part, an anchor that isn't a body hole, or a
+  // rotation not in place.rotations.
+  const TURN = { 0: (c, r) => [c, r], 90: (c, r) => [-r, c], 180: (c, r) => [-c, -r], 270: (c, r) => [r, -c] };
+  function footprintLegs(type, anchor, rotation) {
+    const def = get(type);
+    if (!def || def.place.kind !== 'footprint' || !def.place.rotations.includes(rotation)) return null;
+    let at = anchor;
+    if (typeof anchor === 'string') {
+      const m = /^([a-j])(\d+)$/i.exec(anchor.trim());
+      at = m ? { col: Number(m[2]) - 1, row: m[1].toLowerCase() } : null;
+    }
+    const r0 = at ? BODY_ROWS.indexOf(at.row) : -1;
+    if (r0 < 0 || !Number.isInteger(at.col)) return null;
+    return def.place.legs.map(([dc, dr], i) => {
+      const [c, r] = TURN[rotation](dc, dr);
+      const col = at.col + c, row = BODY_ROWS[r0 + r] || null;
+      return { pin: def.pins[i], col, row, hole: row && col >= 0 ? holeName(col, row) : null };
+    });
+  }
+
+  return { PartDefinitionError, define, get, all, reset, nearestKit, checkValue, checkPlacement, legsOf, footprintLegs };
 });

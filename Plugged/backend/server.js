@@ -445,6 +445,34 @@ function legAt(pin, hole) {
 }
 const spanLegs = (def, a) => [legAt(def.pins[0], a.holeA), legAt(def.pins[1], a.holeB)];
 
+// A footprint part's direction as its rotation (docs/API-CONTRACT.md → AI tools).
+const ROTATION = { right: 0, down: 90, left: 180, up: 270 };
+
+// A footprint action's legs from { hole, direction } (Parts.footprintLegs),
+// as { legs }, or { why } it has none.
+function footprintLegsOf(def, a) {
+  const dir = String(a.direction == null ? '' : a.direction).toLowerCase();
+  if (!(dir in ROTATION)) return { why: `direction must be right, left, up or down; got ${JSON.stringify(a.direction)}.` };
+  if (!def.place.rotations.includes(ROTATION[dir])) {
+    const can = Object.keys(ROTATION).filter(d => def.place.rotations.includes(ROTATION[d]));
+    return { why: `the ${partName(def)} can't face ${dir}; use ${can.join(' or ')}.` };
+  }
+  const legs = Parts.footprintLegs(def.type, String(a.hole == null ? '' : a.hole).trim(), ROTATION[dir]);
+  return legs ? { legs } : { why: `${JSON.stringify(a.hole)} is not a body hole (a1–j${COLS}).` };
+}
+
+// Where an action's part sits, for messages: "b3/b7", or "e20" for a footprint part.
+const placedAt = (def, a) => (def.place.kind === 'footprint' ? String(a.hole) : `${a.holeA}/${a.holeB}`);
+
+// An action's legs that sit in holes: a span part's, or a footprint part's
+// on the board. [] for anything else.
+function actionLegs(def, a) {
+  if (!def) return [];
+  if (def.place.kind === 'span') return spanLegs(def, a).filter(l => l.row);
+  if (def.place.kind === 'footprint') return (footprintLegsOf(def, a).legs || []).filter(l => l.hole && l.col < COLS);
+  return [];
+}
+
 // The hole map and the label counts after `prior`. Labels are only known
 // after a delete_all in the same reply; before one, the board may already
 // hold parts, so a part is "the resistor" instead of a guessed R1.
@@ -463,9 +491,8 @@ function boardSoFar(prior) {
     const def = PART_BY_TOOL.get(a.tool);
     if (!def) return;
     counts[def.prefix] = (counts[def.prefix] || 0) + 1;
-    if (def.place.kind !== 'span') return;
     const label = cleared ? def.prefix + counts[def.prefix] : `the ${partName(def)}`;
-    for (const leg of spanLegs(def, a)) if (leg.row && !map.has(leg.hole)) map.set(leg.hole, { label, pin: leg.pin });
+    for (const leg of actionLegs(def, a)) if (!map.has(leg.hole)) map.set(leg.hole, { label, pin: leg.pin });
   });
   return { map, counts, cleared };
 }
@@ -475,11 +502,20 @@ function boardSoFar(prior) {
 // must be 3–5 columns apart; b2 to b32 is 30."
 function placementRefusal(a, prior) {
   const def = a && PART_BY_TOOL.get(a.tool);
-  if (!def || def.place.kind !== 'span') return null;
+  if (!def || def.place.kind === 'offboard') return null;
   const { map, counts, cleared } = boardSoFar(prior);
-  const who = cleared ? def.prefix + ((counts[def.prefix] || 0) + 1) : `The ${partName(def)} at ${a.holeA}/${a.holeB}`;
-  if (!a.holeA || !a.holeB) return `${who} not placed: it needs both holeA and holeB.`;
-  const check = Parts.checkPlacement(def.type, spanLegs(def, a), map, BOARD);
+  const who = cleared ? def.prefix + ((counts[def.prefix] || 0) + 1) : `The ${partName(def)} at ${placedAt(def, a)}`;
+  let legs;
+  if (def.place.kind === 'span') {
+    if (!a.holeA || !a.holeB) return `${who} not placed: it needs both holeA and holeB.`;
+    legs = spanLegs(def, a);
+  } else {
+    if (!a.hole || !a.direction) return `${who} not placed: it needs a hole and a direction.`;
+    const f = footprintLegsOf(def, a);
+    if (!f.legs) return `${who} not placed: ${f.why}`;
+    legs = f.legs;
+  }
+  const check = Parts.checkPlacement(def.type, legs, map, BOARD);
   return check.ok ? null : `${who} not placed: ${check.reason}`;
 }
 
@@ -493,7 +529,7 @@ function checkValues(a) {
   const def = a && PART_BY_TOOL.get(a.tool);
   if (!def || !def.values) return { action: a, notes };
   const shown = v => (typeof v === 'string' ? `"${v}"` : String(v));
-  const part = `the ${partName(def)}${def.place.kind === 'span' ? ` at ${a.holeA}/${a.holeB}` : ''}`;
+  const part = `the ${partName(def)}${def.place.kind !== 'offboard' ? ` at ${placedAt(def, a)}` : ''}`;
   for (const [key, spec] of Object.entries(def.values)) {
     if (!(key in a)) continue;
     const { [key]: raw, ...rest } = a;
@@ -560,6 +596,7 @@ function findStackedHoles(actions) {
     const def = PART_BY_TOOL.get(a.tool);
     if (a.tool === 'delete_all') used = new Map();
     else if (def && def.place.kind === 'span') { put(a.holeA, partName(def)); put(a.holeB, partName(def)); }
+    else if (def && def.place.kind === 'footprint') for (const leg of actionLegs(def, a)) put(leg.hole, partName(def));
     else if (a.tool === 'add_wire') { put(a.from, 'wire'); put(a.to, 'wire'); }
   }
   const problems = [];

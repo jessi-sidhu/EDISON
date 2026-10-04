@@ -178,6 +178,7 @@ Parts.legsOf(comp) → [ { pin: 'cathode', col: 8, row: 'b', hole: 'b8' },
 App.holeMap() → Map<'b6', { label: 'LED1', pin: 'anode' } | { wire: 3, end: 'from' | 'to' }>
 ```
 - **The stored legs are the truth.** The footprint is only used when placing.
+- `Parts.footprintLegs(type, anchor, rotation) → [{ pin, col, row, hole }]`, one per pin in pin order, from an anchor hole (`'e20'`, pin 0) and one of the part's `place.rotations`. Offsets turn clockwise on the board (+col right, +row toward j): `0 (dc, dr)`, `90 (−dr, dc)`, `180 (−dc, −dr)`, `270 (dr, −dc)`; the AI's direction is right = 0, down = 90, left = 180, up = 270. Off-board legs still come back (a column outside the board, or row `null` past a or j) so `checkPlacement` can refuse them; a rotation the part doesn't allow gives `null`. Hand placement, `chat.js` and the server all use it.
 - **The hole map is rebuilt from the records after every change** (place, delete, undo, load, AI apply). It is never patched as things change, and never saved. It replaces `breadboard.js`'s unused `occupied` flag.
 - **The same map feeds** the overlap check, the AI board state, the stacked-holes check, and later the multimeter and check-my-board.
 
