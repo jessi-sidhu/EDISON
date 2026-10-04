@@ -21,6 +21,18 @@ test('the editor keeps circuits under the signed-in user\'s key, loading storage
     /const LS_KEY = SparkyStorage\.projectsKey\(SparkyStorage\.currentUid\(localStorage\)\)/);
 });
 
+test('the Clear All confirmation says it can be undone, because it can', () => {
+  const src = read('circuit3d/js/interaction.js');
+  assert.doesNotMatch(src, /cannot be undone/);
+  assert.match(src, /You can undo this with Ctrl\+Z/);
+});
+
+test('the showcase viewer draws saved resistor values and LED colours', () => {
+  const src = read('circuit3d/viewer.html');
+  assert.match(src, /App\.buildResistor\(hA, hB, c\.values\?\.resistance\)/);
+  assert.match(src, /App\.buildLED\(hA, hB, c\.values\?\.color\)/);
+});
+
 test('the dashboard signs users in and out through storage.js and never deletes circuits', () => {
   const html = read('dashboard.html');
   assert.ok(scriptOrder(html).includes('circuit3d/js/storage.js'), 'dashboard must load storage.js');

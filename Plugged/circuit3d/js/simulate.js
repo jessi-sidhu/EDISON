@@ -13,19 +13,26 @@
 //    bb_rail_bn    →  all holes in the bottom + rail row (positive)
 //    bb_rail_bp    →  all holes in the bottom − rail row (negative)
 //
-//  Wires (drawn by the user) additionally merge any two nodes.
+//  Wires (drawn by the user) and pressed buttons additionally merge nodes.
+//
+//  SOLVING
+//  ───────
+//  Modified nodal analysis: the whole circuit is solved at once for every
+//  node voltage and every battery current, so parallel branches share
+//  current correctly and batteries in series add up.
 //
 //  POLARITY
 //  ────────
 //  LEDs are diodes — current may only flow from anode (+) to cathode (−).
-//  If the circuit drives current the wrong way the LED stays off.
+//  Each LED is off (open) or on (Vf plus a small resistance); the solver
+//  finds the on/off pattern that is consistent with the voltages.
 //  Battery: pin 0 = positive (+) output, pin 1 = negative (−) return.
 //
 //  EXPORTS
 //  ───────
 //  Browser: window.App.runSimulation() / App.stopSimulation(), unchanged.
-//  Node:    module.exports = the pure solver (PROPS, buildGraph,
-//           findAllPaths, analyze) so a test runner can call it.
+//  Node:    module.exports = the pure solver (PROPS, UnionFind, bbNodeId,
+//           buildGraph, solveLinear, analyze) so a test runner can call it.
 //  Everything above the "Presentation" divider is pure: no document,
 //  no THREE, no AudioContext.
 // ─────────────────────────────────────────────────────────────
@@ -60,14 +67,13 @@
     return STOCK_R.find(r => r >= minOhms) || Math.ceil(minOhms / 1000) * 1000;
   }
 
-  function overCurrentLine(comp, I, netV) {
+  function overCurrentLine(comp, I, advice) {
     const max = propsOf(comp).maxCurrent;
     if (!max || I <= max) return null;
-    const minR = Math.ceil(netV / max);
     return {
       text: "  " + comp.type.toUpperCase() + " is over its " + (max * 1000).toFixed(0) +
-            " mA rating at " + (I * 1000).toFixed(1) + " mA. Needs at least " + minR +
-            " ohm in series, so use " + stockResistor(minR) + " ohm.",
+            " mA rating at " + (I * 1000).toFixed(1) + " mA. Needs at least " + advice.minR +
+            " ohm in series, so use " + advice.stock + " ohm.",
       cls: "sim-err",
     };
   }
@@ -160,90 +166,18 @@
     }));
   }
 
-  // ── Path finding ─────────────────────────────────────────────
-  //
-  //  Backtracking DFS — finds ALL complete paths from startNode to
-  //  endNode so that parallel branches (multiple LEDs) are each
-  //  evaluated independently.  Cap at 30 paths for safety.
-  //
-  // The walk is exponential, so it is bounded two ways: by completed paths and
-  // by steps taken. The step budget is what saves an open circuit, where no path
-  // is ever completed. It counts work rather than milliseconds so the same
-  // circuit always returns the same answer.
-  const MAX_PATHS = 30;
-  const MAX_STEPS = 200000;
-
-  // A cap only means something if the paths it keeps are always the same ones,
-  // so walk the components in an order derived from the circuit rather than
-  // from the order the user happened to place them.
-  function traversalOrder(graph) {
-    return graph
-      .map((entry, i) => ({ entry, i, key: entry.comp.type + nodeSig(entry) }))
-      .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.i - b.i))
-      .map(o => o.entry);
-  }
-  function nodeSig(entry) { return entry.nodes.slice().sort().join("|"); }
-
-  function findAllPaths(graph, startNode, endNode, skipComp) {
-    const order = traversalOrder(graph);
-    const index = new Map(order.map((e, i) => [e.comp, i]));
-    const found = new Map();
-    let   steps     = 0;
-    let   truncated = false;
-    let   cutShort  = false;
-
-    // Deepen one level at a time. Real circuits are short and traps are deep,
-    // so a working two-part branch is found before the budget goes on a mesh.
-    for (let limit = 1; limit <= order.length && !truncated && !cutShort; limit++) {
-      const visited = new Set([startNode]);
-      const path    = [];
-
-      const dfs = (cur, depth) => {
-        if (found.size >= MAX_PATHS) { truncated = true; return; }
-        if (++steps > MAX_STEPS)     { cutShort  = true; return; }
-
-        if (cur === endNode) {
-          const sig = path.map(st => index.get(st.comp) + ":" + st.inPin).join(",");
-          if (!found.has(sig)) found.set(sig, path.slice());
-          return;
-        }
-        if (depth >= limit) return;
-
-        for (const entry of order) {
-          if (entry.comp === skipComp) continue;
-          if (entry.comp.type === "button" && !entry.comp.pressed) continue;
-          const ns = entry.nodes;
-
-          for (let inPin = 0; inPin < ns.length; inPin++) {
-            if (ns[inPin] !== cur) continue;
-
-            for (let outPin = 0; outPin < ns.length; outPin++) {
-              if (outPin === inPin) continue;
-              const next = ns[outPin];
-              if (visited.has(next)) continue;
-
-              visited.add(next);
-              path.push({ comp: entry.comp, inPin, outPin });
-              dfs(next, depth + 1);
-              path.pop();
-              visited.delete(next);
-
-              // Stop expanding, but keep every path already found.
-              if (truncated || cutShort) return;
-            }
-          }
-        }
-      };
-
-      dfs(startNode, 0);
-    }
-
-    return { paths: [...found.values()], truncated, cutShort };
-  }
-
   // ── Nodal analysis ──────────────────────────────────────────
-
-  const PIVOT_EPS = 1e-12;
+  //
+  //  Modified nodal analysis: one unknown per node voltage plus one per
+  //  battery current. An LED is piecewise linear: open when off, Vf in
+  //  series with R_ON when on. The on/off pattern is found by flipping the
+  //  single most inconsistent LED until none is, so the same circuit always
+  //  gives the same answer.
+  const R_ON       = 0.1;    // ohm, LED on-state series resistance
+  const GMIN       = 1e-12;   // S from every node to the reference, keeps floating parts solvable
+  const SHORT_AMPS = 1.0;    // battery current treated as a short circuit
+  const OPEN_AMPS  = 1e-6;   // below this nothing is flowing
+  const PIVOT_EPS  = 1e-15;
 
   // Gaussian elimination with partial pivoting. null when singular.
   function solveLinear(A, b) {
@@ -256,6 +190,7 @@
       if (p !== c) { const t = M[c]; M[c] = M[p]; M[p] = t; }
       for (let r = c + 1; r < n; r++) {
         const f = M[r][c] / M[c][c];
+        if (f === 0) continue;
         for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
       }
     }
@@ -268,17 +203,113 @@
     return x;
   }
 
+  // One linear solve for a fixed set of LEDs that are on.
+  // Returns { v(node), batteryCurrent: Map(comp -> amps) } or null.
+  function solveMNA(graph, bats, ledOn) {
+    const ref   = bats[0].nodes[1];
+    const index = new Map();
+    graph.forEach(g => g.nodes.forEach(n => {
+      if (n !== ref && !index.has(n)) index.set(n, index.size);
+    }));
+    const N = index.size, size = N + bats.length;
+    const A = Array.from({ length: size }, () => new Array(size).fill(0));
+    const b = new Array(size).fill(0);
+    const at = n => (n === ref ? -1 : index.get(n));
+
+    function conductance(n1, n2, g) {
+      const i = at(n1), j = at(n2);
+      if (i >= 0) A[i][i] += g;
+      if (j >= 0) A[j][j] += g;
+      if (i >= 0 && j >= 0) { A[i][j] -= g; A[j][i] -= g; }
+    }
+    function inject(n, amps) { const i = at(n); if (i >= 0) b[i] += amps; }
+
+    for (let i = 0; i < N; i++) A[i][i] += GMIN;
+
+    graph.forEach(g => {
+      const { comp, nodes } = g;
+      const p = propsOf(comp);
+      if (comp.type === 'resistor' || comp.type === 'buzzer') {
+        if (p.resistance > 0) conductance(nodes[0], nodes[1], 1 / p.resistance);
+      } else if (comp.type === 'led' && ledOn.get(comp)) {
+        const anode = nodes[LED_ANODE_PIN], cathode = nodes[1 - LED_ANODE_PIN];
+        const vf = p.forwardVoltage || 0;
+        conductance(anode, cathode, 1 / R_ON);
+        inject(anode, vf / R_ON);
+        inject(cathode, -vf / R_ON);
+      }
+    });
+
+    bats.forEach((bat, k) => {
+      const row = N + k, pos = at(bat.nodes[0]), neg = at(bat.nodes[1]);
+      if (pos >= 0) { A[pos][row] += 1; A[row][pos] += 1; }
+      if (neg >= 0) { A[neg][row] -= 1; A[row][neg] -= 1; }
+      b[row] = propsOf(bat.comp).voltage || 0;
+    });
+
+    const x = solveLinear(A, b);
+    if (!x) return null;
+    const batteryCurrent = new Map(bats.map((bat, k) => [bat.comp, x[N + k]]));
+    return { v: n => (n === ref ? 0 : x[index.get(n)]), batteryCurrent };
+  }
+
+  function forwardCurrent(led, sol, on) {
+    if (!on) return 0;
+    const vf = propsOf(led.comp).forwardVoltage || 0;
+    return (sol.v(led.nodes[LED_ANODE_PIN]) - sol.v(led.nodes[1 - LED_ANODE_PIN]) - vf) / R_ON;
+  }
+
+  // Find the consistent on/off pattern. Returns { sol, ledOn, settled } or null.
+  function solveCircuit(graph, bats) {
+    const leds   = graph.filter(g => g.comp.type === 'led');
+    const ledOn  = new Map(leds.map(l => [l.comp, false]));
+    const rounds = 4 * leds.length + 10;
+    for (let round = 0; round < rounds; round++) {
+      const sol = solveMNA(graph, bats, ledOn);
+      if (!sol) return null;
+      let worst = null, worstBy = 1e-9;
+      leds.forEach(l => {
+        const vf = propsOf(l.comp).forwardVoltage || 0;
+        const vd = sol.v(l.nodes[LED_ANODE_PIN]) - sol.v(l.nodes[1 - LED_ANODE_PIN]);
+        const by = ledOn.get(l.comp) ? vf - vd : vd - vf;   // volts past the switching point
+        if (by > worstBy) { worst = l; worstBy = by; }
+      });
+      if (!worst) return { sol, ledOn, settled: true };
+      ledOn.set(worst.comp, !ledOn.get(worst.comp));
+    }
+    const sol = solveMNA(graph, bats, ledOn);
+    return sol ? { sol, ledOn, settled: false } : null;
+  }
+
+  // Open-circuit voltage across an LED, i.e. with only that LED switched off.
+  function openVoltage(graph, bats, ledOn, led) {
+    const off = new Map(ledOn); off.set(led.comp, false);
+    const sol = solveMNA(graph, bats, off);
+    return sol ? sol.v(led.nodes[LED_ANODE_PIN]) - sol.v(led.nodes[1 - LED_ANODE_PIN]) : 0;
+  }
+
+  // The series resistance that would hold an LED at its rated current.
+  function resistorAdvice(led, voc) {
+    const p = propsOf(led.comp);
+    const minR = Math.ceil((voc - (p.forwardVoltage || 0)) / p.maxCurrent);
+    return { minR, stock: stockResistor(minR) };
+  }
+
   // ── Pure: analyze ────────────────────────────────────────────
   //
   //  components + wires in, numbers and report lines out. Returns:
-  //    status    'empty' | 'no-battery' | 'ok'
-  //    lines     [{ text, cls }] for the results panel
-  //    ledsOn    components the caller should light
-  //    buzzersOn components the caller should sound
-  //    branches  one record per enumerated path, with its current
+  //    status        'empty' | 'no-battery' | 'ok' | 'unsolvable'
+  //    lines         [{ text, cls }] for the results panel
+  //    ledsOn        components the caller should light
+  //    buzzersOn     components the caller should sound
+  //    nodeVoltages  { [node id]: volts }, relative to the first battery's −
+  //    currents      amps per component index, + from pin 0 to pin 1 inside
+  //                  the part (so a lit LED is negative); null for a pressed
+  //                  button, whose pins are one node
+  //    shorted       true when a battery is shorted
   //
   function analyze(components, wires) {
-    const blank = { lines: [], ledsOn: [], buzzersOn: [], branches: [] };
+    const blank = { lines: [], ledsOn: [], buzzersOn: [], nodeVoltages: {}, currents: [], shorted: false };
 
     if (!components.length) {
       return Object.assign({}, blank, {
@@ -287,15 +318,11 @@
       });
     }
 
-    const graph     = buildGraph(components, wires);
-    const lines     = [];
-    const branches  = [];
-    const ledsOn    = [];
-    const buzzersOn = [];
-    const bats      = graph.filter(g => g.comp.type === 'battery');
-    const buttons   = components.filter(c => c.type === 'button');
+    const graph = buildGraph(components, wires);
+    const bats  = graph.filter(g => g.comp.type === 'battery');
+    const lines = [];
 
-    buttons.forEach((btn, i) => {
+    components.filter(c => c.type === 'button').forEach((btn, i) => {
       const state = btn.pressed ? '🟢 CLOSED (current flowing)' : '⭕ OPEN — click to press';
       lines.push({ text: `Button ${i + 1}: ${state}`, cls: btn.pressed ? 'sim-on' : 'sim-info' });
     });
@@ -307,154 +334,90 @@
       });
     }
 
-    bats.forEach((bat, bi) => {
-      const posNode = bat.nodes[0];  // + terminal node
-      const negNode = bat.nodes[1];  // − terminal node
-      const V       = propsOf(bat.comp).voltage || 0;
+    bats.forEach((bat, bi) => lines.push({ text: `Battery ${bi + 1}: ${propsOf(bat.comp).voltage}V`, cls: 'sim-info' }));
 
-      lines.push({ text: `Battery ${bi + 1}: ${V}V`, cls: 'sim-info' });
+    // A wire straight across a battery merges its terminals into one node.
+    if (bats.some(bat => bat.nodes[0] === bat.nodes[1])) {
+      lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
+      return Object.assign({}, blank, { status: 'ok', lines, shorted: true });
+    }
 
-      const walk  = findAllPaths(graph, posNode, negNode, bat.comp);
-      const paths = walk.paths;
+    const solved = solveCircuit(graph, bats);
+    if (!solved) {
+      lines.push({ text: '  ⚠ This circuit cannot be solved. Two batteries may be wired straight into each other.', cls: 'sim-err' });
+      return Object.assign({}, blank, { status: 'unsolvable', lines });
+    }
+    const { sol, ledOn, settled } = solved;
+    if (!settled) lines.push({ text: '  Some LEDs could not settle on or off, so this result is approximate.', cls: 'sim-warn' });
 
-      if (walk.truncated) {
-        lines.push({ text: '  Only the first ' + MAX_PATHS + ' branches were checked. This circuit has more.', cls: 'sim-warn' });
-      } else if (walk.cutShort) {
-        lines.push({ text: '  This circuit has too many routes to check them all, so the result is partial.', cls: 'sim-warn' });
-      }
-
-      if (!paths.length) {
-        if (!walk.cutShort && !walk.truncated) {
-          lines.push({ text: '  Circuit open — no complete path.', cls: 'sim-warn' });
-        }
-        const hasBatConn = graph.some(g =>
-          g.comp !== bat.comp && g.nodes.some(n => n === posNode || n === negNode));
-        if (!hasBatConn) {
-          lines.push({ text: '  ⚠ Battery terminals not connected to anything.', cls: 'sim-warn' });
-        }
-        return;
-      }
-
-      // Each path is an independent parallel branch — evaluate separately.
-      const litLEDs     = new Set();
-      const litBuzzers  = new Set();
-      const backwards   = new Set();
-      let   shortCircuit = false;
-
-      paths.forEach((path, pi) => {
-        // A diode conducts anode to cathode only, so a branch that enters an
-        // LED by any other pin carries nothing.
-        const reversed = path.find(step =>
-          step.comp.type === 'led' && step.inPin !== LED_ANODE_PIN);
-        if (reversed) { backwards.add(reversed.comp); return; }
-
-        let totalR  = 0;
-        let totalVf = 0;
-        path.forEach(step => {
-          const p = propsOf(step.comp);
-          totalR  += p.resistance     || 0;
-          totalVf += p.forwardVoltage || 0;
-        });
-
-        const branch = { battery: bi, path, totalR, totalVf, current: 0, shorted: false };
-        branches.push(branch);
-
-        if (totalR === 0) {
-          branch.shorted = true;
-          if (!shortCircuit) {
-            const part = path.find(step => propsOf(step.comp).maxCurrent);
-            if (part) {
-              const max  = propsOf(part.comp).maxCurrent;
-              const minR = Math.ceil((V - totalVf) / max);
-              lines.push({
-                text: "  Short circuit. The " + part.comp.type.toUpperCase() +
-                      " sits straight across the battery with no current-limiting resistor.",
-                cls: "sim-err",
-              });
-              lines.push({
-                text: "  A series resistor sets the current: (" + V + "V - " + totalVf + "V) / " +
-                      (max * 1000).toFixed(0) + " mA = " + minR + " ohm minimum, so use a " +
-                      stockResistor(minR) + " ohm.",
-                cls: "sim-info",
-              });
-            } else {
-              lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
-            }
-            shortCircuit = true;
-          }
-          return;
-        }
-
-        const netV = V - totalVf;
-        if (netV <= 0) return; // not enough voltage for this branch
-
-        const I    = netV / totalR;
-        const I_mA = I * 1000;
-        branch.current = I;
-
-        path.forEach(step => {
-          const type = step.comp.type;
-
-          if (type === 'led') {
-            if (litLEDs.has(step.comp)) return;
-            litLEDs.add(step.comp);
-            if (I >= propsOf(step.comp).thresholdCurrent) {
-              ledsOn.push(step.comp);
-              lines.push({ text: `  💡 LED ON  (${I_mA.toFixed(1)} mA)`, cls: 'sim-on' });
-              const over = overCurrentLine(step.comp, I, netV);
-              if (over) lines.push(over);
-            } else {
-              lines.push({ text: '  LED: current too low.', cls: 'sim-warn' });
-            }
-          }
-
-          if (type === 'buzzer') {
-            if (litBuzzers.has(step.comp)) return;
-            litBuzzers.add(step.comp);
-            if (I >= propsOf(step.comp).thresholdCurrent) {
-              buzzersOn.push(step.comp);
-              lines.push({ text: `  🔔 BUZZER ON  (${I_mA.toFixed(1)} mA)`, cls: 'sim-on' });
-            } else {
-              lines.push({ text: '  Buzzer: current too low.', cls: 'sim-warn' });
-            }
-          }
-        });
-      });
-
-      // Announced after every branch, so an LED a second branch lights stays quiet.
-      backwards.forEach(led => {
-        if (litLEDs.has(led)) return;
-        lines.push({ text: '  LED is backwards. Current cannot flow from cathode to anode. Flip it around.', cls: 'sim-warn' });
-      });
-
-      if (!shortCircuit && !backwards.size &&
-          litLEDs.size === 0 && litBuzzers.size === 0 && paths.length > 0) {
-        lines.push({ text: '  No output components in circuit path.', cls: 'sim-info' });
-      }
-    });
-
-    // Walk each branch from + down to −, dropping I·R + Vf across each part.
     const nodeVoltages = {};
-    branches.forEach(br => {
-      const bat = bats[br.battery];
-      let v = propsOf(bat.comp).voltage || 0;
-      nodeVoltages[bat.nodes[1]] = 0;
-      br.path.forEach(step => {
-        const entry = graph.find(g => g.comp === step.comp);
-        nodeVoltages[entry.nodes[step.inPin]] = v;
-        const p = propsOf(step.comp);
-        v -= br.current * (p.resistance || 0) + (p.forwardVoltage || 0);
-        nodeVoltages[entry.nodes[step.outPin]] = v;
-      });
+    graph.forEach(g => g.nodes.forEach(n => { nodeVoltages[n] = sol.v(n); }));
+
+    const currents = graph.map(g => {
+      const { comp, nodes } = g;
+      if (comp.type === 'battery') return sol.batteryCurrent.get(comp);
+      if (comp.type === 'button')  return comp.pressed ? null : 0;
+      if (comp.type === 'led')     return -forwardCurrent(g, sol, ledOn.get(comp));
+      const R = propsOf(comp).resistance;
+      return R > 0 ? (sol.v(nodes[0]) - sol.v(nodes[1])) / R : 0;
     });
 
-    // Current through each part, + from pin 0 to pin 1 inside it.
-    const currents = components.map(() => 0);
-    branches.forEach(br => br.path.forEach(step => {
-      currents[components.indexOf(step.comp)] += step.inPin === 0 ? br.current : -br.current;
-    }));
+    const shortBat = bats.find(bat => Math.abs(sol.batteryCurrent.get(bat.comp)) > SHORT_AMPS);
+    if (shortBat) {
+      const led = graph.find((g, i) => g.comp.type === 'led' && -currents[i] > SHORT_AMPS);
+      if (led) {
+        const advice = resistorAdvice(led, openVoltage(graph, bats, ledOn, led));
+        lines.push({ text: '  Short circuit. The LED sits straight across the battery with no current-limiting resistor.', cls: 'sim-err' });
+        lines.push({ text: `  Put a resistor in series: at least ${advice.minR} ohm, so use a ${advice.stock} ohm.`, cls: 'sim-info' });
+      } else {
+        lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
+      }
+      return Object.assign({}, blank, { status: 'ok', lines, nodeVoltages, currents, shorted: true });
+    }
 
-    return { status: 'ok', lines, ledsOn, buzzersOn, branches, nodeVoltages, currents };
+    const ledsOn = [], buzzersOn = [];
+    let backwards = 0;
+    graph.forEach((g, i) => {
+      const { comp } = g;
+      const p = propsOf(comp);
+      if (comp.type === 'led') {
+        const I = -currents[i];
+        if (ledOn.get(comp) && I >= p.thresholdCurrent) {
+          ledsOn.push(comp);
+          lines.push({ text: `  💡 LED ON  (${(I * 1000).toFixed(1)} mA)`, cls: 'sim-on' });
+          const over = overCurrentLine(comp, I, resistorAdvice(g, openVoltage(graph, bats, ledOn, g)));
+          if (over) lines.push(over);
+        } else if (!ledOn.get(comp)) {
+          const reverse = sol.v(g.nodes[1 - LED_ANODE_PIN]) - sol.v(g.nodes[LED_ANODE_PIN]);
+          if (reverse >= (p.forwardVoltage || 0)) {
+            backwards++;
+            lines.push({ text: '  LED is backwards. Current cannot flow from cathode to anode. Flip it around.', cls: 'sim-warn' });
+          }
+        } else if (I >= OPEN_AMPS) {
+          // Below OPEN_AMPS the "current" is only GMIN leaking through a
+          // floating node: the path is open, which the open-circuit line says.
+          lines.push({ text: '  LED: current too low.', cls: 'sim-warn' });
+        }
+      }
+      if (comp.type === 'buzzer' && Math.abs(currents[i]) >= p.thresholdCurrent) {
+        buzzersOn.push(comp);
+        lines.push({ text: `  🔔 BUZZER ON  (${(Math.abs(currents[i]) * 1000).toFixed(1)} mA)`, cls: 'sim-on' });
+      }
+    });
+
+    const flowing = bats.some(bat => Math.abs(sol.batteryCurrent.get(bat.comp)) > OPEN_AMPS);
+    if (!flowing && !ledsOn.length && !buzzersOn.length && !backwards) {
+      lines.push({ text: '  Circuit open — no complete path.', cls: 'sim-warn' });
+      bats.forEach(bat => {
+        const linked = graph.some(g => g.comp !== bat.comp &&
+          g.nodes.some(n => n === bat.nodes[0] || n === bat.nodes[1]));
+        if (!linked) lines.push({ text: '  ⚠ Battery terminals not connected to anything.', cls: 'sim-warn' });
+      });
+    } else if (flowing && !ledsOn.length && !buzzersOn.length && !backwards) {
+      lines.push({ text: '  No output components in circuit path.', cls: 'sim-info' });
+    }
+
+    return { status: 'ok', lines, ledsOn, buzzersOn, nodeVoltages, currents, shorted: false };
   }
 
   // ── Presentation ─────────────────────────────────────────────
@@ -680,5 +643,5 @@
     App.stopSimulation = stopSimulation;
   }
 
-  return { PROPS, UnionFind, bbNodeId, buildGraph, findAllPaths, solveLinear, analyze, install };
+  return { PROPS, UnionFind, bbNodeId, buildGraph, solveLinear, analyze, install };
 });

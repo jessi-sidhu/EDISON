@@ -58,7 +58,7 @@ test('series battery, resistor, LED: (9-2)/470', () => {
 // ── Parallel: two LEDs behind one 470R (#8) ───────────────────
 // 14.894 mA through the resistor, split 7.447 mA per LED.
 
-test.skip('parallel LEDs behind one resistor split its current (#8)', () => {
+test('parallel LEDs behind one resistor split its current (#8)', () => {
   const bat  = battery();
   const res  = comp('resistor', [h(5, 'a'), h(10, 'a')]);
   const led1 = comp('led', [h(1, 'tn'), h(10, 'a')]);
@@ -102,7 +102,7 @@ test('reversed LED: stays dark and says so (#10)', () => {
 
 // ── Shorts ────────────────────────────────────────────────────
 
-test.skip('LED across the battery with no resistor is reported as a short', () => {
+test('LED across the battery with no resistor is reported as a short', () => {
   const bat = battery();
   const led = comp('led', [h(1, 'tn'), h(1, 'tp')]); // cathode on -, anode on +
   const r = Sim.analyze([bat, led], []);
@@ -112,7 +112,7 @@ test.skip('LED across the battery with no resistor is reported as a short', () =
   assert.ok(hasLine(r, 'Short circuit'), texts(r).join(' | '));
 });
 
-test.skip('a wire straight across the battery is a short', () => {
+test('a wire straight across the battery is a short', () => {
   const r = Sim.analyze([battery()], [wire(h(4, 'tp'), h(4, 'tn'))]);
 
   assert.equal(r.shorted, true);
@@ -136,7 +136,7 @@ test('resistor and LED not wired to the battery leave the circuit open', () => {
 // ── Two batteries in series (#11) ─────────────────────────────
 // 18 V drives (18 - 2) / 470 = 34.043 mA.
 
-test.skip('two 9V batteries in series add up (#11)', () => {
+test('two 9V batteries in series add up (#11)', () => {
   const batA = comp('battery', [h(1, 'tp'),  h(20, 'a')]);
   const batB = comp('battery', [h(20, 'a'), h(1, 'tn')]);
   const res  = comp('resistor', [h(5, 'a'), h(10, 'a')]);
@@ -149,7 +149,7 @@ test.skip('two 9V batteries in series add up (#11)', () => {
 
 // ── Mixed LEDs, floating parts, buttons ───────────────────────
 
-test.skip('red and green LEDs in parallel: only the lower-Vf red one lights', () => {
+test('red and green LEDs in parallel: only the lower-Vf red one lights', () => {
   const bat   = battery();
   const res   = comp('resistor', [h(5, 'a'), h(10, 'a')]);
   const red   = comp('led', [h(1, 'tn'), h(10, 'a')]);
@@ -160,7 +160,7 @@ test.skip('red and green LEDs in parallel: only the lower-Vf red one lights', ()
   assert.deepEqual(r.ledsOn, [red]);
 });
 
-test.skip('a floating resistor does not disturb the circuit', () => {
+test('a floating resistor does not disturb the circuit', () => {
   const bat   = battery();
   const res   = comp('resistor', [h(5, 'a'), h(10, 'a')]);
   const led   = comp('led',      [h(15, 'a'), h(10, 'a')]);
@@ -185,7 +185,21 @@ test('a push button opens and closes the circuit', () => {
   assert.equal(build(true).ledsOn.length, 1);
 });
 
-test.skip('batteries wired straight together are unsolvable, not a crash', () => {
+// The demo circuit: the button is on the ground side, so releasing it leaves
+// the LED's cathode connected to nothing.
+test('an LED whose return path is broken by a released button just reports an open circuit', () => {
+  const bat = battery();
+  const res = comp('resistor', [h(1, 'tp'), h(6, 'a')]);
+  const led = comp('led', [h(11, 'a'), h(6, 'a')]);
+  const btn = comp('button', [h(11, 'a'), h(1, 'tn')], { pressed: false });
+  const r = Sim.analyze([bat, res, led, btn], []);
+
+  assert.equal(r.ledsOn.length, 0);
+  assert.ok(hasLine(r, 'Circuit open'), texts(r).join(' | '));
+  assert.ok(!hasLine(r, 'current too low'), texts(r).join(' | '));
+});
+
+test('batteries wired straight together are unsolvable, not a crash', () => {
   const a = battery();
   const b = comp('battery', [h(9, 'tp'), h(9, 'tn')], { values: { voltage: 6 } });
   const r = Sim.analyze([a, b], []);

@@ -77,11 +77,11 @@
           if (c.type === 'resistor' && c.holeRefs?.length === 2) {
             const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
             const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-            if (hA && hB) result = App.buildResistor(hA, hB);
+            if (hA && hB) result = App.buildResistor(hA, hB, c.values?.resistance);
           } else if (c.type === 'led' && c.holeRefs?.length === 2) {
             const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
             const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);
-            if (hA && hB) result = App.buildLED(hA, hB);
+            if (hA && hB) result = App.buildLED(hA, hB, c.values?.color);
           } else if (c.type === 'buzzer' && c.holeRefs?.length === 2) {
             const hA = bb.getHole(c.holeRefs[0].col, c.holeRefs[0].row);
             const hB = bb.getHole(c.holeRefs[1].col, c.holeRefs[1].row);

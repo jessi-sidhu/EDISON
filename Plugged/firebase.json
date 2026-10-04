@@ -16,6 +16,10 @@
       "package.json",
       "package-lock.json",
       "tsconfig.json",
+      "vitest.config.mjs",
+      "test/**",
+      "docs/**",
+      "*.png",
       "*.md"
     ]
   }

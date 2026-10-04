@@ -78,12 +78,14 @@ Problems it detects:
 | No complete path | Reports an open circuit, and whether the battery isn't connected at all |
 | Empty board or no battery | Says so |
 
-**Limitations:**
-- Each path from + to − is calculated on its own, so parts shared between parallel branches get the wrong current.
-- It doesn't calculate voltages at points in the middle of a circuit.
-- Multiple batteries are each treated separately, so batteries in series don't add up.
+**How it calculates:** the whole circuit is solved at once (nodal analysis), so it knows the voltage at every point and the current through every part:
+- Parallel branches share current correctly.
+- Batteries in series add up.
+- LEDs with different colours in parallel light only if they get their forward voltage.
 
-These are tracked as issues #8, #9 and #11, and the tests in `test/simulate.test.js` record them.
+**Limits:**
+- Batteries wired directly into each other (in parallel) can't be solved. The results panel says so.
+- LEDs switch fully on or off; brightness doesn't follow a real diode curve.
 
 ---
 
@@ -93,7 +95,7 @@ The chat panel on the right of the editor.
 
 - **Ask questions or ask it to build.** "Why isn't my LED on?" gets an explanation. "Build me 3 LEDs" places the parts and wires.
 - **It sees your board.** Every message includes the current parts, wires and board layout.
-- **Preview before applying.** Proposed parts and wires appear as see-through previews. Nothing changes until you press Accept; Decline discards them.
+- **Preview before applying.** Proposed parts and wires appear as see-through previews. Nothing changes until you press Accept; Decline discards them. Accepting a build is one undo step.
 - **Warnings.** Before a build reaches you, the server checks it for a battery that isn't wired in, a backwards LED, or an LED that isn't between power and ground. Any problems are added to the reply as warnings.
 - **Conversation memory.** It remembers the last 20 messages in the session.
 - **Quick-start buttons:** "Build an LED circuit", "Analyze my circuit", "What should I add?"
@@ -132,7 +134,7 @@ Requests are limited to 20 per minute per visitor.
   - Star favourites and filter to show only starred ones.
   - Fork a spark into My Circuits.
   - Remove your own sparks.
-- **Sign out** clears this browser's saved circuits, so the next person using it doesn't see them.
+- **Sign out** keeps your circuits. Each account has its own, so the next person to sign in on this browser sees only theirs. Circuits made without signing in move into your account when you sign in.
 
 ### Landing page
 `landing.html`
@@ -156,7 +158,8 @@ Node 18 or newer, with no npm packages.
 - Serves the app's pages. Only listed file types are served, and backend code, source files and hidden files are blocked.
 - `POST /api/ask`: the AI tutor endpoint.
 - `GET /api/health`: a health check.
-- Optional Google OAuth and IBM Cloudant routes. The app doesn't use them; it signs in and stores shared circuits through Firebase instead.
+- Requests over 256 KB are rejected.
+- Set `TRUST_PROXY=1` behind a proxy such as Render, so the AI rate limit applies per visitor.
 
 ---
 
@@ -173,5 +176,5 @@ Node 18 or newer, with no npm packages.
 
 `test/`
 
-- Run with `node --test test/`.
+- Run with `npm test` (Vitest). No API key or browser needed.
 - Tests for the simulator: series circuits, parallel circuits, voltage dividers, backwards LEDs, short circuits, open circuits, batteries in series, empty boards, and how holes are grouped into connected nodes.

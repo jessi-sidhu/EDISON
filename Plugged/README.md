@@ -22,7 +22,7 @@ The AI tutor needs the backend, because that is where the Gemini key lives. The 
 
 **Run the backend if you want the AI tutor.** The 3D designer, wiring and simulation all work without it.
 
-`backend/server.js` is a standalone Node 18+ server with zero npm dependencies. It serves the static files and exposes `/api/ask`, which is what the chat panel calls. It also carries optional Google OAuth routes and Cloudant storage, which the shipped frontend does not use: sign-in and cloud sharing go through Firebase Auth and Firestore.
+`backend/server.js` is a standalone Node 18+ server with zero npm dependencies. It serves the static files and exposes `/api/ask`, which is what the chat panel calls. Sign-in and cloud sharing go through Firebase Auth and Firestore, straight from the browser.
 
 ```bash
 cd backend
@@ -54,10 +54,10 @@ You can also just click components in the sidebar to start placing them.
 The simulator models the breadboard as a graph. Holes in the same column on the same side of the center channel are electrically connected (just like a real breadboard). Power rails run the full length of the board.
 
 When you hit simulate, it:
-1. Maps every hole and wire into a connectivity graph using Union-Find
-2. Finds **all** paths from battery+ to battery- (not just the first one, this is what makes parallel circuits work)
-3. Calculates current through each path: `I = (9V - LED voltage drops) / total resistance`
-4. Lights up any LED getting enough current
+1. Maps every hole and wire into electrical nodes using Union-Find
+2. Solves the whole circuit at once with nodal analysis: the voltage at every node and the current through every part, so parallel branches share current correctly and batteries in series add up
+3. Treats each LED as off or on (its forward voltage plus a small resistance), and settles on the pattern that matches the voltages, so a backwards LED stays dark and a green LED next to a red one only lights if it gets enough voltage
+4. Lights up any LED getting enough current, and reports shorts, open circuits, backwards LEDs and LEDs over their 20 mA rating (with the resistor you need)
 
 Push buttons work during simulation too -- click them to toggle the circuit on and off.
 
@@ -78,7 +78,8 @@ landing.html          Marketing page + Firebase sign-in
 dashboard.html        Saved circuits, shared "sparks" (Firestore)
 
 circuit3d/
-  index.html          The app (+ inline chat JS and Gemini calls)
+  index.html          The app
+  viewer.html         Auto-rotating showcase of demo.sparky
   css/                 Styling
   js/
     scene.js           Three.js scene setup
@@ -86,12 +87,22 @@ circuit3d/
     components.js      3D component models
     interaction.js     Mouse/keyboard handling
     simulate.js        Circuit simulation engine
+    storage.js         Which localStorage key holds whose circuits
+    ids.js             Component names (battery_0, led_1) shared with the AI
+    history.js         Undo / redo
+    board-io.js        Rebuilding a board from saved data
     app.js             Ties everything together
+    chat.js            AI chat panel: preview, accept, apply
 
 backend/
   server.js            AI backend + static server (zero npm dependencies)
+  ai-providers.js      Gemini, local Claude CLI, or recorded fixtures
   .env                 Your API key (not committed)
+
+test/                  Vitest tests (npm test)
 ```
+
+The modules that hold logic (`simulate.js`, `storage.js`, `ids.js`, `history.js`, `board-io.js`, `chat.js`) load in the browser as plain scripts and in Node through `module.exports`, which is how the tests reach them.
 
 Everything is vanilla JS. No build tools, no frameworks, no bundler. The 3D components are all built from basic Three.js shapes, so the whole app works offline from the file system (minus the AI).
 
@@ -114,25 +125,18 @@ Everything is vanilla JS. No build tools, no frameworks, no bundler. The 3D comp
 | `GEMINI_MODEL` | No | Gemini model id (default: `gemini-flash-latest`) |
 | `AI_PROVIDER` | No | `gemini`, `claude` for the local Claude Code CLI, or `fixture` to replay recorded responses with no key |
 | `PORT` | No | Server port (default: 5001) |
-| `GOOGLE_CLIENT_ID` | No | Google OAuth 2.0 client ID (for login, [setup guide below](#google-oauth-setup)) |
-| `GOOGLE_CLIENT_SECRET` | No | Google OAuth 2.0 client secret |
-| `CLOUDANT_URL` | No | IBM Cloudant URL (for cloud circuit storage) |
-| `CLOUDANT_APIKEY` | No | IBM Cloudant API key |
+| `TRUST_PROXY` | No | Set to `1` behind a proxy such as Render, so the AI rate limit (20 requests a minute) applies per visitor instead of to everyone at once |
 
-`GEMINI_API_KEY` is required for the AI tutor unless you set `AI_PROVIDER` to `claude` or `fixture`, which need no key at all. The rest are optional: Google OAuth and Cloudant power the backend's own login and storage routes, while the shipped frontend uses Firebase Auth and Firestore for sign-in and cloud sharing.
+`GEMINI_API_KEY` is required for the AI tutor unless you set `AI_PROVIDER` to `claude` or `fixture`, which need no key at all.
 
-## Google OAuth setup
+## Tests
 
-This is **optional** and applies to the backend's own login route only. The shipped app signs in through Firebase, so you do not need any of this to use Sparky.
+```bash
+npm install     # once
+npm test
+```
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-2. Create a new project (or select an existing one)
-3. Click **Create Credentials** → **OAuth 2.0 Client ID**
-4. Set application type to **Web application**
-5. Under **Authorized redirect URIs**, add:
-   - `http://localhost:5001/api/auth/callback` (for local dev)
-   - Your production URL + `/api/auth/callback` (if deploying)
-6. Copy the **Client ID** and **Client Secret** into your `.env` file
+The tests use Vitest and need no API key or browser. `AI_PROVIDER=fixture` lets you run the whole app against the recorded AI response in `test/fixtures/ask/`.
 
 ---
 
