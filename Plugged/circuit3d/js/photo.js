@@ -1,6 +1,7 @@
 // ─────────────────────────────────────────────────────────────
 //  photo.js — 📷 capture (issue #140): choose, drop or sample a photo,
-//  tap the board's 4 corner holes, flatten it, send it to /api/photo.
+//  tap the board's 4 corner holes, flatten it, send it to /api/photo,
+//  then the confirm screen (photo-confirm.js, #141).
 //  DOM only: the geometry is PhotoGrid (photo-grid.js).
 //  Contract: docs/API-CONTRACT.md → "POST /api/photo", "PhotoGrid",
 //  "Page additions".
@@ -11,10 +12,12 @@
 //         a live labelled grid) → Looks right
 //    📷 → Use sample photo → its stored taps (window.PhotoSamples)
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
-//    → the Reading (logged until the confirm screen, #141), or the reply's
-//      friendly text with Use sample photo.
+//    → the Reading opens the confirm screen (PhotoConfirm.open) on the same
+//      flattened image; Build it hands its result back here (logged until
+//      #143). Or the reply's friendly text with Use sample photo.
 //  While the overlay is open, keydown stops at the window (capture
-//  phase), so Backspace and Ctrl+Z never reach the board.
+//  phase), so Backspace and Ctrl+Z never reach the board. Escape cancels
+//  a confirm-screen move first, else closes.
 //
 //  EXPORTS
 //  ───────
@@ -39,7 +42,7 @@
   const modal   = $('photo-modal'),   menu   = $('photo-menu'),   fileIn = $('photo-file');
   const corners = $('photo-corners'), prompt = $('photo-prompt'), canvas = $('photo-canvas');
   const colsEl  = $('photo-cols'),    okBtn  = $('photo-ok'),     status = $('photo-status');
-  const errBtn  = $('photo-error-sample');
+  const errBtn  = $('photo-error-sample'), confirm = $('photo-confirm');
 
   let img  = null;   // the photo being tapped
   let taps = [];     // its tapped corners, photo pixels, in corner order
@@ -54,6 +57,7 @@
   function open() {
     menu.hidden = true;
     corners.hidden = true;
+    confirm.hidden = true;
     showStatus('', false);
     modal.style.display = 'flex';
   }
@@ -188,7 +192,7 @@
 
   // ── Send ───────────────────────────────────────────────────
 
-  // The original resized to ≤ MAX_SIDE, warped into the grid's frame, as a JPEG data URL.
+  // The original resized to ≤ MAX_SIDE, warped into the grid's frame: a canvas.
   function flatten(im, grid) {
     const s   = Math.min(1, MAX_SIDE / Math.max(im.naturalWidth, im.naturalHeight));
     const src = document.createElement('canvas');
@@ -204,7 +208,7 @@
     const octx = out.getContext('2d');
     const flat = PhotoGrid.warp(sctx.getImageData(0, 0, src.width, src.height), H, octx.createImageData(grid.width, grid.height));
     octx.putImageData(flat, 0, 0);
-    return out.toDataURL('image/jpeg', 0.9);
+    return out;
   }
 
   async function send(im, grid, sample) {
@@ -212,7 +216,8 @@
     showStatus(READING, false);
     await new Promise(r => requestAnimationFrame(() => setTimeout(r)));   // paint the status before the warp
     if (my !== job) return;
-    const body = { image: flatten(im, grid),
+    const flat = flatten(im, grid);
+    const body = { image: flat.toDataURL('image/jpeg', 0.9),
                    grid: { cols: grid.cols, pitch: grid.pitch, x0: grid.x0, y0: grid.y0, width: grid.width, height: grid.height } };
     if (sample) body.sample = sample;
 
@@ -230,10 +235,16 @@
 
     if (res && res.ok && data && data.reading) {
       Capture.lastReading = data.reading;
-      console.log('[photo] reading', data);                // until the confirm screen (#141)
-      return close();
+      showStatus('', false);
+      return PhotoConfirm.open(data.reading, flat, grid, built);
     }
     showStatus(timedOut ? AI_TIMEOUT : (data && data.reply) || AI_FAILED, true);
+  }
+
+  // Build it on the confirm screen: { actions, flags, labels, skipped }.
+  function built(result) {
+    console.log('[photo] build', result);                  // until the build step (#143)
+    close();
   }
 
   async function useSample() {
@@ -280,7 +291,7 @@
   window.addEventListener('keydown', e => {
     if (!isOpen()) return;
     e.stopPropagation();
-    if (e.key === 'Escape') close();
+    if (e.key === 'Escape' && !PhotoConfirm.cancelMove()) close();
   }, true);
 
 })();

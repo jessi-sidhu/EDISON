@@ -266,6 +266,38 @@ html, body {
 #photo-cols { margin-right: auto; font-family: inherit; font-size: 12px; }
 #photo-ok:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
 
+/* Confirm screen (js/photo-confirm.js): the flattened photo, the list beside it. */
+#photo-confirm { display: flex; gap: 12px; align-items: stretch; }
+#photo-confirm-canvas { display: block; position: static; border: 0; padding: 0; border-radius: 0; cursor: pointer; }
+.photo-side { display: flex; flex-direction: column; gap: 8px; width: 252px; }
+.photo-side .photo-btns { flex-wrap: wrap; justify-content: stretch; }
+.photo-side .btn-secondary { flex: 1; font-size: 11px; padding: 5px 6px; }
+#photo-confirm-help { font-size: 12px; color: var(--text-sub); line-height: 1.4; }
+#photo-parts { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+#photo-parts li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+#photo-parts b    { min-width: 34px; }
+#photo-parts span { flex: 1; }
+#photo-parts button {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+}
+#photo-parts button:hover { border-color: var(--accent); }
+#photo-build { justify-content: center; }
+#photo-build:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+
 #photo-status { max-width: 420px; font-size: 13px; color: var(--text-primary); }
 #photo-status:empty,
 #photo-menu[hidden],

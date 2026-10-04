@@ -44,8 +44,8 @@
 //       .grid             the PhotoGrid grid of the current 4 taps (taps in the
 //                         photo's own pixels), null before the 4th tap / after
 //                         Redo.
-//       .lastReading      the Reading the last /api/photo returned. Until the
-//                         confirm screen (#141) the page logs it and closes.
+//       .lastReading      the Reading the last /api/photo returned; it opens
+//                         the confirm screen, #photo-confirm (#141).
 //   - window.PhotoSamples['demo-board'] from samples/samples.js:
 //                         { file: 'samples/demo-board.jpg', cols: 63, taps }.
 //   - While #photo-modal is open, keydown is swallowed in the capture phase:
@@ -105,7 +105,7 @@ const imageSize = (page, src) => page.evaluate(src => new Promise((resolve, reje
 
 // ── Choose a photo, tap the corners, send ──────────────────────────────────
 
-test('Choose photo → tap a1, a63, j63, j1 → the grid appears; Redo; Looks right → /api/photo gets the flattened JPEG and the grid, then the overlay closes', async ({ page }) => {
+test('Choose photo → tap a1, a63, j63, j1 → the grid appears; Redo; Looks right → /api/photo gets the flattened JPEG and the grid, then the confirm screen opens', async ({ page }) => {
   test.setTimeout(60_000);
   const errors = watchErrors(page);
   let sent = null, answer;
@@ -138,30 +138,40 @@ test('Choose photo → tap a1, a63, j63, j1 → the grid appears; Redo; Looks ri
   expect(await page.evaluate(() => window.PhotoCapture.grid), 'Redo clears the grid').toBe(null);
 
   // Three taps, then the 4th draws the grid over the photo, well beyond the 4th dot.
-  const canvasPixels = () => page.evaluate(() => {
-    const c = document.getElementById('photo-canvas');
-    return { w: c.width, h: c.height, data: Array.from(c.getContext('2d').getImageData(0, 0, c.width, c.height).data) };
-  });
+  // The pixels stay in the page (returning ~1.6M numbers through evaluate took
+  // up to 90 s under full-suite load); only the sizes and the count come back.
   for (const [name, at] of CORNERS.slice(0, 3)) {
     await expect(page.locator('#photo-prompt')).toContainText(new RegExp(`\\b${name}\\b`));
     await tapPhoto(page, at);
   }
   expect(await page.evaluate(() => window.PhotoCapture.grid), 'no grid before the 4th tap').toBe(null);
-  const before = await canvasPixels();
+  await page.evaluate(() => {
+    const c = document.getElementById('photo-canvas');
+    window.__photoBefore = { w: c.width, h: c.height, data: c.getContext('2d').getImageData(0, 0, c.width, c.height).data.slice() };
+  });
   await expect(page.locator('#photo-prompt')).toContainText(/\bj1\b/);
   await tapPhoto(page, CORNERS[3][1]);
   await expect(page.locator('#photo-ok')).toBeEnabled();
-  const after = await canvasPixels();
-  expect([after.w, after.h]).toEqual([before.w, before.h]);
-  const [jx, jy] = [CORNERS[3][1][0] * after.w / PHOTO.width, CORNERS[3][1][1] * after.h / PHOTO.height];
-  const near = 0.06 * after.w;                         // the 4th dot's neighbourhood
-  let changed = 0;
-  for (let i = 0; i < after.data.length; i += 4) {
-    const p = i / 4, x = p % after.w, y = Math.floor(p / after.w);
-    if (Math.hypot(x - jx, y - jy) < near) continue;
-    if (Math.abs(after.data[i] - before.data[i]) + Math.abs(after.data[i + 1] - before.data[i + 1]) + Math.abs(after.data[i + 2] - before.data[i + 2]) > 30) changed++;
-  }
-  expect(changed, 'the 4th tap draws the grid across the photo').toBeGreaterThan(1000);
+  const diff = await page.evaluate(({ tap, photo }) => {
+    const c = document.getElementById('photo-canvas');
+    const before = window.__photoBefore;
+    delete window.__photoBefore;
+    const w = c.width, h = c.height;
+    const after = c.getContext('2d').getImageData(0, 0, w, h).data;
+    const [jx, jy] = [tap[0] * w / photo.width, tap[1] * h / photo.height];
+    const near = 0.06 * w;                             // the 4th dot's neighbourhood
+    let changed = 0;
+    if (before.w === w && before.h === h) {
+      for (let i = 0; i < after.length; i += 4) {
+        const p = i / 4, x = p % w, y = Math.floor(p / w);
+        if (Math.hypot(x - jx, y - jy) < near) continue;
+        if (Math.abs(after[i] - before.data[i]) + Math.abs(after[i + 1] - before.data[i + 1]) + Math.abs(after[i + 2] - before.data[i + 2]) > 30) changed++;
+      }
+    }
+    return { before: [before.w, before.h], after: [w, h], changed };
+  }, { tap: CORNERS[3][1], photo: PHOTO });
+  expect(diff.after).toEqual(diff.before);
+  expect(diff.changed, 'the 4th tap draws the grid across the photo').toBeGreaterThan(1000);
 
   // The taps landed on the photo pixels that were clicked.
   const grid = await page.evaluate(names => {
@@ -176,10 +186,10 @@ test('Choose photo → tap a1, a63, j63, j1 → the grid appears; Redo; Looks ri
 
   await page.locator('#photo-ok').click();
   await expect(page.locator('#photo-status')).toContainText('Reading your board');
-  await expect(page.locator('#photo-corners')).toBeHidden();
+  await expect(page.locator('#photo-corners')).toBeHidden({ timeout: 15_000 });   // waits on the warp
   await expect.poll(() => sent, { message: 'Looks right posts to /api/photo' }).not.toBe(null);
   answer();
-  await expect(page.locator('#photo-modal'), 'the Reading closes the overlay (until #141)').toBeHidden();
+  await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen (#141)').toBeVisible();
   expect(await page.evaluate(() => window.PhotoCapture.lastReading)).toEqual(MOCK_READING);
 
   // The request: { image, grid }, no sample.
@@ -244,7 +254,7 @@ test('Use sample photo → /api/photo gets sample "demo-board" with its flattene
   await page.locator('#photo-sample').click();
   await expect.poll(() => sent.length, { message: 'the sample is sent with no taps and no Looks right' }).toBe(1);
   await expect(page.locator('#photo-corners'), 'the sample skips the corner step').toBeHidden();
-  await expect(page.locator('#photo-modal')).toBeHidden();
+  await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen (#141)').toBeVisible();
   expect(await page.evaluate(() => window.PhotoCapture.lastReading)).toEqual(MOCK_READING);
 
   const body = sent[0];

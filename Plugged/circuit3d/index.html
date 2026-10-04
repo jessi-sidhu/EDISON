@@ -242,6 +242,19 @@
           <button class="btn-simulate" id="photo-ok" disabled>Looks right</button>
         </div>
       </div>
+      <!-- Confirm screen (js/photo-confirm.js, #141) -->
+      <div id="photo-confirm" hidden>
+        <canvas id="photo-confirm-canvas"></canvas>
+        <div class="photo-side">
+          <div id="photo-confirm-help">Check every dot against your board. Tap a dot, then the hole it's really in. The + dot is the LED's long leg.</div>
+          <ul id="photo-parts"></ul>
+          <div class="photo-btns">
+            <button class="btn-secondary" id="photo-rails-a" title="The a-side rail signs are the other way round">a side: swap + / −</button>
+            <button class="btn-secondary" id="photo-rails-j" title="The j-side rail signs are the other way round">j side: swap + / −</button>
+          </div>
+          <button class="btn-simulate" id="photo-build">Build it</button>
+        </div>
+      </div>
       <div id="photo-status"></div>
       <div class="photo-btns">
         <button class="btn-simulate" id="photo-error-sample" hidden>Use sample photo</button>
@@ -313,6 +326,7 @@
 <script src="js/app.js"></script>
 <script src="js/chat.js"></script>
 <script src="samples/samples.js"></script>
+<script src="js/photo-confirm.js"></script>
 <script src="js/photo.js"></script>
 
 </body>
