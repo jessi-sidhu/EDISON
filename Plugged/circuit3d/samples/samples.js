@@ -112,9 +112,10 @@ window.PhotoSamples = {
       { tool: 'add_wire', from: 'g41', to: 'h58', color: 'green' },
     ],
   },
-  // Thandi's real board (#17), the photoexample op-amp blinker as she built it.
-  // PLACEHOLDER board and text until the decode of her photo: docs/boards/README.md's
-  // list with R4 at i20–i23 (ground j23 → bn_23) and pin 4's j17 → bn_17 left out.
+  // Thandi's real board (#17), the photoexample op-amp blinker as she built it,
+  // decoded from her photos (the file is a 2048-px copy of IMG_2013): U1 turned
+  // around and 2 columns off, and pin 4 with no wire to ground. fix turns U1
+  // around at e32 and adds a29 → tn_29.
   'thandi-blinker': {
     file: 'samples/thandi-blinker.jpg',
     cols: 63,
@@ -130,35 +131,39 @@ window.PhotoSamples = {
     credit: 'Photo: Thandi',
     board: [
       { tool: 'place_battery' },
-      { tool: 'place_tl072', hole: 'f14', direction: 'right' },
-      { tool: 'place_potentiometer', hole: 'f9', direction: 'right', resistance: 10000 },
-      { tool: 'place_capacitor', holeA: 'g15', holeB: 'g13', capacitance: '100µF' },   // holeA the + lead
-      { tool: 'place_resistor', holeA: 'i11', holeB: 'i15', resistance: 1000 },
-      { tool: 'place_resistor', holeA: 'e20', holeB: 'f20', resistance: 10000 },
-      { tool: 'place_resistor', holeA: 'h20', holeB: 'h24', resistance: 10000 },
-      { tool: 'place_resistor', holeA: 'i20', holeB: 'i23', resistance: 10000 },
-      { tool: 'place_resistor', holeA: 'g24', holeB: 'g27', resistance: 1000 },
-      { tool: 'place_led', holeA: 'h28', holeB: 'h27', color: 'red' },                // holeA the cathode
+      { tool: 'place_tl072', hole: 'f27', direction: 'right' },                     // as photographed: turned around, 2 columns off
+      { tool: 'place_potentiometer', hole: 'e37', direction: 'left', resistance: 10000 },
+      { tool: 'place_capacitor', holeA: 'd31', holeB: 'd33', capacitance: '100µF' },
+      { tool: 'place_resistor', holeA: 'a36', holeB: 'a31', resistance: 1000 },
+      { tool: 'place_resistor', holeA: 'a22', holeB: 'a19', resistance: 10000 },
+      { tool: 'place_resistor', holeA: 'c22', holeB: 'c17', resistance: 5600 },
+      { tool: 'place_resistor', holeA: 'b26', holeB: 'b22', resistance: 10000 },
+      { tool: 'place_resistor', holeA: 'd15', holeB: 'd10', resistance: 1000 },
+      { tool: 'place_led', holeA: 'c8', holeB: 'c10', color: 'yellow' },            // holeA the cathode
       { tool: 'add_wire', from: 'BAT1.0', to: 'tp_1', color: 'red' },
-      { tool: 'add_wire', from: 'BAT1.1', to: 'tn_2', color: 'black' },
-      { tool: 'add_wire', from: 'tp_13', to: 'a14', color: 'red' },
-      { tool: 'add_wire', from: 'tn_18', to: 'a17', color: 'black' },
-      { tool: 'add_wire', from: 'tp_21', to: 'a20', color: 'red' },
-      { tool: 'add_wire', from: 'b15', to: 'b16', color: 'green' },
-      { tool: 'add_wire', from: 'tp_30', to: 'bp_30', color: 'red' },
-      { tool: 'add_wire', from: 'tn_29', to: 'bn_29', color: 'black' },
-      { tool: 'add_wire', from: 'g10', to: 'g11', color: 'green' },
-      { tool: 'add_wire', from: 'h9', to: 'h14', color: 'blue' },
-      { tool: 'add_wire', from: 'g16', to: 'g20' },
-      { tool: 'add_wire', from: 'j14', to: 'j24', color: 'blue' },
-      { tool: 'add_wire', from: 'j13', to: 'bn_14', color: 'black' },
-      { tool: 'add_wire', from: 'j23', to: 'bn_23', color: 'black' },
-      { tool: 'add_wire', from: 'j28', to: 'bn_27', color: 'black' },
+      { tool: 'add_wire', from: 'BAT1.1', to: 'tn_1', color: 'black' },
+      { tool: 'add_wire', from: 'bp_3', to: 'tp_3', color: 'black' },
+      { tool: 'add_wire', from: 'bn_4', to: 'tn_5', color: 'green' },
+      { tool: 'add_wire', from: 'bp_34', to: 'j32', color: 'white' },
+      { tool: 'add_wire', from: 'bn_28', to: 'i29', color: 'black' },
+      { tool: 'add_wire', from: 'd35', to: 'd36', color: 'red' },
+      { tool: 'add_wire', from: 'c32', to: 'b37', color: 'white' },
+      { tool: 'add_wire', from: 'a33', to: 'tn_31', color: 'red' },
+      { tool: 'add_wire', from: 'd30', to: 'd22', color: 'red' },
+      { tool: 'add_wire', from: 'a32', to: 'a15', color: 'yellow' },
+      { tool: 'add_wire', from: 'a26', to: 'tn_25', color: 'red' },
+      { tool: 'add_wire', from: 'a8', to: 'tn_9', color: 'black' },
+      { tool: 'add_wire', from: 'b19', to: 'tp_19', color: 'white' },
+      { tool: 'add_wire', from: 'b17', to: 'b15', color: 'white' },
     ],
-    explain: 'Two things are off: … (placeholder)',
+    explain: "Two things keep this blinker dark:\n\n1. **U1 is turned around and 2 columns off.** Its dot (pin 1) should face the potentiometer, at e32. Where it sits now, pin 8 (V+) and pin 4 (V−) land in empty columns, so the op-amp gets no power.\n2. **Pin 4 (V−) has no wire to ground.** Even turned the right way, it needs a wire to the − rail.\n\nAsk me to fix it and I'll turn U1 around and add the wire.",
     fix: {
-      reply: "Here's the fix: … (placeholder)",
-      actions: [{ tool: 'add_wire', from: 'j17', to: 'bn_17', color: 'black' }],
+      reply: "Here's the fix: I turn U1 around and move it so pin 1 sits at e32, then wire pin 4 (V−) to the − rail (a29 → tn_29). Accept, then Run: the op-amp gets its ±supply and the LED lights.",
+      actions: [
+        { tool: 'delete_part', part: 'U1' },
+        { tool: 'place_tl072', hole: 'e32', direction: 'left' },
+        { tool: 'add_wire', from: 'a29', to: 'tn_29', color: 'black' },
+      ],
     },
   },
   piranha: {
