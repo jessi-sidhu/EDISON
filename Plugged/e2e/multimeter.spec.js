@@ -190,21 +190,39 @@ test('Ω mode on an unpowered resistor beside the running demo reads its 1 kΩ',
   expect(errors).toEqual([]);
 });
 
-// Where the top of the meter's body is on screen: the top centre of its
-// model's bounding box, the way button.spec.js finds the button's cap.
-function meterPoint(page) {
+// Where the meter is on screen, issue #110. The knob is the dial: the only
+// group nested in the meter's model. `knob` is the top centre of the dial's
+// bounding box; `body` is a point on the case (the model's direct meshes)
+// halfway between the case's left edge and the dial's, level with the dial,
+// so it lands on the face plate away from the knob. Read fresh after every
+// mode change: setValues rebuilds the model.
+function meterPoints(page) {
   return page.evaluate(() => {
     const c = App.state.components.find(x => x.type === 'multimeter');
-    const box = new THREE.Box3().setFromObject(c.group);
-    const p = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+    const dial = c.group.children.find(o => o.isGroup);
+    const dialBox = new THREE.Box3().setFromObject(dial);
+    const caseBox = new THREE.Box3();
+    c.group.children.filter(o => o.isMesh).forEach(o => caseBox.expandByObject(o));
     App.camera.updateMatrixWorld();
-    p.project(App.camera);
     const r = App.renderer.domElement.getBoundingClientRect();
-    return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height, onScreen: Math.abs(p.x) < 1 && Math.abs(p.y) < 1 };
+    const screen = v => {
+      const p = v.clone().project(App.camera);
+      return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height, onScreen: Math.abs(p.x) < 1 && Math.abs(p.y) < 1 };
+    };
+    const dialZ = (dialBox.min.z + dialBox.max.z) / 2;
+    return {
+      knob: screen(new THREE.Vector3((dialBox.min.x + dialBox.max.x) / 2, dialBox.max.y, dialZ)),
+      body: screen(new THREE.Vector3((caseBox.min.x + dialBox.min.x) / 2, caseBox.max.y, dialZ)),
+    };
   });
 }
 
-test('clicking the meter body in 3D turns the dial V → A → Ω', async ({ page }) => {
+const selectedMeter = page => page.evaluate(() => {
+  const s = App.state.selected;
+  return s ? { kind: s.kind, label: s.item.label } : null;
+});
+
+test('clicking the meter body selects it and keeps the mode; a second click, or a click on the knob, turns the dial', async ({ page }) => {
   const errors = watchErrors(page);
   await openDemo(page);
   const holes = await demoHoles(page);
@@ -219,14 +237,36 @@ test('clicking the meter body in 3D turns the dial V → A → Ω', async ({ pag
   });
   await run(page);
   await expect(page.locator('#meter-mode')).toHaveText(/V/);
+  expect(await selectedMeter(page), 'nothing selected yet').toBeNull();
 
-  const at = await meterPoint(page);
-  expect(at.onScreen, 'the meter body is in view').toBe(true);
-  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y).id, at), 'nothing covers the body').toBe('canvas');
-  await page.mouse.click(at.x, at.y);
+  const onCanvas = async (pt, what) => {
+    expect(pt.onScreen, `${what} is in view`).toBe(true);
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y).id, pt), `nothing covers ${what}`).toBe('canvas');
+  };
+
+  // 1. A plain click on the body selects the meter and leaves the dial alone.
+  let at = await meterPoints(page);
+  await onCanvas(at.body, 'the body');
+  await page.mouse.click(at.body.x, at.body.y);
+  await expect.poll(() => selectedMeter(page), { message: 'the click selects MM1' }).toEqual({ kind: 'component', label: 'MM1' });
+  await page.waitForTimeout(200);   // give a wrong dial turn time to show
+  await expect(page.locator('#meter-mode'), 'one click on the body keeps V').toHaveText(/V/);
+  expect(await meterMode(page)).toBe('V');
+
+  // 2. Clicking the body again, now that it's selected, turns V → A.
+  at = await meterPoints(page);
+  await onCanvas(at.body, 'the body');
+  await page.mouse.click(at.body.x, at.body.y);
   await expect(page.locator('#meter-mode')).toHaveText(/A/);
   expect(await meterMode(page)).toBe('A');
-  await page.mouse.click(at.x, at.y);
+
+  // 3. A click on the knob turns A → Ω with the meter NOT selected: the
+  // knob needs no prior selection.
+  await page.evaluate(() => App.deselect());
+  expect(await selectedMeter(page), 'deselected before the knob click').toBeNull();
+  at = await meterPoints(page);
+  await onCanvas(at.knob, 'the knob');
+  await page.mouse.click(at.knob.x, at.knob.y);
   await expect(page.locator('#meter-mode')).toHaveText(/Ω/);
   expect(await meterMode(page)).toBe('Ω');
   expect(errors).toEqual([]);

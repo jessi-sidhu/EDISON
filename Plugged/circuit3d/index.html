@@ -50,6 +50,17 @@
     </div>
 
     <div class="topbar-actions">
+      <div class="labs-menu-wrap">
+        <button class="btn-secondary" id="labs-menu-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="labs-menu" title="Open a lab starter circuit">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+          ENSC 220 Labs
+        </button>
+        <!-- Lab items: filled in by js/tools/labs.js -->
+        <div id="labs-menu" role="menu" aria-label="ENSC 220 Labs" hidden></div>
+      </div>
       <button class="btn-secondary" onclick="App.saveCircuit()" title="Download circuit as .sparky file">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -254,6 +265,7 @@
 <script src="js/tools/thevenin.js"></script>
 <script src="js/tools/flow-dots.js"></script>
 <script src="js/tools/meter-display.js"></script>
+<script src="js/tools/labs.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/ids.js"></script>
 <script src="js/history.js"></script>

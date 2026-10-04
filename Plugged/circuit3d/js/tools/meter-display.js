@@ -9,8 +9,10 @@
 //  mode it is Multimeter.ohms(), or "--" and why (#meter-note). Not
 //  simulating: "--".
 //
-//  A click on the meter's body in 3D (select mode) turns the dial
-//  V → A → Ω → V through App.setValues. Never stops or prevents an event.
+//  A click on the meter in 3D (select mode) turns the dial V → A → Ω → V
+//  through App.setValues when it lands on the dial knob, or on the body of
+//  a meter that was already selected. A first click on the body only
+//  selects it (interaction.js). Never stops or prevents an event.
 //
 //  LOADING
 //  ───────
@@ -90,11 +92,12 @@
   });
   setInterval(sync, POLL_MS);
 
-  // ── Turning the dial: a click on the meter's body ────────────
+  // ── Turning the dial: a click on the knob, or on a selected meter ──
   let down = null;
   let raycaster = null;
 
-  // The meter whose model is the first thing under the click, or null.
+  // { comp, knob } for the meter whose model is the first thing under the
+  // click (knob: the hit is inside the dial, the meter's nested group), or null.
   function meterAt(e) {
     const canvas = App.renderer.domElement;
     const r = canvas.getBoundingClientRect();
@@ -108,20 +111,23 @@
     if (!hit) return null;
     let comp = null;
     for (let o = hit.object; o && !comp; o = o.parent) comp = App.state.components.find(c => c.group === o) || null;
-    return comp && comp.type === 'multimeter' ? comp : null;
+    return comp && comp.type === 'multimeter' ? { comp, knob: hit.object.parent !== comp.group } : null;
   }
 
+  // What was selected is read here: interaction.js selects on pointerup, before this file's handler.
   document.addEventListener('pointerdown', e => {
     down = window.App && App.renderer && e.target === App.renderer.domElement && e.isPrimary && e.button === 0
-      ? { x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+      ? { x: e.clientX, y: e.clientY, id: e.pointerId, selected: App.state.selected && App.state.selected.item } : null;
   });
   document.addEventListener('pointerup', e => {
     if (!down || e.pointerId !== down.id) return;
     const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > DRAG_PX;
+    const wasSelected = down.selected;
     down = null;
     if (moved || App.state.mode !== 'select') return;
-    const comp = meterAt(e);
-    if (!comp) return;
+    const at = meterAt(e);
+    if (!at || (!at.knob && at.comp !== wasSelected)) return;
+    const comp = at.comp;
     const next = MODES[(MODES.indexOf(comp.values.mode) + 1) % MODES.length];
     App.setValues(comp, { mode: next });
     sync();

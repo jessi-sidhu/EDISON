@@ -137,3 +137,37 @@
   color: #1a1a1a;
   line-height: 1.4;
 }
+
+/* ENSC 220 Labs menu (#98), built by js/tools/labs.js */
+
+.labs-menu-wrap { position: relative; }
+
+#labs-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 70;
+  min-width: 240px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.13);
+}
+#labs-menu[hidden] { display: none; }
+
+.labs-menu-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.labs-menu-item:hover,
+.labs-menu-item:focus-visible { background: #f5f2ed; outline: none; }

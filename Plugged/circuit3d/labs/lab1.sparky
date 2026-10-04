@@ -1,0 +1,155 @@
+{
+  "version": 1,
+  "name": "ENSC 220 Lab 1: Series-parallel resistors",
+  "thumbnail": "",
+  "components": [
+    {
+      "type": "bench_supply",
+      "id": "PS1",
+      "label": "PS1",
+      "values": {
+        "voltage": 10,
+        "limit": 0.5
+      },
+      "holeRefs": null,
+      "position": {
+        "x": 16.4,
+        "z": -1
+      }
+    },
+    {
+      "type": "resistor",
+      "id": "R1",
+      "label": "R1",
+      "values": {
+        "resistance": 1000
+      },
+      "holeRefs": [
+        {
+          "pin": "lead1",
+          "col": 9,
+          "row": "a"
+        },
+        {
+          "pin": "lead2",
+          "col": 13,
+          "row": "a"
+        }
+      ],
+      "position": {
+        "x": 0,
+        "z": 0
+      }
+    },
+    {
+      "type": "resistor",
+      "id": "R2",
+      "label": "R2",
+      "values": {
+        "resistance": 2200
+      },
+      "holeRefs": [
+        {
+          "pin": "lead1",
+          "col": 13,
+          "row": "c"
+        },
+        {
+          "pin": "lead2",
+          "col": 17,
+          "row": "c"
+        }
+      ],
+      "position": {
+        "x": 0,
+        "z": 0
+      }
+    },
+    {
+      "type": "resistor",
+      "id": "R3",
+      "label": "R3",
+      "values": {
+        "resistance": 3300
+      },
+      "holeRefs": [
+        {
+          "pin": "lead1",
+          "col": 13,
+          "row": "e"
+        },
+        {
+          "pin": "lead2",
+          "col": 17,
+          "row": "e"
+        }
+      ],
+      "position": {
+        "x": 0,
+        "z": 0
+      }
+    }
+  ],
+  "wires": [
+    {
+      "id": "W1",
+      "startHole": null,
+      "endHole": {
+        "col": 49,
+        "row": "tp"
+      },
+      "startCompIdx": 0,
+      "startPinIdx": 0,
+      "endCompIdx": -1,
+      "endPinIdx": -1,
+      "startPin": "pos",
+      "color": 15680580
+    },
+    {
+      "id": "W2",
+      "startHole": null,
+      "endHole": {
+        "col": 49,
+        "row": "tn"
+      },
+      "startCompIdx": 0,
+      "startPinIdx": 1,
+      "endCompIdx": -1,
+      "endPinIdx": -1,
+      "startPin": "com",
+      "color": 1118481
+    },
+    {
+      "id": "W3",
+      "startHole": {
+        "col": 9,
+        "row": "tp"
+      },
+      "endHole": {
+        "col": 9,
+        "row": "b"
+      },
+      "startCompIdx": -1,
+      "startPinIdx": -1,
+      "endCompIdx": -1,
+      "endPinIdx": -1,
+      "color": 15680580
+    },
+    {
+      "id": "W4",
+      "startHole": {
+        "col": 17,
+        "row": "a"
+      },
+      "endHole": {
+        "col": 17,
+        "row": "tn"
+      },
+      "startCompIdx": -1,
+      "startPinIdx": -1,
+      "endCompIdx": -1,
+      "endPinIdx": -1,
+      "color": 1118481
+    }
+  ]
+}
