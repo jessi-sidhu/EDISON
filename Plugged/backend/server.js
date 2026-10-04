@@ -8,7 +8,9 @@
  * POST /api/photo          { image, grid, sample? }        →  { reading, provider, model, ms, key }
  * POST /api/photo/leads    { key, items }                  →  { items, provider, model, ms }
  *                          (Accept application/x-ndjson: a line per item as it settles, then { done, … })
- * GET  /api/health
+ * POST /api/voice/stt      { audio } (a base64 audio data URL)  →  { text }
+ * POST /api/voice/tts      { text } (1–600 characters)          →  audio/mpeg, streamed
+ * GET  /api/health                                         →  { status, model, voice }
  * POST /api/course/canvas/sync                             →  { ok, demo, syncedAt }  (Edison demo, no real Canvas)
  * GET  anything else       the app's static files
  */
@@ -16,9 +18,11 @@
 const http = require('http');
 const fs   = require('fs');
 const path = require('path');
+const { Readable, pipeline } = require('stream');
 const { makeAsk, isFixRequest } = require('./ai-providers');
 const { readPhoto, isSafeId } = require('./photo-reader');
 const { readLeads } = require('./photo-leads');
+const Voice = require('./voice');
 // The board's size: the same file the 3D editor builds the board from.
 const { COLS, TOTAL_HOLES, BODY_ROWS } = require('../circuit3d/js/board-geometry.js');
 // The parts registry: every part's tool, prompt lines and circuit behaviour.
@@ -1495,14 +1499,18 @@ function sendJSON(res, status, obj) {
 const MAX_BODY_BYTES  = 256 * 1024;
 const MAX_PHOTO_BYTES = 4 * 1024 * 1024;
 const MAX_LEADS_BYTES = 6 * 1024 * 1024;   // up to 24 crops
+const MAX_VOICE_BYTES = 2 * 1024 * 1024 + 64 * 1024;   // ~60 s of opus, as base64 JSON
+const MAX_TTS_BYTES   = 8 * 1024;
 
 const RATE_WINDOW_MS       = 60000;
 const ASK_MAX_PER_WINDOW   = 20;
 const PHOTO_MAX_PER_WINDOW = 6;
 const LEADS_MAX_PER_WINDOW = 6;
+const VOICE_MAX_PER_WINDOW = 20;   // stt and tts together
 const askHits   = new Map();
 const photoHits = new Map();
 const leadsHits = new Map();
+const voiceHits = new Map();
 
 // Behind a proxy (Render and similar) every request arrives from the proxy,
 // so the limit would be shared by every visitor. Only trust the header when
@@ -1681,6 +1689,66 @@ async function handleLeads(req, res) {
   if (!res.writableEnded && !res.destroyed) res.end();
 }
 
+// ── /api/voice/stt and /api/voice/tts (#12) ──────────────────
+// ElevenLabs behind the server (backend/voice.js), so the key never reaches
+// the page. Env is read per request. One [voice] line per request that
+// reached a provider; never the audio, the transcript, an upstream body or the key.
+const VOICE_STATUS  = { BAD_AUDIO: 400, BAD_TEXT: 400, VOICE_OFF: 503, VOICE_TIMEOUT: 504, VOICE_FAILED: 502 };
+const VOICE_RATE    = { reply: 'Too many voice requests. Wait a moment.', code: 'RATE_LIMITED' };
+const MAX_TTS_CHARS = 600;
+const voiceCode  = e => (e && VOICE_STATUS[e.code] ? e.code : 'VOICE_FAILED');
+const voiceError = (res, code) => sendJSON(res, VOICE_STATUS[code], { reply: Voice.VOICE_REPLY[code], code });
+const logVoice   = (route, outcome, started, tail = '') => console.log(`[voice] ${route} ${outcome} ${Date.now() - started} ms${tail}`);
+
+// The JSON body's `key`, or undefined when the body isn't a JSON object.
+function voiceField(raw, key) {
+  try {
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' ? o[key] : undefined;
+  } catch { return undefined; }
+}
+
+async function handleVoiceStt(req, res) {
+  if (rateLimited(req, voiceHits, VOICE_MAX_PER_WINDOW)) return sendJSON(res, 429, VOICE_RATE);
+  const raw = await readBody(req, res, MAX_VOICE_BYTES, { reply: 'That recording is too long.', code: 'TOO_LARGE' });
+  if (raw === null) return;
+  const clip = Voice.parseAudioDataUrl(voiceField(raw, 'audio'));
+  if (!clip) return voiceError(res, 'BAD_AUDIO');
+  if (Voice.voiceMode() === 'off') return voiceError(res, 'VOICE_OFF');
+  const started = Date.now();
+  try {
+    const text = await Voice.transcribe(clip);
+    logVoice('stt', 200, started);
+    return sendJSON(res, 200, { text });
+  } catch (e) {
+    const code = voiceCode(e);
+    logVoice('stt', `${VOICE_STATUS[code]} ${code}`, started);
+    return voiceError(res, code);
+  }
+}
+
+async function handleVoiceTts(req, res) {
+  if (rateLimited(req, voiceHits, VOICE_MAX_PER_WINDOW)) return sendJSON(res, 429, VOICE_RATE);
+  const raw = await readBody(req, res, MAX_TTS_BYTES, { reply: 'That reply is too long to speak.', code: 'TOO_LARGE' });
+  if (raw === null) return;
+  const said = voiceField(raw, 'text');
+  const text = typeof said === 'string' ? said.trim() : '';
+  if (!text || text.length > MAX_TTS_CHARS) return voiceError(res, 'BAD_TEXT');
+  if (Voice.voiceMode() === 'off') return voiceError(res, 'VOICE_OFF');
+  const started = Date.now();
+  let audio;
+  try {
+    audio = Readable.fromWeb((await Voice.speak(text)).body);
+  } catch (e) {
+    const code = voiceCode(e);
+    logVoice('tts', `${VOICE_STATUS[code]} ${code}`, started);
+    return voiceError(res, code);
+  }
+  const firstByte = Date.now() - started;
+  res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' });
+  pipeline(audio, res, err => console.log(`[voice] tts 200 ${firstByte} ms to first byte${err ? ', stream cut off' : ''}`));
+}
+
 // A sent board in the board-model shape; anything else is ignored, as
 // from an older client.
 const isBoard = b => !!b && Array.isArray(b.parts) && Array.isArray(b.wires);
@@ -1708,7 +1776,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && req.url === '/api/health') {
-    return sendJSON(res, 200, { status: 'ok', model: MODEL_NAME });
+    return sendJSON(res, 200, { status: 'ok', model: MODEL_NAME, voice: Voice.voiceMode() });
   }
 
   // The Edison course hub's Canvas dummy: a sync that worked, marked as a demo. No real Canvas.
@@ -1738,6 +1806,8 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && req.url === '/api/photo') return handlePhoto(req, res);
   if (req.method === 'POST' && req.url === '/api/photo/leads') return handleLeads(req, res);
+  if (req.method === 'POST' && req.url === '/api/voice/stt') return handleVoiceStt(req, res);
+  if (req.method === 'POST' && req.url === '/api/voice/tts') return handleVoiceTts(req, res);
 
   // ── Static file serving ───────────────────────────────────
   const STATIC_ROOT = path.join(__dirname, '..');
@@ -1806,6 +1876,7 @@ if (require.main === module) {
     console.log(`⚡ Sparky AI  →  http://localhost:${PORT}`);
     console.log(`   AI    : ${AI_PROVIDER}`);
     console.log(`   Model : ${MODEL_NAME}`);
+    console.log(`   Voice : ${Voice.voiceMode()}`);
     console.log(`   Health: http://localhost:${PORT}/api/health`);
   });
 }

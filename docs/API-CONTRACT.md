@@ -746,6 +746,34 @@ A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `
 - `GET /api/course/ta-feed` → `200 { demo: true, events: [{ at: <ISO>, lab, step, label, text }] }` (sample events, timestamps relative to now)
 - Callers fall back to `CourseData` sample data when these 404 (deployed hosting has no Node server).
 
+## Voice (V1, #12)
+The student talks to Edison and hears the answer. ElevenLabs does the speech behind the server, so **the key never reaches the page**. The hold-to-talk UI is V2, a later issue.
+
+### `POST /api/voice/stt` and `POST /api/voice/tts`
+- **Owner:** `backend/voice.js` (`{ parseAudioDataUrl, voiceMode, transcribe, speak, VOICE_REPLY }`; `transcribe(clip, { env, fetch })` and `speak(text, { env, fetch })` default to `process.env` and the global `fetch`), routed by `backend/server.js`. **Called by:** the chat's voice UI (V2).
+- **`/api/voice/stt` request:** `{ audio }`, a base64 data URL `data:audio/<webm|ogg|mp4|mpeg|wav>[;codecs=…];base64,…`, inside JSON as `/api/photo` sends its image (`readBody` decodes UTF-8, so raw binary would be corrupted). **Response 200:** `{ text }`, the transcript.
+- **`/api/voice/tts` request:** `{ text }`, 1 to 600 characters after trimming. **Response 200:** `audio/mpeg` (`mp3_44100_128`), streamed as ElevenLabs sends it, `Cache-Control: no-store`.
+- **Errors:** JSON `{ reply, code }`.
+
+| Status | `code` | When | `reply` |
+|---|---|---|---|
+| 400 | `BAD_AUDIO` | stt: `audio` missing or not a base64 audio data URL of a listed type, or the body isn't JSON | `"That recording could not be read. Try again."` |
+| 400 | `BAD_TEXT` | tts: `text` missing, not a string, blank, or over 600 characters after trimming, or the body isn't JSON | `"Nothing to say."` |
+| 413 | `TOO_LARGE` | stt: the body is over 2 MB + 64 KB (about a minute of opus); tts: over 8 KB | `"That recording is too long."` / `"That reply is too long to speak."` |
+| 429 | `RATE_LIMITED` | more than 20 voice requests a minute from one IP (stt and tts share one map, separate from `/api/ask`'s; `TRUST_PROXY` as for `/api/ask`), checked before the body is read | `"Too many voice requests. Wait a moment."` |
+| 502 | `VOICE_FAILED` | ElevenLabs answered an error (its body is never read or passed on) or couldn't be reached | `"Voice failed. Try again or type your question."` |
+| 503 | `VOICE_OFF` | `voiceMode()` is `'off'` | `"Voice is off on this server."` |
+| 504 | `VOICE_TIMEOUT` | ElevenLabs past `VOICE_TIMEOUT_MS` (default 10000); the call is aborted | `"I didn't catch that in time. Try again."` |
+
+- **Providers:** `VOICE_PROVIDER` = `elevenlabs | fixture | off`, read per request. Unset or blank, it is `elevenlabs` when `ELEVENLABS_API_KEY` is set, otherwise `off`; `elevenlabs` with no key is `off`. The names are in `.env.example`.
+  - STT: `POST https://api.elevenlabs.io/v1/speech-to-text`, multipart `file` (the clip) and `model_id` (`ELEVENLABS_STT_MODEL`, default `scribe_v2`), the key in the `xi-api-key` header (no hand-set `Content-Type`: fetch writes the boundary). The 200's JSON `text` is the transcript.
+  - TTS: `POST https://api.elevenlabs.io/v1/text-to-speech/<voice>/stream?output_format=mp3_44100_128`, JSON `{ text, model_id }` (`ELEVENLABS_TTS_MODEL`, default `eleven_flash_v2_5`), the key in `xi-api-key`. The voice is `ELEVENLABS_VOICE_ID`, default `JBFqnCBsd6RMkjVDRZzb`.
+  - **Deadline:** one per ElevenLabs call, `VOICE_TIMEOUT_MS` (default 10000), on `setTimeout` and an `AbortController`. STT's covers reading the transcript; TTS's ends when the audio starts.
+- **Fixtures** (`Plugged/test/fixtures/voice/`): `VOICE_PROVIDER=fixture` answers stt with `stt.json`'s `text` and tts with `tts.mp3`, never calling out, even with a key set. The Playwright server runs with it and unit tests stub `fetch`, so no test reaches ElevenLabs.
+- **Health:** `GET /api/health` → `{ status, model, voice }`, `voice` being `voiceMode()`: `'elevenlabs'`, `'fixture'` or `'off'`. Never the key.
+- **Logging:** one line per request that reached a provider, e.g. `[voice] stt 200 840 ms`, `[voice] stt 504 VOICE_TIMEOUT 10003 ms`, `[voice] tts 200 310 ms to first byte`. Never the audio, the transcript, an upstream body or the key.
+- **Mock:** stt `{ text: 'Why is my output flat?' }`; tts the bytes of `tts.mp3`.
+
 ## Testing contract (a part is done when all of these pass)
 1. **Registry check**, automatic for every part: every rule in `PartDefinition` and `Placement`.
 2. **Known answers:** every `examples[]` entry is run through `Sim.analyze` and matches `expect`.
