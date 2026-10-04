@@ -41,7 +41,3 @@ html[data-ui="edison"] .result-callout-sub { margin-top: 3px; color: #8A8A8A; le
 html[data-ui="edison"] .result-callout-led { display: none; flex: none; box-sizing: border-box; width: 6px; height: 6px; }
 html[data-ui="edison"] .result-callout[data-level="fault"] .result-callout-led { display: inline-block; background: #FF3D7F; }
 html[data-ui="edison"] .result-callout[data-level="warn"] .result-callout-led { display: inline-block; border: 1px solid #FF3D7F; }
-
-/* A part off the canvas: its dot is a ring on the canvas edge, toward the part */
-html[data-ui="edison"] .result-callout-dot[data-off="true"] { fill: #101010; stroke: #F4F4F4; stroke-width: 1; }
-html[data-ui="edison"] .result-callout-dot[data-off="true"][data-level="fault"] { stroke: #FF3D7F; }

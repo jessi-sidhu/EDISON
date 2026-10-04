@@ -4,8 +4,9 @@
 //  the measured values (.ed-val) and the board's part labels (.ed-tag) in
 //  Edison's replies, draws a leader from a reply to the first part it
 //  names, names the chat Edison (with the Lab HUD's header row, issue
-//  #192), sends a ?ask= request once, and gives the Lab HUD top bar its
-//  status LEDs and RUNNING cell (#189). chat.js doesn't change; in
+//  #192), sends a ?ask= request once, gives the Lab HUD top bar its
+//  status LEDs and RUNNING cell (#189), and moves the inspector off the
+//  chat column into the canvas frame (#201). chat.js doesn't change; in
 //  classic none of this runs. The look is circuit3d/css/edison-hud.css
 //  and edison-hud-chat.css. The pure half loads in Node for
 //  test/edison-skin.test.js.
@@ -207,12 +208,22 @@
     doc.addEventListener('plugged:sim-stop', () => { cell.hidden = true; });
   }
 
+  // The inspector (#201): classic keeps it at the top of the chat column,
+  // where in Edison it covered the conversation. It moves into the canvas
+  // frame (edison-hud-canvas.css puts it at the right edge, under Clear All).
+  // The same element moves, so Inspector.mount's reference still holds.
+  function hudInspector(doc) {
+    const inspector = doc.getElementById('inspector'), wrap = doc.getElementById('canvas-wrap');
+    if (inspector && wrap) wrap.append(inspector);
+  }
+
   function wire(win) {
     const doc = win.document;
     const start = () => {
       rename(doc);
       hudLeds(win);
       hudClock(win);
+      hudInspector(doc);
       const log = doc.getElementById('sparky-messages');
       if (log) new win.MutationObserver(muts => {
         for (const m of muts) for (const n of m.addedNodes) {

@@ -53,8 +53,9 @@
     return `Untitled (${n})`;
   }
 
-  // How far past the board's end a battery sits (user and AI placement).
-  App.BATTERY_MARGIN = 2.5;
+  // How far past the board's end a battery sits (user and AI placement):
+  // the bench's own margin (bench.js).
+  App.BATTERY_MARGIN = Bench.MARGIN;
 
   // Where the AI's battery goes: just past the right-hand end of the board,
   // right behind the top + and − rails so its wires drop straight in.
@@ -273,10 +274,15 @@
   // One placement for every registry part; rebuilding a board (load, undo)
   // uses it. where: the board holes, one per pin, or { x, z } off the board.
   // opts.controls: settings over the defaults (a loaded knob's position),
-  // drawn that way from the start.
+  // drawn that way from the start. A new part must fit the bench (#197: one
+  // bench supply, one function generator, two multimeters): one more is not
+  // placed (null) and the hint says why. A saved part (opts.label: a load,
+  // undo or redo) comes back as saved.
   App.placePart = function (type, where, values, opts) {
     const def = Parts.get(type);
     if (!def) return null;
+    const full = !(opts && opts.label) && Bench.refusal(type, state.components);
+    if (full) { App.setHint(`${partLabel(type, opts)} not placed: ${full}`, 6000); return null; }
     pushHistory();
     const vals = checkedValues(type, values);
     const ctl  = ownControls(type, opts && opts.controls);

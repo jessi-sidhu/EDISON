@@ -69,7 +69,9 @@ test('App.resetCamera puts the camera back on App.CAMERA.home', async ({ page })
 // behind the board they go where you point, BATTERY_MARGIN clear of its long
 // edge; a point just past that edge moves out to the clear line; level with
 // the board they go past its ends, as before; a spot in front survives a
-// reload. The preview stands where the click then puts the part.
+// reload. The preview stands where the click then puts the part. The bench
+// has two multimeters (#197), so the edge one is deleted before the third
+// spot is tried.
 const GUEST_KEY = 'sparky_local_projects:guest';   // SparkyStorage.projectsKey(null)
 
 function screenAt(page, at) {
@@ -124,6 +126,7 @@ test('a multimeter goes where you point in front of the board, just past its lon
     expect(s.z, 'just past the long edge: out to the clear line').toBeCloseTo(D + M, 2);
   }
 
+  await page.evaluate(() => App.deletePart(App.state.components[1]));   // a third meter would be refused (#197)
   const level = await placeMeterAt(page, { x: W - 1, z: 0 });
   for (const s of [level.ghost, level.placed]) {
     expect(s.x, 'level with the board: past its end, as before').toBeCloseTo(W + M, 2);
@@ -133,14 +136,15 @@ test('a multimeter goes where you point in front of the board, just past its lon
   // Autosave, then reload: the meters come back where they were.
   await expect.poll(() => page.evaluate(k => {
     const list = JSON.parse(localStorage.getItem(k) || '[]');
-    const rec = list.find(p => p.components && p.components.filter(c => c.type === 'multimeter').length === 3);
+    const rec = list.find(p => p.components && p.components.filter(c => c.type === 'multimeter').length === 2
+      && p.components.some(c => c.type === 'multimeter' && c.position && Math.abs(c.position.z) < 0.5));
     return rec ? rec.components.filter(c => c.type === 'multimeter').map(c => c.position) : null;
   }, GUEST_KEY), { timeout: 10_000 }).not.toBeNull();
   await page.reload();
-  await page.waitForFunction(() => window.App && App.state && App.state.components.filter(c => c.type === 'multimeter').length === 3);
+  await page.waitForFunction(() => window.App && App.state && App.state.components.filter(c => c.type === 'multimeter').length === 2);
   const back = await page.evaluate(() => App.state.components.filter(c => c.type === 'multimeter')
     .map(c => ({ x: c.group.position.x, z: c.group.position.z })));
-  [front.placed, edge.placed, level.placed].forEach((s, i) => {
+  [front.placed, level.placed].forEach((s, i) => {
     expect(back[i].x, `meter ${i + 1} x after a reload`).toBeCloseTo(s.x, 2);
     expect(back[i].z, `meter ${i + 1} z after a reload`).toBeCloseTo(s.z, 2);
   });

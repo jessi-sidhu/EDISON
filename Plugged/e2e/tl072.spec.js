@@ -1,7 +1,7 @@
 // The TL072 dual op-amp in the page, issue #117: picked from the generated
 // sidebar, its ghost shown across the centre gap and placed with a click;
-// wired by hand as an inverting −10 amplifier on the bench supply's ±12 V
-// with 0.50 V in, Run, and the hover card on OUT1 shows −5.0 V. /api/ask is
+// wired by hand as an inverting −5 amplifier on the bench supply's ±12 V
+// with 1 V in, Run, and the hover card on OUT1 shows −5.0 V. /api/ask is
 // stubbed; no AI is called. Guest only; Google sign-in stays a manual QA
 // case.
 //
@@ -26,12 +26,14 @@
 // IN2− e32, OUT2 e31, V+ e30):
 //   PS1 ±12 V: + → tp_63, COM → tn_63, − → bn_63; tn_1 → bp_1 (bp is COM).
 //   V+ tp_30 → a30; V− bn_33 → j33; IN1+ j32 → bp_32.
-//   PS2 at 0.50 V: + → g35, COM → tn_62. Rin 10 kΩ i35–i31 (IN1−).
+//   BAT1 at 1 V (the bench has one supply, #197): + → g35, − → tn_62.
+//   Rin 20 kΩ i35–i31 (IN1−).
 //   Rf 100 kΩ j30 (OUT1)–j34, h34 → h31 (IN1−). Half 2 left unused.
 //   Nothing crosses OUT1's column in rows g–i, and the one part in it (Rf,
 //   in row j) sits below the default camera's line of sight to f30, so
 //   hovering OUT1's pin reaches the chip, not a resistor in front of it.
-//   Vout1 = −5.00038 V (hand-computed in test/tl072.test.js).
+//   Vout1 = −(100k / 20k) · 1 V ≈ −5.00 V (the −10 version, 0.5 V through
+//   10 kΩ, is hand-computed in test/tl072.test.js: −5.00038 V).
 //
 // The pin-out in the inspector, issue #132 (the second test). Selecting the
 // TL072 shows a top-view DIP-8 diagram under its rows; a resistor shows none.
@@ -132,7 +134,7 @@ const cardText = page => page.evaluate(() => {
   return card && !card.hidden ? card.textContent : null;
 });
 
-test('by hand: pick the TL072, its ghost straddles the gap and a click places it; wired as an inverting −10 on ±12 V with 0.50 V in, Run, and the hover card on OUT1 shows −5.0 V', async ({ page }) => {
+test('by hand: pick the TL072, its ghost straddles the gap and a click places it; wired as an inverting −5 on ±12 V with 1 V in, Run, and the hover card on OUT1 shows −5.0 V', async ({ page }) => {
   test.setTimeout(90_000);   // slow runner (software WebGL)
   const errors = watchErrors(page);
   await openEditor(page);
@@ -184,17 +186,17 @@ test('by hand: pick the TL072, its ghost straddles the gap and a click places it
     const wire = (a, b) => { App.state.wireStart = endAt(a); App.finishWire(endAt(b)); };
     const spot = App.batterySpot();
     App.placePart('bench_supply', spot, { voltage: 12 });
-    App.placePart('bench_supply', { x: spot.x, z: spot.z + 3 }, { voltage: 0.5 });
-    App.placePart('resistor', [hole('i' + (col.in1n + 4)), hole('i' + col.in1n)], { resistance: 10000 });
+    App.placePart('battery', { x: spot.x, z: spot.z + 3 }, { voltage: 1 });
+    App.placePart('resistor', [hole('i' + (col.in1n + 4)), hole('i' + col.in1n)], { resistance: 20000 });
     App.placePart('resistor', [hole('j' + col.out1), hole('j' + (col.out1 + 4))], { resistance: 100000 });
     for (const [a, b] of [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63'], ['PS1.2', 'bn_63'], ['tn_1', 'bp_1'],
                           ['tp_' + col.vpos, 'a' + col.vpos], ['bn_' + col.vneg, 'j' + col.vneg],
                           ['j' + col.in1p, 'bp_' + col.in1p],
-                          ['PS2.0', 'g' + (col.in1n + 4)], ['PS2.1', 'tn_62'], ['h' + (col.out1 + 4), 'h' + col.in1n]]) {
+                          ['BAT1.0', 'g' + (col.in1n + 4)], ['BAT1.1', 'tn_62'], ['h' + (col.out1 + 4), 'h' + col.in1n]]) {
       wire(a, b);
     }
   }, { col: { out1: col(0), in1n: col(1), in1p: col(2), vneg: col(3), vpos: col(7) } });
-  expect(await page.evaluate(() => App.state.components.map(c => c.label).sort())).toEqual([chip, 'PS1', 'PS2', 'R1', 'R2'].sort());
+  expect(await page.evaluate(() => App.state.components.map(c => c.label).sort())).toEqual([chip, 'BAT1', 'PS1', 'R1', 'R2'].sort());
   expect(await page.evaluate(() => App.state.wires.length)).toBe(10);
 
   await page.locator('#sim-run-btn').click();

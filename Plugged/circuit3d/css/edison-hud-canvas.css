@@ -113,6 +113,14 @@ html[data-ui="edison"] #reset-cam-btn::after { content: '+'; content: '+' / ''; 
 html[data-ui="edison"] #clear-all-btn:hover { background: var(--hc-k); border-color: var(--hc-pink); color: var(--hc-pink); }
 html[data-ui="edison"] #reset-cam-btn:hover { background: var(--hc-k); border-color: var(--hc-ink); color: var(--hc-ink); }
 
+/* ── The inspector (#201): edison/skin.js moves it from the chat column into
+   the frame. It sits at the right edge under Clear All, clear of Reset View,
+   and scrolls when a part has more rows than fit. ── */
+html[data-ui="edison"] #canvas-wrap > #inspector {
+  position: absolute; top: 52px; right: 52px; width: 240px; box-sizing: border-box;
+  max-height: calc(100% - 104px); border: 1px solid var(--border-dark); border-radius: 0;
+}
+
 /* ── Scope: a thin-framed instrument under a caps caption ── */
 html[data-ui="edison"] #scope {
   bottom: 44px; right: 44px; padding: 6px 8px 8px; background: var(--hc-veil); border: 0; border-radius: 0; box-shadow: none;

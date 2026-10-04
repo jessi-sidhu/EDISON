@@ -20,6 +20,7 @@
   const Ids      = inNode ? require('./ids.js') : window.App;
   const Parts    = inNode ? require('./parts') : window.Parts;
   const GEOMETRY = inNode ? require('./board-geometry.js') : window.App.BOARD_GEOMETRY;
+  const Bench    = inNode ? require('./bench.js') : window.Bench;
 
   // A wire end the AI names: a component pin by label ("BAT1.0") or the old
   // form ("battery_0_pin0"), or a hole. Pin k is the same index in both.
@@ -111,8 +112,8 @@
     return holes.every(Boolean) ? holes : null;
   }
 
-  // place_<type> for any registry part: its holes (one per pin), or the
-  // board's spot for an off-board part.
+  // place_<type> for any registry part: its holes (one per pin), or, off
+  // the board, a spot of its own on the bench.
   function placeOne(a, board) {
     const def = partFor(a.tool);
     if (!def) {
@@ -121,9 +122,13 @@
     }
     let where;
     if (def.place.kind === 'offboard') {
-      // The board says where an AI battery goes (App.batterySpot in a page).
-      const { x, z } = board.batterySpot();
-      where = { x, z };
+      // The bench's limits, then its next free spot (#197): the battery on
+      // the board's battery spot (App.batterySpot in a page) while that is
+      // free, an instrument in front of the board.
+      const parts = board.components();
+      const full  = Bench.refusal(def.type, parts);
+      if (full) { note(board, `${Ids.nextLabel(parts, def.type)} not placed: ${full}`); return false; }
+      where = Bench.spotFor(def.type, Bench.spotsOf(parts), board.batterySpot());
     } else if (def.place.kind === 'span') {
       where = [holeOf(a.holeA, board), holeOf(a.holeB, board)];
       if (!where.every(Boolean)) return false;
@@ -237,6 +242,27 @@
     });
   }
 
+  // Where each action's off-board part will stand once accepted (#197), as
+  // placeOne puts it: { x, z }, or null for an action that places nothing
+  // off the board or that the bench's limits refuse. Like predictLabels, it
+  // walks the board as it will be: delete_all empties it, delete_part takes
+  // its part out.
+  function predictSpots(actions, components, batterySpot) {
+    let parts = (components || []).slice();
+    return (actions || []).map(a => {
+      if (a.tool === 'delete_all') { parts = []; return null; }
+      if (a.tool === 'delete_part') { const gone = Ids.findByLabel(parts, a.part); parts = parts.filter(c => c !== gone); return null; }
+      const def = typeof a.tool === 'string' && a.tool.startsWith('place_') ? partFor(a.tool) : null;
+      if (!def) return null;
+      const label = Ids.nextLabel(parts, def.type);
+      if (def.place.kind !== 'offboard') { parts.push({ type: def.type, label }); return null; }
+      if (Bench.refusal(def.type, parts)) return null;
+      const spot = Bench.spotFor(def.type, Bench.spotsOf(parts), batterySpot);
+      parts.push({ type: def.type, label, position: spot });
+      return spot;
+    });
+  }
+
   // The HTML an AI reply shows: escaped first, so the model's text can never
   // be markup, then **x** turned into <strong>x</strong> (issue #62).
   const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -305,7 +331,7 @@
   // 60 s DeepSeek deadline, so the server's clear 504 normally arrives first.
   const ASK_TIMEOUT_MS = 75000;
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, photoContext, EDITS, ROTATION, ASK_TIMEOUT_MS };
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, predictSpots, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, photoContext, EDITS, ROTATION, ASK_TIMEOUT_MS };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -432,16 +458,19 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     // reach pins that do not exist yet. Their pin positions are keyed (lower
     // case) by the label Accept will give each one ("bat1.0") and by the old
     // form ("battery_0_pin0"). A delete_all ahead of them restarts numbering.
+    // Each stands on the spot Accept will give it; one over the bench's
+    // limits gets none, and no ghost (#197).
     const pendingPins = {};
     const ghosts = [];
     const labels = Chat.predictLabels(actions, App.state.components);
+    const spots  = Chat.predictSpots(actions, App.state.components, board.batterySpot());
     const counts = {};
     const countOf = type => App.state.components.filter(c => c.type === type).length;
     actions.forEach((a, i) => {
       if (a.tool === 'delete_all') { for (const k of Object.keys(counts)) counts[k] = 0; return; }
       const def = Chat.partFor(a.tool);
-      if (!def || def.place.kind !== 'offboard') return;
-      const spot = board.batterySpot();   // the same spot Accept uses
+      const spot = spots[i];
+      if (!def || def.place.kind !== 'offboard' || !spot) return;
       const built = App.buildPart(def.type, Parts.legsOf({ type: def.type, holeRefs: null }), Chat.partValues(a), { ghost: true });
       built.group.position.set(spot.x, App.BENCH_Y || 0, spot.z);   // on the bench, where Accept puts it (#187)
       if (!(def.type in counts)) counts[def.type] = actions.slice(0, i).some(b => b.tool === 'delete_all') ? 0 : countOf(def.type);

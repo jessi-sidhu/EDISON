@@ -78,7 +78,6 @@ const DEMO      = 'Build a single LED circuit with a current-limiting resistor.'
 const INVERTING = 'Build an inverting amplifier with a gain of −10';
 const COMPARE   = 'Build a comparator that lights an LED when the input is above 5 V';
 const FOLLOWER  = 'Build a voltage follower';
-const OPAMP_IDS = ['OPAMP-inverting', 'OPAMP-comparator', 'OPAMP-follower'];
 
 const mentionsChip = s => /tl072|op-?amp/i.test(s);
 

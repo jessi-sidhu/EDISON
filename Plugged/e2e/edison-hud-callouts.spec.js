@@ -3,7 +3,10 @@
 // first, at most ResultCallouts.MAX) and the label layout are
 // test/result-callouts.test.js; this spec is what needs a real page: a fault
 // callout drawn on U1 when its V− is unwired in Lab 2, its dot on U1's
-// projected position, the dot following the camera, #sim-results and the
+// projected position, the dot following the camera, PS1's and FG1's callouts
+// shown only while their part is on the canvas (#201: the lab frames U1 and
+// leaves the instruments out; e2e/edison-inspector-callouts.spec.js is the
+// zoomed-in case), #sim-results and the
 // mistakes panel keeping their text as mistake-checker.spec expects (in
 // Edison they fold into the Details drawer, #193: e2e/edison-hud-details.spec.js),
 // and in classic no callouts and both boxes shown as before.
@@ -118,8 +121,22 @@ test('Edison, Lab 2 with U1\'s V− unwired: a fault callout on U1 says it has n
   await expect(u1, 'a callout for U1 appears').toBeVisible();
   await expect(u1, 'U1\'s callout is a fault').toHaveAttribute('data-level', 'fault');
   await expect(u1, 'and says U1 has no supply').toContainText(/no supply/i);
+  // PS1 and FG1 have callouts too (the mockup's three), but only while their
+  // part is on the canvas: a callout never leads off it (#201).
+  await drawn(page);
   for (const label of ['PS1', 'FG1']) {
-    await expect(page.locator(`.result-callout[data-label="${label}"]`), `a callout for ${label}`).toBeVisible();
+    const on = await page.evaluate(l => {
+      const c = App.state.components.find(x => x.label === l);
+      const box = new THREE.Box3().setFromObject(c.group);
+      const p = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+      App.camera.updateMatrixWorld();
+      const ahead = p.clone().applyMatrix4(App.camera.matrixWorldInverse).z < 0;
+      p.project(App.camera);
+      return ahead && Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1;
+    }, label);
+    const callout = page.locator(`.result-callout[data-label="${label}"]`);
+    if (on) await expect(callout, `${label} is on the canvas: its callout shows`).toBeVisible();
+    else await expect(callout, `${label} is off the canvas: its callout hides`).toBeHidden();
   }
   const cap = await page.evaluate(() => window.ResultCallouts && ResultCallouts.MAX);
   expect(typeof cap, 'the page has window.ResultCallouts.MAX').toBe('number');

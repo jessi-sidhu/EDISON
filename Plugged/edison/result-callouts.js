@@ -18,11 +18,16 @@
 //                                    → [{ label, left, top, width, height,
 //                                    side, leader }] in the same order: the
 //                                    blocks stay inside the viewport and never
-//                                    overlap; leader is [[x, y], elbow, end]
+//                                    overlap; leader is [[x, y], elbow, end].
+//                                    A block wider or taller than the viewport
+//                                    can't fit: { label, hidden: true } (#201)
 //
 //  The page half redraws on plugged:sim, clears on plugged:sim-stop, and
 //  re-projects on the orbit controls' 'change' (the camera moved) and on a
 //  resize. No animation loop: render on demand (issue 109) stays quiet.
+//  A callout never draws outside the canvas (#201): one whose part's anchor
+//  is off the canvas or behind the camera (zoomed in, or an instrument a
+//  framed lab leaves out) hides, as does one whose block can't fit.
 //
 //  EXPORTS
 //  ───────
@@ -114,8 +119,11 @@
 
   function layoutCallouts(items, viewport, avoid) {
     const vp = { width: Number(viewport && viewport.width) || 0, height: Number(viewport && viewport.height) || 0 };
-    const list = (Array.isArray(items) ? items : [])
+    const all = (Array.isArray(items) ? items : [])
       .map(it => ({ label: it.label, x: Number(it.x) || 0, y: Number(it.y) || 0, w: Number(it.w) || 0, h: Number(it.h) || 0 }));
+    // A block bigger than the viewport fits nowhere in it: hidden, and it takes no room.
+    const fitsIn = it => it.w <= vp.width && it.h <= vp.height;
+    const list = all.filter(fitsIn);
     const keepOff = (Array.isArray(avoid) ? avoid : []).filter(r => r && r.width > 0 && r.height > 0);
     const placed = [];
     const clear = (box, pad, withDots) => placed.every(p => !hits(box, p, pad)) && keepOff.every(r => !hits(box, r, pad)) &&
@@ -147,14 +155,14 @@
         if (ok) [boxes[i], boxes[j]] = ok;
       }
     }
-    return list.map((item, k) => Object.assign({ label: item.label, left: boxes[k].left, top: boxes[k].top,
-                                                width: boxes[k].width, height: boxes[k].height }, leaderOf(item, boxes[k])));
+    const laid = list.map((item, k) => Object.assign({ label: item.label, left: boxes[k].left, top: boxes[k].top,
+                                                      width: boxes[k].width, height: boxes[k].height }, leaderOf(item, boxes[k])));
+    return all.map(item => (fitsIn(item) ? laid[list.indexOf(item)] : { label: item.label, hidden: true }));
   }
 
   // ── The page (Edison only) ──
   const SVG = 'http://www.w3.org/2000/svg';
-  const AVOID = ['sim-results', 'mistakes-panel', 'scope', 'meter-display', 'lab-sheet', 'clear-all-btn', 'reset-cam-btn'];
-  const EDGE  = 8;   // px, an off-canvas part's dot in from the canvas edge
+  const AVOID = ['sim-results', 'mistakes-panel', 'scope', 'meter-display', 'lab-sheet', 'clear-all-btn', 'reset-cam-btn', 'inspector'];
 
   function boot(win) {
     const doc = win.document;
@@ -247,28 +255,20 @@
     }
 
     // The part's anchor (its group's top centre) on the canvas, px from the
-    // overlay's top left. A part off the canvas (a framed lab leaves the
-    // instruments out) keeps its callout: its dot sits on the canvas edge,
-    // on the line from the centre toward the part, with off: true.
+    // overlay's top left; null when it isn't on the canvas. #191 pinned an
+    // off-canvas part's dot to the canvas edge instead, so zoomed in (or in a
+    // framed lab, the instruments) its leader ran to the edge, at nothing:
+    // now that callout hides (#201).
     function anchor(comp, cam, cr, or) {
       const THREE = win.THREE;
       const box = new THREE.Box3().setFromObject(comp.group);
       if (box.isEmpty()) return null;
       const world = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
-      const ahead = world.clone().applyMatrix4(cam.matrixWorldInverse).z < 0;
+      if (world.clone().applyMatrix4(cam.matrixWorldInverse).z >= 0) return null;   // behind the camera
       const p = world.clone().project(cam);
-      let x = (p.x + 1) / 2 * cr.width, y = (1 - p.y) / 2 * cr.height;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-      const cx = cr.width / 2, cy = cr.height / 2;
-      if (!ahead) { x = cx - (x - cx) * 1e3; y = cy - (y - cy) * 1e3; }   // behind the camera: the mirror image, far off
-      let off = false;
-      if (!ahead || x < EDGE || y < EDGE || x > cr.width - EDGE || y > cr.height - EDGE) {
-        const dx = x - cx, dy = y - cy;
-        const t = Math.min(dx ? (cx - EDGE) / Math.abs(dx) : Infinity, dy ? (cy - EDGE) / Math.abs(dy) : Infinity);
-        if (!Number.isFinite(t)) return null;
-        x = cx + dx * t; y = cy + dy * t; off = true;
-      }
-      return { x: cr.left - or.left + x, y: cr.top - or.top + y, off };
+      const x = (p.x + 1) / 2 * cr.width, y = (1 - p.y) / 2 * cr.height;
+      if (!(x >= 0 && y >= 0 && x <= cr.width && y <= cr.height)) return null;   // off the canvas (or NaN)
+      return { x: cr.left - or.left + x, y: cr.top - or.top + y };
     }
 
     function place() {
@@ -285,7 +285,6 @@
         const at = comp && comp.group ? anchor(comp, App.camera, cr, or) : null;
         if (!at) { gone.push(e); continue; }
         e.block.hidden = false;
-        e.dot.dataset.off = String(at.off);
         items.push({ label: l.label, x: at.x, y: at.y, w: e.block.offsetWidth, h: e.block.offsetHeight, e });
       }
       const avoid = AVOID.map(id => doc.getElementById(id)).filter(Boolean).map(el => el.getBoundingClientRect())
@@ -293,6 +292,7 @@
       const boxes = layoutCallouts(items, { width: or.width, height: or.height }, avoid);
       boxes.forEach((b, k) => {
         const { e, x, y } = items[k];
+        if (b.hidden) { gone.push(e); return; }   // its block can't fit on the canvas
         e.block.style.left = b.left + 'px';
         e.block.style.top = b.top + 'px';
         e.block.dataset.side = b.side;

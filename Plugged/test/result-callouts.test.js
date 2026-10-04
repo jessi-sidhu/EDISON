@@ -265,3 +265,25 @@ test('ResultCallouts.layoutCallouts: label boxes stay inside the viewport and ne
     }
   }
 });
+
+// #201: a callout never draws outside the canvas. A block wider or taller
+// than the viewport can't fit anywhere in it, so it comes back hidden: true
+// (no box to clamp, no leader) and takes no room from the others.
+test('ResultCallouts.layoutCallouts: a block that can\'t fit in the viewport comes back hidden, and the others lay out as if it weren\'t there', () => {
+  const R = RC();
+  const viewport = { width: 400, height: 300 };
+  const fits = { label: 'A', x: 200, y: 150, w: 120, h: 48 };
+  const wide = { label: 'B', x: 100, y: 100, w: 420, h: 48 };
+  const tall = { label: 'C', x: 300, y: 200, w: 100, h: 320 };
+  const out = R.layoutCallouts([wide, fits, tall], viewport);
+  expect(Array.isArray(out) && out.map(o => o.label), 'one entry per item, in order').toEqual(['B', 'A', 'C']);
+  expect(out[0].hidden, `B is wider than the viewport: hidden (${JSON.stringify(out[0])})`).toBe(true);
+  expect(out[2].hidden, `C is taller than the viewport: hidden (${JSON.stringify(out[2])})`).toBe(true);
+  const a = out[1];
+  expect(!a.hidden, `A fits: shown (${JSON.stringify(a)})`).toBe(true);
+  expect(a.left >= 0 && a.top >= 0 && a.left + a.width <= viewport.width && a.top + a.height <= viewport.height,
+    `A is inside the viewport: ${JSON.stringify(a)}`).toBe(true);
+  const alone = R.layoutCallouts([fits], viewport)[0];
+  expect({ left: a.left, top: a.top }, 'A lands where it would alone: the hidden blocks take no room')
+    .toEqual({ left: alone.left, top: alone.top });
+});

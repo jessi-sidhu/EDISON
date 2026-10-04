@@ -400,7 +400,9 @@ test('a resistor 3–5 columns apart on free holes is placed with no note', () =
 //   methods. Every place_<type> goes through board.placePart(type, where,
 //   values), for any type Parts.get knows:
 //     span / footprint parts: where = the holes, getHole's objects, one per pin
-//     offboard parts:         where = board.batterySpot(), { x, z }
+//     offboard parts:         where = { x, z }: board.batterySpot() for the
+//                             battery, a spot in front of the board for an
+//                             instrument (#197, test/bench-rules.test.js)
 //   values = the action's keys the part has in its ValueSpecs, each checked
 //   with Parts.checkValue. A refused value is left out (the part keeps its
 //   default) and its reason goes to board.note, as the server does.
@@ -580,7 +582,7 @@ const MIXED = [
   wire('tp_12', 'a12', 'red'), wire('a23', 'tn_23', 'black'),
 ];
 
-test('every registered part is placed through board.placePart: holes for board parts, the battery spot off the board', () => {
+test('every registered part is placed through board.placePart: holes for board parts, a spot off the board for the rest', () => {
   for (const def of Parts.all()) {
     const board = simBoard();
     const tool = (def.ai && def.ai.tool) || 'place_' + def.type;
@@ -594,7 +596,8 @@ test('every registered part is placed through board.placePart: holes for board p
     const [type, where, values] = board.calls.placePart[0];
     assert.equal(type, def.type);
     if (def.place.kind === 'offboard') {
-      assert.deepEqual(where, { x: 15.8, z: -3.15 }, `${tool}: an off-board part goes where board.batterySpot() says`);
+      if (def.type === 'battery') assert.deepEqual(where, { x: 15.8, z: -3.15 }, `${tool}: the battery goes where board.batterySpot() says`);
+      else assert.ok(where.z >= require('../circuit3d/js/board-geometry.js').BOARD_D / 2 + 2.5, `${tool}: an instrument goes in front of the board (#197): ${JSON.stringify(where)}`);
     } else {
       assert.deepEqual(where, [{ col: 9, row: 'b' }, { col: 9 + def.place.span.default, row: 'b' }], `${tool}: one hole per pin, in order`);
     }
