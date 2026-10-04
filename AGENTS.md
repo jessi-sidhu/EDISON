@@ -41,6 +41,7 @@ The app is `Plugged/`. Its commands, code rules and gotchas are in `Plugged/AGEN
 - `cd backend && node server.js`: run the app
 
 ## Docs (read the one you need, when you need it)
+- `docs/STATUS.md`: **read first when you pick the project up**, on any machine. Where things stand, the to-do list in order, what we've learned (the AI test results), how Aarmen likes to work, and how to set up a new laptop. Update it at the end of a session.
 - `docs/PRD.md`: what we're building and the demo story. Read before any user-facing work.
 - `docs/ARCHITECTURE.md`: modules, data flow, and **who works in which folder**. Read before creating a new file or folder.
 - `docs/API-CONTRACT.md`: the interfaces and data shapes between modules. **Read before writing code that calls, or is called by, another module.** Build against it exactly, and use its mock data until the real side exists.

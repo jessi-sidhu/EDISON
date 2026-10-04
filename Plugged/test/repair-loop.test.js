@@ -60,7 +60,9 @@ const NO_RESISTOR = [
   { tool: 'add_wire', from: 'a8', to: 'tn_8', color: 'black' },
 ];
 // The good build with the older battery pin form, which Board.apply rejects
-// (so the model's board has an unwired battery) but the live board accepts.
+// (so the model's board has an unwired battery). The live board still reads
+// it, but since #199 finishAIReply drops a reply whose wire ends Board.apply
+// can't read, so this form never reaches the page from the server.
 const LEGACY_PINS = GOOD.map(a =>
   a.from === 'BAT1.0' ? { ...a, from: 'battery_0_pin0' }
   : a.from === 'BAT1.1' ? { ...a, from: 'battery_0_pin1' } : a);

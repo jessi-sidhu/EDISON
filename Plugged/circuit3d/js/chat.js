@@ -485,6 +485,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
       built.pinPositions.forEach((p, k) => {
         const at = p.clone().add(built.group.position);
         pendingPins[`${labels[i]}.${k}`.toLowerCase()] = at;
+        if (def.pins[k] != null) pendingPins[`${labels[i]}.${def.pins[k]}`.toLowerCase()] = at;   // MM1.red, as Accept resolves it
         pendingPins[`${def.type}_${counts[def.type]}_pin${k}`] = at;
       });
       counts[def.type]++;
