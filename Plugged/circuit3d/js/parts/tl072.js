@@ -242,15 +242,17 @@
       keywords: ['op-amp', 'op amp', 'opamp', 'amplifier', 'comparator', 'tl072', 'follower', 'buffer'],
       listed:   'in-play',
       guide:    'Pins 1 OUT1, 2 IN1−, 3 IN1+, 4 V−, 5 IN2+, 6 IN2−, 7 OUT2, 8 V+; hole=fC, right: 1-4 fC..fC+3, 8-5 eC..eC+3. ' +
-                'One place_bench_supply PS1; ±12: V+ tp, V− bn. Input: one place_function_generator FG1, COM to tn, ' +
-                'OUT to input, offset = DC in. Inverting: FG1.0→Rin→IN1−, −Rf/Rin (place_resistor). Follower: ' +
-                'FG1.0→IN1+, OUT1→IN1−. Comparator: 12 V (V− tn), FG1.0→IN1+, divider→IN1−, OUT1→R→place_led→tn.',
+                'One place_bench_supply PS1; ±12: V+ tp, V− bn. FG1 place_function_generator, COM tn; ' +
+                'sine: amplitude=peak V, freq, offset 0; DC: offset, amp 0. Inverting −Rf/Rin; divider→Rin: stiff, R ≤ Rin/10. ' +
+                'Follower: FG1.0→IN1+, OUT1→IN1−. Comparator: V− tn, divider→IN1−, OUT1→place_resistor→place_led.',
       recipe:   {
-        // Vout1 = −(100k/(10k + 50 Ω))·0.5 V = −4.975 V (the generator's 50 Ω; finite gain: < 1 mV off).
-        name:  'inverting amplifier, gain −10, on ±12 V: FG1 (offset 0.5 V) through Rin 10 kΩ into IN1− (pin 2), ' +
-               'Rf 100 kΩ from IN1− to OUT1 (pin 1), IN1+ (pin 3) to COM: OUT1 ≈ −5 V',
+        // The 0.5 V sine (#5): Vout1 = −(100k/(10k + 50 Ω))·Vin, −4.975 V at the peak (t = 1/4 s) and
+        // +4.975 V at the trough (t = 3/4 s) (the generator's 50 Ω; finite gain: < 1 mV off). A plain
+        // solve reads the offset, 0 V, so `expect` reads OUT1 at 0 V.
+        name:  'inverting amplifier, gain −10, on ±12 V: FG1 (a 0.5 V sine) through Rin 10 kΩ into IN1− (pin 2), ' +
+               'Rf 100 kΩ from IN1− to OUT1 (pin 1), IN1+ (pin 3) to COM: OUT1 ≈ −5 V at the peak',
         parts: [{ type: 'bench_supply', label: 'PS1', values: { voltage: 12 } },
-                { type: 'function_generator', label: 'FG1', values: { amplitude: 0, offset: 0.5, frequency: 1 } },
+                { type: 'function_generator', label: 'FG1', values: { amplitude: 0.5, offset: 0, frequency: 1 } },
                 { type: 'tl072', label: 'U1', holes: ['f30', 'f31', 'f32', 'f33', 'e33', 'e32', 'e31', 'e30'] },
                 { type: 'resistor', label: 'R1', holes: ['g27', 'g31'], values: { resistance: 10000 } },     // Rin
                 { type: 'resistor', label: 'R2', holes: ['h31', 'h35'], values: { resistance: 100000 } }],  // Rf
@@ -258,7 +260,7 @@
                 ['FG1.1', 'tn_61'],                                  // the generator's COM on ground
                 ['tp_30', 'a30'], ['bn_33', 'j33'],                  // V+ (pin 8) +12 V, V− (pin 4) −12 V
                 ['FG1.0', 'h27'], ['i35', 'i30'], ['j32', 'tn_32']], // input into Rin, Rf to OUT1, IN1+ to COM
-        expect: { U1: { vout1: [-5.0, -4.95], mode1: 'linear', unused2: true } },
+        expect: { U1: { vout1: [-0.01, 0.01], mode1: 'linear', unused2: true } },
       },
       // One worked build per op-amp request (the AI copies the nearest one),
       // in the same layout: the chip at f30, op-amp 2 unused.
