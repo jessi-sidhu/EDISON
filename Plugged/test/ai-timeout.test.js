@@ -1,4 +1,4 @@
-// A stalled DeepSeek can't hang /api/ask (issue #129). Found on 2026-10-01:
+// A stalled DeepSeek can't hang /api/ask (issue #129). Found live:
 // deepseek-flash stopped answering, the server waited forever, and the page
 // showed "Failed to fetch" after about 5 minutes.
 //

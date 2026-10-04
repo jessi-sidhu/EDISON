@@ -136,7 +136,7 @@ const BB830 = { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' };
 const lead = (hole, role = 'none') => ({ hole, pt: [0, 0], role });
 const end  = hole => ({ hole, pt: [0, 0] });
 
-// The stage board (photo spec, stage-board rule): every part fully in the
+// The stage board (the stage-board rule, #144): every part fully in the
 // main holes, so it builds with no bridge and no flags (bridge-independent).
 function stageReading() {
   return {

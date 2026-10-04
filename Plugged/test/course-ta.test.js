@@ -1,10 +1,10 @@
-// The TA view's drawing logic (Edison E9, issue #155): edison/sections/ta.js.
+// The TA view's drawing logic (issue #155): edison/sections/ta.js.
 //
 // ta.js becomes a UMD module (the wrapper at the top of course-data.js): in
 // the browser it sets window.TA and registers the #ta section with
 // Course.section; in Node it exports the same object and touches no DOM.
 //
-// What these tests assume (plan Task E9, Step 1; spec §3, §4 and §4a):
+// What these tests assume (from the issue; edison/DESIGN.md §3, §4 and §4a):
 // - TA.isoPoint(hole) → { x, y }: a body hole ('a1' … 'j63', rows and columns
 //   from circuit3d/js/board-geometry.js) in the isometric drawing's own
 //   coordinates. The projection is isometric line art, so it is affine:
@@ -20,8 +20,8 @@
 //   purple (the design guard's rule: hue 230–290°, saturation above 40%).
 //   It is a valid colour for max 0 and for counts above max.
 // - TA.summary(heatmap) → the summary block's sentences, as an array of
-//   strings or one string. Numbers live inside sentences (spec §3: no stat
-//   banners), so every sentence carries its number, and the busiest cell
+//   strings or one string. Numbers live inside sentences (DESIGN.md §3: no
+//   stat banners), so every sentence carries its number, and the busiest cell
 //   reads "<count> of <total> students …" with that cell's note in the same
 //   sentence.
 //

@@ -1,4 +1,4 @@
-/* edison/course.css — the ENSC 220 course hub (spec §5.2). Colours, type and
+/* edison/course.css — the ENSC 220 course hub. Colours, type and
    radii come only from tokens.css. Borders, never shadows. */
 
 *, *::before, *::after { box-sizing: border-box; }

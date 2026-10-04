@@ -12,9 +12,8 @@
 // that keeps the first body), and the eval cases are graded against canned
 // replies (as in test/ai-eval.test.js).
 //
-// Seams these tests assume (the issue and the spec, docs/superpowers/specs/
-// 2026-10-01-phase-4-op-amp-and-sine-design.md → "AI"; stated so the builder
-// matches them):
+// Seams these tests assume (from the issue; stated so the builder matches
+// them):
 // - def.ai is an AiSpec, tool place_tl072 (the default). Keywords include
 //   op-amp, opamp, amplifier, comparator, tl072, follower, buffer.
 // - The guide (≤ 400 chars) names every pin with its number and role, in a

@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
-//  edison/sections/textbook.js — the course hub's Textbook (spec §5.2,
-//  plan E7): a contents list, then one chapter at a time. Each chapter
+//  edison/sections/textbook.js — the course hub's Textbook (issue #153):
+//  a contents list, then one chapter at a time. Each chapter
 //  opens with a large Barlow Condensed title and a square live figure
 //  (the Elodin opener), then numbered sections in STIX with fine-line SVG
 //  diagrams (the Synthetic Sciences engravings).

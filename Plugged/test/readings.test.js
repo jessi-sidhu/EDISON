@@ -1,4 +1,4 @@
-// Readings (issue #90): what every Phase 3 tool reads from a solve.
+// Readings (issue #90): what every tool (js/tools/) reads from a solve.
 //
 // Contract these tests are written against (docs/API-CONTRACT.md →
 // "Readings", circuit3d/js/readings.js, UMD like simulate.js):

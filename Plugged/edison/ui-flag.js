@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-//  edison/ui-flag.js — which UI a page shows (spec §6, contract
+//  edison/ui-flag.js — which UI a page shows (contract
 //  "Edison and the course hub"). Loaded first in <head>; never throws.
 // ─────────────────────────────────────────────────────────────
 (function (root, factory) {

@@ -1,7 +1,6 @@
-// The lab sheet's data and checks, circuit3d/labs/sheets.js (issue #151,
-// Edison E5; plan docs/superpowers/plans/2026-10-01-edison-ui-revamp.md →
-// "Task E5", spec §5.3). The page half (?lab=, the panel, Run, the
-// inspector edit, ?lab=lab9) is e2e/lab-sheet.spec.js.
+// The lab sheet's data and checks, circuit3d/labs/sheets.js (issue #151).
+// The page half (?lab=, the panel, Run, the inspector edit, ?lab=lab9) is
+// e2e/lab-sheet.spec.js.
 //
 // Contract (docs/API-CONTRACT.md → "Edison and the course hub" → "Lab
 // sheets"): window.LabSheets / module.exports, UMD.
@@ -15,7 +14,7 @@
 //   `board` is the board as the page holds it (App.state: components with
 //   labels, wires).
 //
-// Review focus #5 (the plan): while the circuit is half-built, missing parts
+// The half-built rule: while the circuit is half-built, missing parts
 // and floating nodes give *Not yet* ('pending'), never *Check failed* or a
 // crash. Here that is every Lab 1 board with one starter part deleted, and
 // the starter's parts with no wires at all. 'failed' is only for a complete
@@ -29,9 +28,9 @@
 // Everything runs the app's real code: board-io's load path, Sim.analyze and
 // Readings. Nothing is mocked; the one fake is the peak test's readings
 // object, which stands in for a time run (the peak check's memo logic is
-// what's tested; E6 runs the real TL072 time solve).
+// what's tested; Lab 2 below runs the real TL072 time solve).
 //
-// Lab 2 (issue #152, Edison E6; plan → "Task E6"), at the end of this file:
+// Lab 2 (issue #152), at the end of this file:
 // the TL072 inverting amplifier fed by the function generator. The starter
 // circuit3d/labs/lab2.sparky holds U1 (across the centre gap), PS1 and FG1,
 // unwired; test/fixtures/lab2-finish.js adds the student's wires and Rin /
@@ -232,7 +231,7 @@ test('unknown ids', () => {
   expect(L.ids()).toContain('lab1');
 });
 
-// Review focus #5. Each row is a half-built Lab 1. Real readings exist for
+// The half-built rule. Each row is a half-built Lab 1. Real readings exist for
 // what is left (with R2 deleted, R3 still carries 2.33 mA through R1 alone,
 // and I(R1) is 2.33 mA), but the circuit isn't the lab's yet, so a measure
 // step is *Not yet*, not *Check failed*. The supply step (a 'part' check on
@@ -277,7 +276,7 @@ test.each(HALF_BUILT)('half-built Lab 1, %s: every measure step is pending (neve
   }
 });
 
-// ── Lab 2: the TL072 inverting amplifier (issue #152, Edison E6) ─────────────
+// ── Lab 2: the TL072 inverting amplifier (issue #152) ────────────────────────
 
 const LAB2 = path.join(ROOT, 'circuit3d', 'labs', 'lab2.sparky');
 const { lab2Finish } = require('./fixtures/lab2-finish.js');
@@ -371,13 +370,13 @@ const peakStep = s => {
   return st;
 };
 
-// The plan's steps (Task E6, Step 3): 1 place the TL072 across the centre
+// The sheet's steps (from the issue): 1 place the TL072 across the centre
 // gap (part U1); 2 wire ±12 V to pins 8 and 4 (manual); 3 the generator
 // through Rin to pin 2 (part R1); 4 Rf from pin 1 to pin 2 (part R2); 5 run
 // and read the output peak on the scope (peak at U1's OUT1, expect 10 V);
-// 6 explain the phase flip (manual). The tolerance is at most the plan's
-// 0.05 (see the half-built test below for why it may need to be tighter).
-test('Lab 2 sheet: code LAB-02, starter labs/lab2.sparky, steps numbered 1..n with the plan\'s checks, the peak at U1 OUT1 expecting 10 V', () => {
+// 6 explain the phase flip (manual). The tolerance is at most 0.05 (see the
+// half-built test below for why it may need to be tighter).
+test('Lab 2 sheet: code LAB-02, starter labs/lab2.sparky, steps numbered 1..n with the lab\'s checks, the peak at U1 OUT1 expecting 10 V', () => {
   const s = lab2Sheet(labSheets());
   expect(s).toMatchObject({ id: 'lab2', code: 'LAB-02', starter: 'labs/lab2.sparky' });
   expect(typeof s.title === 'string' && s.title.length > 0, 'Lab 2 has a title').toBe(true);
@@ -464,7 +463,7 @@ test('finished Lab 2, time-stepped for 2 s with one shared memo: OUT1 peaks at 9
   }
 });
 
-// Review focus #5 for Lab 2: a half-built amplifier is Not yet, never
+// The half-built rule for Lab 2: a half-built amplifier is Not yet, never
 // Passed. Each row is the starter plus part of the student's work
 // (test/fixtures/lab2-finish.js), time-stepped for 2 s with one memo; the
 // peak step must be 'pending' at every step (peak never fails, and a
@@ -473,7 +472,7 @@ test('finished Lab 2, time-stepped for 2 s with one shared memo: OUT1 peaks at 9
 // Three rows clip. With no feedback the op-amp runs open loop and OUT1
 // slams between the rails, ±10.5 V (12 V less the 1.5 V headroom); with
 // the supply's COM unwired the chip has no ground reference and clips too.
-// |10.5 − 10| = 0.5 V is exactly the plan's tol 0.05 × 10 V, so a check
+// |10.5 − 10| = 0.5 V is exactly a tol of 0.05 × 10 V, so a check
 // that only compares the peak with 10 V ± 5 % reads a clipped op-amp as the
 // amplifier's peak and passes step 5 before step 4 (Rf) is done. The real
 // peak is 9.950 V, so a clipped output must not count: e.g. a tighter tol
@@ -508,7 +507,7 @@ test.each(LAB2_HALF_BUILT)('half-built Lab 2, %s: the peak step is pending at ev
   expect([...statuses], `the peak step over 2 s (largest |V(OUT1)| seen: ${maxV.toFixed(4)} V)`).toEqual(['pending']);
 });
 
-// The plan (Task E6): tools/labs.js lists Lab 2. Every sheet is in the
+// tools/labs.js lists Lab 2. Every sheet is in the
 // ENSC 220 Labs menu as "Lab <n>…", and the menu opens the sheet's starter.
 test('the ENSC 220 Labs menu lists every lab sheet, Lab 2 included, as "Lab <n>", opening the sheet\'s starter', () => {
   const L = labSheets();

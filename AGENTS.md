@@ -1,6 +1,6 @@
 # Edison
 
-This is a project project, and we win on the **demo**: a judge must see the core idea work end to end, reliably, in under 3 minutes. Everything below serves that.
+We win on the **demo**: a viewer must see the core idea work end to end, reliably, in under 3 minutes. Everything below serves that.
 
 ## Team
 Two people.
@@ -24,14 +24,9 @@ If you are an agent: your job is the issue in front of you, nothing more. When t
   - CI is off (#165: no Actions minutes left on a private repo). `/ship`'s local checks are the gate, so never push without them. If `dev` breaks, whoever broke it fixes it first.
 - **`main`** is tested and demo-ready.
   - `/promote`: the local checks (lint, unit, full browser suite) on `dev`, then a quick walk of the demo path in a browser, then a `dev → main` PR merged by whoever runs it.
-  - Promote at natural points: the end of each build day, sprint checkpoints, and before judging.
+  - Promote at natural points, and before the demo.
   - Nothing reaches `main` any other way.
 - **`/qa-pass`** is the full QA script with real AI prompts. It's for checkpoints (about once a day, and before submitting), not every promotion. It files `bug` issues.
-
-## Phases
-1. **Build week (pre-event):** Build the real product. The core demo should work end to end on real code, deployed, before the event. Keep modules swappable behind the contracts so they can be reshaped when tracks drop.
-2. **Track drop:** Aarmen runs `/adapt-to-tracks`, and it updates the PRD and plan and re-cuts the issues. Pause feature work until it's done.
-3. **Sprint (24h):** Reshape for the chosen track, add sponsor integrations, polish, and rehearse. Work issues against the `docs/PLAN.md` checkpoints. After the feature freeze, only demo-path bug fixes.
 
 ## Commands
 The app is `Plugged/`. Its commands, code rules and gotchas are in `Plugged/AGENTS.md`, which Claude loads automatically when working there. The main ones, run from `Plugged/`:
@@ -46,7 +41,6 @@ The app is `Plugged/`. Its commands, code rules and gotchas are in `Plugged/AGEN
 - `docs/ARCHITECTURE.md`: modules, data flow, and **who works in which folder**. Read before creating a new file or folder.
 - `docs/API-CONTRACT.md`: the interfaces and data shapes between modules. **Read before writing code that calls, or is called by, another module.** Build against it exactly, and use its mock data until the real side exists.
 - `docs/QA.md`: the test cases `/qa-pass` runs, with the expected result of each.
-- `docs/PLAN.md`: sprint timeline and checkpoints.
 - `Plugged/AGENTS.md`: how to work on the app's code. Read it before editing anything in `Plugged/`.
 
 ## Task loop (every task)

@@ -1,9 +1,10 @@
-// The TA view on the ENSC 220 course hub (Edison E9, issue #155):
-// /edison/course.html#ta. Spec §4a: Quindar's isometric line-art hardware with
-// dashed leader callouts, and Godela's heat-map colour scale with a legend;
-// spec §3: numbers inside sentences, no stat-banner row. The math behind the
-// drawing (TA.isoPoint, TA.colourFor, TA.summary) is test/course-ta.test.js,
-// and the feed endpoint's shape and 15 s rotation is test/course-ta-feed.test.js.
+// The TA view on the ENSC 220 course hub (issue #155):
+// /edison/course.html#ta. edison/DESIGN.md §4a: Quindar's isometric line-art
+// hardware with dashed leader callouts, and Godela's heat-map colour scale
+// with a legend; §3: numbers inside sentences, no stat-banner row. The math
+// behind the drawing (TA.isoPoint, TA.colourFor, TA.summary) is
+// test/course-ta.test.js, and the feed endpoint's shape and 15 s rotation is
+// test/course-ta-feed.test.js.
 // This spec is what needs a real page: the SVG as drawn, the dots inside the
 // drawn outline, the leaders landing on dots, the feed polling the server,
 // and the 404 fallback deployed hosting hits.
@@ -11,9 +12,9 @@
 // No AI is called on this page; no sign-in is involved.
 //
 // The page the builder matches (chosen here, stated so it can be built to):
-// - section[data-route="ta"] keeps its <h2>TA view</h2> (exactly that: the
-//   E4 spec finds it by name). A visible "Sample data (demo)" label sits
-//   beside or just under it, not inside it.
+// - section[data-route="ta"] keeps its <h2>TA view</h2> (exactly that:
+//   e2e/edison-course.spec.js finds it by name). A visible "Sample data
+//   (demo)" label sits beside or just under it, not inside it.
 // - The summary is plain sentences; the busiest cell reads
 //   "<count> of <total> students …".
 // - One inline <svg> in the section holds:

@@ -1051,7 +1051,7 @@
     const result = analyze(components, wires);
     showResults(result.lines);
     showParts(components, result.status === 'ok' && !result.shorted ? result.parts : {});
-    // Every solve is announced; the Phase 3 tools listen (API-CONTRACT → "Page events").
+    // Every solve is announced; the tools in js/tools/ listen (API-CONTRACT → "Page events").
     const readings = window.Readings ? window.Readings.from(result, { components, wires }) : null;
     document.dispatchEvent(new CustomEvent('plugged:sim', { detail: { result, readings } }));
     if (result.status === 'empty') return;

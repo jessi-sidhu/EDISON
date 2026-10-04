@@ -270,7 +270,7 @@
   function checkElement(el, i, pins, bad) {
     const at = `elements[${i}]`;
     if (!isObj(el)) return bad(`${at} must be an Element object`);
-    if (RESERVED.includes(el.kind)) return bad(`${at}: element kind ${el.kind} is reserved (not supported until Phase 5–6)`);
+    if (RESERVED.includes(el.kind)) return bad(`${at}: element kind ${el.kind} is reserved (not supported yet)`);
     const spec = ELEMENTS[el.kind];
     if (!spec) return bad(`${at}.kind "${el.kind}" is not an element kind; use ${Object.keys(ELEMENTS).join(', ')}`);
     for (const f of spec.pins) {

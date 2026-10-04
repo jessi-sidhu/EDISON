@@ -20,15 +20,15 @@
   const course = { code: 'ENSC 220', title: 'Electric Circuits I', term: 'Fall 2026', instructor: 'Instructor' };
 
   const announcements = [
-    { date: 'Oct 1',  text: 'Midterm 1 is in class on Oct 16. It covers Ohm\'s law, KCL and KVL, and dividers.' },
-    { date: 'Sep 30', text: 'Lab 2 is open. Bring your pre-lab answers; the lab sheet checks your readings as you build.' },
-    { date: 'Sep 26', text: 'Lab 1 marks are in. The usual slip was measuring R2 across the wrong pair of holes.' },
-    { date: 'Sep 22', text: 'Office hours move to Thursday, 2–3 pm, this week.' },
+    { date: 'Oct 3',  text: 'Midterm 1 is in class on Oct 16. It covers Ohm\'s law, KCL and KVL, and dividers.' },
+    { date: 'Oct 3' , text: 'Lab 2 is open. Bring your pre-lab answers; the lab sheet checks your readings as you build.' },
+    { date: 'Oct 3' , text: 'Lab 1 marks are in. The usual slip was measuring R2 across the wrong pair of holes.' },
+    { date: 'Oct 3' , text: 'Office hours move to Thursday, 2–3 pm, this week.' },
   ];
 
   // id is what ?lab= takes in the editor.
   const labs = [
-    { id: 'lab1', code: 'LAB-01', title: 'Series-parallel resistors',   due: 'Sep 25', status: 'done' },
+    { id: 'lab1', code: 'LAB-01', title: 'Series-parallel resistors',   due: 'Oct 3' , status: 'done' },
     { id: 'lab2', code: 'LAB-02', title: 'Op-amps and the sine source', due: 'Oct 9',  status: 'open' },
     { id: 'lab3', code: 'LAB-03', title: 'RC charging',                 due: 'Oct 23', status: 'locked', opens: 'Opens week 6' },
     { id: 'lab4', code: 'LAB-04', title: 'Thévenin equivalents',        due: 'Nov 6',  status: 'locked', opens: 'Opens week 8' },

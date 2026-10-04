@@ -1,4 +1,4 @@
-// The ENSC 220 course hub's data (Edison E4, issue #150): edison/course-data.js,
+// The ENSC 220 course hub's data (issue #150): edison/course-data.js,
 // a UMD module (window.CourseData in the browser, module.exports in Node).
 //
 // Shape (docs/API-CONTRACT.md → "Edison and the course hub" → Course data):
@@ -10,12 +10,12 @@
 //     heatmap: { lab, cells[{ hole, count, note }], total },
 //     feed[{ minsAgo, lab, step, label, text }] }
 //
-// The rules checked here come from the plan (Task E4, Step 1) and the spec
-// (§2: SFU-inspired, no real names; §3: sentence case, no "A · B · C" meta):
+// The rules checked here come from the issue (SFU-inspired, no real names)
+// and edison/DESIGN.md (§3: sentence case, no "A · B · C" meta):
 // - The course header is generic: the instructor is "Instructor".
 // - Labs 1–5 in order. Labs 1–2 are open; 3–5 are locked and say which week
 //   they open. Each lab's id is what ?lab= takes (lab1 … lab5), and the
-//   titles are the five ENSC 220 labs the plan names.
+//   titles are the five ENSC 220 labs the issue names.
 // - Sample grades are marked sample and use invented names (Student A …).
 // - Every heat-map cell is a real body hole on the 63-column breadboard
 //   (rows and columns from circuit3d/js/board-geometry.js), and its count is
@@ -60,7 +60,7 @@ test('each lab has the ?lab= id of its number, a known status and a due date', (
   }
 });
 
-test('the five labs are the ENSC 220 labs the plan names', () => {
+test('the five labs are the ENSC 220 labs the issue names', () => {
   const D = courseData();
   expect(D.labs.map(l => l.title)).toEqual([
     'Series-parallel resistors',

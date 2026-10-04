@@ -387,18 +387,22 @@ async function main() {
   if (process.env.DEEPSEEK_FALLBACK_MODEL === undefined) process.env.DEEPSEEK_FALLBACK_MODEL = '';
   const { ask } = require('../backend/server.js');
 
+  const settings = evalSettings(process.env);
+  console.log(`ai-eval: ${settings.model}, thinking ${settings.thinking ? `on${settings.effort ? ` (${settings.effort})` : ''}` : 'off'}`);
   const results = [], raw = [];
   for (const c of cases) {
     const outcomes = [];
     const markdown = c.markdown || emptyBoardMarkdown();
     for (let run = 1; run <= args.runs; run++) {
       let res;
+      const started = Date.now();
       try {
         // The board the browser would send with the markdown (#84).
         res = await ask(markdown, c.message, [], startBoard(c.board));
       } catch (e) {
         res = e instanceof Error ? e : new Error(String(e));
       }
+      const ms = Date.now() - started;
       const o = outcome(c, res);
       outcomes.push(o);
       const graded = o === 'error' ? null : grade(c, res);
@@ -406,8 +410,8 @@ async function main() {
         : o === 'fail' ? 'FAIL ' + graded.failed.join(', ')
         : 'ERROR ' + (res instanceof Error ? describeError(res) : res && res.reply);
       const by = res && res.fallbackModel ? ` (answered by ${res.fallbackModel})` : '';
-      console.log(`${c.id} run ${run}/${args.runs}: ${why}${by}`);
-      raw.push({ id: c.id, run, outcome: o, failed: graded ? graded.failed : null,
+      console.log(`${c.id} run ${run}/${args.runs}: ${why}${by} (${(ms / 1000).toFixed(1)} s)`);
+      raw.push({ id: c.id, run, outcome: o, ms, failed: graded ? graded.failed : null,
                  reply: res instanceof Error ? { error: describeError(res) } : res });
     }
     results.push({ id: c.id, tags: c.tags || [], outcomes });
@@ -419,14 +423,34 @@ async function main() {
   for (const s of summary.cases) {
     console.log(`${s.id.padEnd(18)} ${(s.passes + '/' + s.runs).padEnd(8)} ${s.passAll ? '✓' : '✗'}`);
   }
+  const passed = raw.filter(r => r.outcome === 'pass').length;
+  console.log(`\n${passed}/${raw.length} runs passed; median ${(median(raw.map(r => r.ms)) / 1000).toFixed(1)} s per build`);
   if (args.json) {
-    fs.writeFileSync(args.json, JSON.stringify({ runs, summary, raw }, null, 2));
+    fs.writeFileSync(args.json, JSON.stringify({ runs, settings, summary, raw }, null, 2));
     console.log(`\nReplies and grades written to ${args.json}`);
   }
   process.exit(summary.exitCode);
 }
 
+// The DeepSeek settings a run used (#205), as the server reads them.
+function evalSettings(env) {
+  return {
+    model:    env.DEEPSEEK_MODEL || 'deepseek-flash',
+    thinking: /^(1|on|true)$/i.test(String(env.DEEPSEEK_THINKING || '')),
+    effort:   env.DEEPSEEK_REASONING_EFFORT || null,
+  };
+}
+
+// The middle of a list of numbers (the mean of the two middle ones for an
+// even count); 0 for none.
+function median(list) {
+  const xs = (list || []).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!xs.length) return 0;
+  const mid = Math.floor(xs.length / 2);
+  return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+}
+
 if (require.main === module) main();
 
 module.exports = { grade, startBoard, describeError, outcome, summarize, parseArgs, emptyBoardMarkdown,
-                   wiringProblems, logicProblems, stripOf };
+                   wiringProblems, logicProblems, stripOf, evalSettings, median };

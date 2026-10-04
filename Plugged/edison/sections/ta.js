@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-//  edison/sections/ta.js — the course hub's TA view (spec §4a):
+//  edison/sections/ta.js — the course hub's TA view (DESIGN.md §4a):
 //  Quindar's isometric line-art breadboard with dashed callouts, and
 //  Godela's heat-map scale and legend, over CourseData.heatmap, plus the
 //  live feed from GET /api/course/ta-feed (CourseData.feed when it 404s).
@@ -58,7 +58,7 @@
     return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
   }
 
-  // ── The summary: numbers inside sentences (spec §3) ──
+  // ── The summary: numbers inside sentences (DESIGN.md §3) ──
   const colOf = hole => Number(/\d+$/.exec(hole)[0]);
   function summary(heat) {
     const total = heat.total;

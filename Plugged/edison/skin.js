@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
-//  edison/skin.js — the editor's Edison skin, script half (spec §4
-//  "Edison's annotations", §5.4). With <html data-ui="edison"> it wraps
+//  edison/skin.js — the editor's Edison skin, script half (DESIGN.md §4
+//  "Edison's annotations"). With <html data-ui="edison"> it wraps
 //  the measured values (.ed-val) and the board's part labels (.ed-tag) in
 //  Edison's replies, draws a leader from a reply to the first part it
 //  names, names the chat Edison (with the Lab HUD's header row, issue

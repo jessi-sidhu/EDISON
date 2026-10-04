@@ -1,5 +1,5 @@
 # The app's checks. The app lives in Plugged/, so every step runs there.
-# OFF since 2026-10-02 (#165): the repo is private, the free Actions minutes
+# OFF (#165): the repo is private, the free Actions minutes
 # ran out, and the gate is the local checks /ship and /promote run. Manual
 # runs only. To turn it back on, put back the triggers it had:
 #   on: { pull_request: , push: { branches: [main, dev] } }

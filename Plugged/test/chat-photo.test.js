@@ -1,9 +1,9 @@
-// Edison's help after a photo build (issue #143; the photo spec → "Build,
-// then help"; docs/API-CONTRACT.md → "Page additions (photo)"). After Build
-// it, the page asks Edison her question with a context line appended to the
-// /api/ask `message` (question + "\n\n" + context). The server is unchanged,
-// so the context must not change what the server does with the message:
-// which tools selectTools sends, the NEW_BUILD match, or the "Fix it" check.
+// Edison's help after a photo build (issue #143; docs/API-CONTRACT.md →
+// "Page additions (photo)"). After Build it, the page asks Edison her
+// question with a context line appended to the /api/ask `message` (question
+// + "\n\n" + context). The server is unchanged, so the context must not
+// change what the server does with the message: which tools selectTools
+// sends, the NEW_BUILD match, or the "Fix it" check.
 //
 // Seams these tests assume (stated so the builder matches them):
 // - Chat.photoContext(result) → the context line, a pure export of chat.js's
@@ -16,7 +16,7 @@
 //   - No flags: exactly that sentence.
 //   - Flags: then " Unsure readings: <labels and what>." naming each flagged
 //     entry by its APP label (result.labels[flag.id]) when it has one. The
-//     spec's own example, a polarity flag on LED1, is exactly
+//     contract's example, a polarity flag on LED1, is exactly
 //     "Built from a photo of my real breadboard. Unsure readings: LED1 direction."
 //   - Never a part keyword (any Parts.all() part's ai.keywords, as a whole
 //     word with a plural "s", the way selectTools matches them), a NEW_BUILD
@@ -92,9 +92,9 @@ const BUILDS = [
   ['both resistor leads in one strip (shorted)', stage({ parts: [resistor('R1', 'a10', 'b10'), led('LED1', 'c14', 'c17')] })],
 ];
 
-// ── The spec's wording ─────────────────────────────────────────────────────
+// ── The contract's wording ─────────────────────────────────────────────────
 
-test('the spec\'s example: a polarity flag on LED1 → "Built from a photo of my real breadboard. Unsure readings: LED1 direction."', () => {
+test('the contract\'s example: a polarity flag on LED1 → "Built from a photo of my real breadboard. Unsure readings: LED1 direction."', () => {
   const result = build(stage({ parts: [resistor('R1', 'a10', 'a14'), ledOf('LED1', [{ hole: 'c14', role: 'unknown' }, { hole: 'c17', role: 'unknown' }])] }));
   assert.deepStrictEqual(result.flags.map(f => `${f.kind}:${f.id}`), ['polarity:LED1'], 'the fixture raises exactly one polarity flag');
   assert.strictEqual(context(result), `${PREFIX} Unsure readings: LED1 direction.`);

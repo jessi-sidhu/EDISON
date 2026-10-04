@@ -1,4 +1,4 @@
-// The course hub's textbook (Edison E7, issue #153): three short chapters in
+// The course hub's textbook (issue #153): three short chapters in
 // edison/course-data.js (CourseData.chapters), each with live figures, the
 // .sparky files under edison/figures/ that viewer.html?circuit= draws and the
 // editor's ?open= loads. What the page shows (STIX body, the openers, the
@@ -15,8 +15,8 @@
 //   what viewer.html?circuit= and the editor's ?open= both take, so it must
 //   pass UiFlag.allowedCircuit.
 //
-// The rules (plan Task E7, Step 1; spec §3 copy, §4 lines of 75 characters,
-// §4a every chapter opener has a square inset live figure):
+// The rules (from the issue; edison/DESIGN.md §3 copy, §4 lines of 75
+// characters, §4a every chapter opener has a square inset live figure):
 // - 3 chapters, in order: "Ohm's law and power", "Kirchhoff's laws and
 //   dividers", "The op-amp"; sections numbered 1.1, 1.2 … within each.
 // - Every chapter has at least one figure, each under edison/figures/, on
@@ -106,7 +106,7 @@ function readFigure(figure) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-// Pin: E4 set this outline; E7 rewrites the chapters around it.
+// Pin: #150 set this outline; #153 rewrites the chapters around it.
 test('pin: three chapters in order, numbered 1–3, with sections numbered 1.1, 1.2 … in each', () => {
   const C = chapters();
   expect(C.map(ch => ch.title)).toEqual(TITLES);
@@ -178,7 +178,7 @@ test('each chapter body is 120–400 words, and no paragraph is over 120 words',
   }
 });
 
-// A guard on the new copy (the E4 outline already passes it).
+// A guard on the new copy (the #150 outline already passes it).
 test('copy rules: no meta dots, no all-caps words over 3 letters except codes', () => {
   const strings = chapters().flatMap(ch => [ch.title, ...ch.sections.flatMap(s => [s.title, plain(s.body)])]);
   for (const s of strings) {

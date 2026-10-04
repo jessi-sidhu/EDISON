@@ -39,7 +39,7 @@ GitHub issue ──/start-task──▶ local branch ──build + verify──�
 - **Every piece of work is a GitHub issue.** Write one with `/new-task`. Pick one with `/start-task`, or run `/start-task 12` for a specific issue.
 - **Your Claude follows the issue.** It touches only the files the issue lists and builds against `docs/API-CONTRACT.md`. If something is unclear, it stops and asks.
 - **Finish with `/ship`.** It runs the checks, reviews the diff, and pushes straight to `dev`. No PR and no waiting.
-- **Moving to `main` is a quick test.** `/promote` runs the local checks (lint, unit, full browser suite) on `dev`, then walks the demo path in a browser and merges a `dev → main` PR. Do it at the end of each build day, and at sprint checkpoints.
+- **Moving to `main` is a quick test.** `/promote` runs the local checks (lint, unit, full browser suite) on `dev`, then walks the demo path in a browser and merges a `dev → main` PR. Do it at natural points, and before the demo.
 - **Full QA is for checkpoints.** `/qa-pass` runs the real prompts and circuits in `docs/QA.md` about once a day and before submitting, and files what breaks as `bug` issues.
 - **`main` is always demo-ready.** `/demo-check` walks the demo story on it.
 
@@ -55,8 +55,8 @@ The full rules are in [AGENTS.md](AGENTS.md). The plan and design docs are in [d
 | Piece | What it does |
 |---|---|
 | `AGENTS.md` / `CLAUDE.md` | Team rules every agent follows |
-| `docs/` | PRD, architecture, API contract, QA script, sprint plan |
-| Skills | `/start-task`, `/ship`, `/promote`, `/new-task`, `/adapt-to-tracks`, `/demo-check`, `/qa-pass` |
+| `docs/` | PRD, architecture, API contract, QA script, AI test set |
+| Skills | `/start-task`, `/ship`, `/promote`, `/new-task`, `/demo-check`, `/qa-pass` |
 | Plugins | `superpowers` (planning workflow) and `frontend-design` (polished UI) |
 | MCP servers | `context7` (current library docs) and `playwright` (browser testing) |
 | Agents | `.claude/agents/`: scout, test-writer, builder, reviewer (run by `/start-task`), qa-tester (run by `/qa-pass`) |

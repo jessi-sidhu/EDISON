@@ -71,8 +71,7 @@
 // - No .ed-giant, .ed-sec or .ed-theme, no button named "Switch to light/dark
 //   mode", and no element outside the <header> whose whole text is "EDISON"
 //   (the header's wordmark reads EDISON since #186).
-// - The footer is one line: "Edison, built for Edison. Not an
-//   official SFU site." and the "Switch to classic UI" link to
+// - The footer is one line: "Not an official SFU site." and the "Switch to classic UI" link to
 //   ../landing.html?ui=classic.
 // - The landing never writes localStorage (no setItem, removeItem or clear),
 //   on load or on Ask.
@@ -351,7 +350,7 @@ test('the first screen: the kept wordmark, headline and Ask box ("Build me a lig
   expect.soft(F.unreadable, 'text under 4.5:1 contrast (3:1 when large)').toEqual([]);
 
   // The footer: one line, the classic link kept.
-  expect.soft(F.footText, 'the footer').toBe('Edison, built for Edison. Not an official SFU site. Switch to classic UI');
+  expect.soft(F.footText, 'the footer').toBe('Not an official SFU site. Switch to classic UI');
   expect.soft(F.footSpread, 'the footer is one line (spread of its text runs\' centres, px)').toBeLessThanOrEqual(4);
   expect.soft(F.classic, 'Switch to classic UI goes to').toBe('/landing.html?ui=classic');
 

@@ -6,7 +6,7 @@
 const TWO_LEDS = {
   id: 'c-two-leds',
   name: 'Two LEDs',
-  updatedAt: '2026-09-27T10:00:00.000Z',
+  updatedAt: '2026-10-03T10:00:00.000Z',
   components: [
     { type: 'battery',  label: 'BAT1', holeRefs: null, position: { x: 15.8, z: 0 } },
     { type: 'resistor', label: 'R1',   values: { resistance: 220 }, holeRefs: [{ col: 2, row: 'b' }, { col: 6, row: 'b' }], position: { x: 0, z: 0 } },
@@ -25,7 +25,7 @@ const TWO_LEDS = {
 const ONE_RESISTOR = {
   id: 'c-one-resistor',
   name: 'Just a resistor',
-  updatedAt: '2026-09-26T10:00:00.000Z',
+  updatedAt: '2026-10-03T09:00:00.000Z',
   components: [
     { type: 'resistor', label: 'R1', values: { resistance: 1000 }, holeRefs: [{ col: 20, row: 'b' }, { col: 24, row: 'b' }], position: { x: 0, z: 0 } },
   ],

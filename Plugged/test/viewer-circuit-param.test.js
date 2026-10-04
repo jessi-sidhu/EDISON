@@ -1,8 +1,8 @@
-// The viewer's ?circuit= hook (issue #147, Edison E1): circuit3d/viewer.html
+// The viewer's ?circuit= hook (issue #147): circuit3d/viewer.html
 // renders the .sparky named by ?circuit=, but only through
 // UiFlag.allowedCircuit; anything else, such as ?circuit=../backend/server.js,
 // falls back to ../demo.sparky (contract: docs/API-CONTRACT.md → "Edison and
-// the course hub" → Page hooks; plan Task E1, Step 6).
+// the course hub" → Page hooks).
 //
 // Run with:  npm test
 //

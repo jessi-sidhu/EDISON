@@ -5,9 +5,8 @@
 //
 // Run with:  npm test
 //
-// Shapes these tests assume (spec: docs/superpowers/specs/
-// 2026-10-01-phase-4-op-amp-and-sine-design.md → "The function generator
-// part"; values from Aarmen on the issue), stated so the builder matches them:
+// Shapes these tests assume (values from Aarmen on the issue), stated so the
+// builder matches them:
 // - type 'function_generator', place { kind: 'offboard' }, pins ['out', 'com'],
 //   ref 'com'. Its label prefix is the def's own (read here, never assumed);
 //   its tool is place_function_generator (ai.tool unset).

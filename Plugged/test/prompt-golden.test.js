@@ -38,7 +38,7 @@ const CASES = {
 // Part packs (issue #76) send only the rule lines of the parts in play, so
 // each budget is that request's size after packs, × 1.1, rounded up. Raise
 // them only on purpose.
-// Measured 2026-09-30 after #76: demo 13,253 and heavy 19,724 characters
+// Measured after #76: demo 13,253 and heavy 19,724 characters
 // (the demo was 16,900 before #76, with a budget of 17,175).
 const DEMO_BUDGET  = 14579;   // the demo request
 const HEAVY_BUDGET = 21697;   // HEAVY_REQUEST, below

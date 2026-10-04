@@ -9,7 +9,7 @@
 //  (PhotoImport's key when that is missing or repeated; a battery its app
 //  label, BAT1), never by its built label (#178).
 //  Contract: docs/API-CONTRACT.md → "Reading v1",
-//  "PhotoGrid", "PhotoImport"; spec → "The confirm screen".
+//  "PhotoGrid", "PhotoImport".
 //
 //  FLOW
 //  ────

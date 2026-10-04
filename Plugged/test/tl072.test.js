@@ -13,9 +13,8 @@
 // test/parts-examples.test.js, so they are not repeated here. The AI side
 // (its pack, recipe and ai-eval cases, #118) is test/tl072-ai.test.js.
 //
-// Seams these tests assume (the issue and the spec, docs/superpowers/specs/
-// 2026-10-01-phase-4-op-amp-and-sine-design.md → "The TL072 part"; stated so
-// the builder matches them):
+// Seams these tests assume (from the issue; stated so the builder matches
+// them):
 // - type 'tl072', listed in parts/index.js, loaded by circuit3d/index.html
 //   and circuit3d/viewer.html (every part is, so a shared board shows it).
 //   name / sub / category / prefix / icon are the builder's pick; the tests

@@ -1,6 +1,6 @@
 # Test photos: sources and licences
 
-Real breadboard photos used to test the photo → circuit grid and import code (`docs/superpowers/specs/2026-10-01-photo-to-circuit-design.md`). Each image was turned upright (EXIF), resized to at most 2,048 px on the long edge and re-saved as JPEG; nothing else was changed. The corner taps in `photos.json` are scaled to the resized images.
+Real breadboard photos used to test the photo → circuit grid and import code (`docs/API-CONTRACT.md`, the photo section). Each image was turned upright (EXIF), resized to at most 2,048 px on the long edge and re-saved as JPEG; nothing else was changed. The corner taps in `photos.json` are scaled to the resized images.
 
 | File | Source | Author | Licence |
 |---|---|---|---|

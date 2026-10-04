@@ -1,4 +1,4 @@
-/* edison/sections/grades.css — the Grades section (spec §5.2): the push row and
+/* edison/sections/grades.css — the Grades section: the push row and
    one plain table, marks right-aligned in B612 Mono. Tokens only; borders, no shadows. */
 
 [data-route="grades"] .sync { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 28px; }

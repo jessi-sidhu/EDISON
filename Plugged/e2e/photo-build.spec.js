@@ -1,5 +1,5 @@
-// 📷 build and help, the demo beat (issue #143; the photo spec → "Build, then
-// help"; docs/API-CONTRACT.md → "Page additions (photo)"). Build it on the
+// 📷 build and help, the demo beat (issue #143; docs/API-CONTRACT.md →
+// "Page additions (photo)"). Build it on the
 // confirm screen puts the photo's circuit on the board as one undo step
 // (never over her open saved circuit), runs the simulation, badges the
 // problems-panel rows of parts read unsure, and asks Edison her question

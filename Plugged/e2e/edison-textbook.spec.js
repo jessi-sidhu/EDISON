@@ -1,4 +1,4 @@
-// The course hub's Textbook (Edison E7, issue #153): edison/course.html#textbook
+// The course hub's Textbook (issue #153): edison/course.html#textbook
 // shows three chapters set in STIX Two Text, each with live figures (the
 // viewer in a frame) and an "Open in the editor" link, plus fine-line
 // engraved SVG diagrams; and the editor honours ?open=, for allowed paths only.
@@ -10,7 +10,7 @@
 // anyway); no sign-in is involved.
 //
 // The page the builder matches (chosen here, stated so it can be built to):
-// - The textbook section is section[data-route="textbook"] (E4's shell; it
+// - The textbook section is section[data-route="textbook"] (the #150 shell; it
 //   keeps its <h2>Textbook</h2> and no <table>, which e2e/edison-course.spec.js
 //   checks).
 // - It lists the chapters in order, one button or link per chapter whose
@@ -22,7 +22,7 @@
 // - The open chapter is article[data-chapter="<n>"]; the other chapters'
 //   articles are hidden or absent.
 //   - Its first h2/h3 is the opener: it holds the chapter title, in Barlow
-//     Condensed at 39 px or more (plan: 49 px).
+//     Condensed at 39 px or more (designed at 49 px).
 //   - Each section has a heading reading "<n> <title>", e.g. "3.1 The ideal
 //     op-amp".
 //   - Each section's body is shown in <p> elements set in STIX Two Text.
@@ -32,7 +32,7 @@
 //     At least one frame is square (the opener's inset), 160 px or more.
 //   - Each figure has a link named exactly "Open in the editor" with href
 //     ../circuit3d/index.html?ui=edison&open=<figure>.
-//   - Inline SVG diagrams (120 px wide or more; the plan names an op-amp
+//   - Inline SVG diagrams (120 px wide or more; e.g. an op-amp
 //     symbol and a KVL loop), at least one in the textbook: drawn with 3 or
 //     more stroked shapes, every stroke rendered at 1.5 px or less, and every
 //     <path> unfilled (a dot is a <circle>).

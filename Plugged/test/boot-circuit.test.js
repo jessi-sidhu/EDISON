@@ -11,7 +11,7 @@ const SERIES = {
   id: 'c-series',
   name: 'Two LEDs',
   thumbnail: 'data:image/jpeg;base64,xx',
-  updatedAt: '2026-09-27T10:00:00.000Z',
+  updatedAt: '2026-10-03T10:00:00.000Z',
   components: [
     { type: 'battery',  label: 'BAT1', values: {}, holeRefs: null, position: { x: 15.8, z: 0 } },
     { type: 'resistor', label: 'R1', values: { resistance: 220 }, holeRefs: [{ col: 2, row: 'b' }, { col: 6, row: 'b' }], position: { x: 0, z: 0 } },

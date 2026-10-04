@@ -13,7 +13,7 @@
 // V row's `wave?`). amp and offset are values (V); the registry has no Hz
 // unit, so the frequency is fixed at FREQ.
 //
-// `volts` is 0 on purpose: the registry needs a number there, and the spec
+// `volts` is 0 on purpose: the registry needs a number there, and the V row
 // says a wave source reads its `offset` in a plain solve and
 // offset + amp·sin(2π·freq·t) in a time step, whatever `volts` says. So a
 // solver that ignores `wave` reads 0 V here, never the expected value.

@@ -1,10 +1,10 @@
 # Edison design system
 
-A copy of §3, §4 and §4a of `docs/superpowers/specs/2026-10-01-edison-ui-revamp-design.md`, for agents working in `Plugged/edison/` and `circuit3d/css/theme-edison.css`. The spec is the source; if they differ, the spec wins. Tokens live in `edison/tokens.css` only, and `test/edison-design-guard.test.js` enforces §3.
+The design rules for agents working in `Plugged/edison/` and the editor's Edison CSS (`circuit3d/css/theme-edison.css`, `circuit3d/css/edison-hud*.css`). Tokens live in `edison/tokens.css` only, and `test/edison-design-guard.test.js` enforces §3.
 
 ## 3. Staying away from "obvious AI UI"
 
-Researched 2026-10-01. Sources: Developers Digest's 16 vibe-coded patterns, the `avoid-ai-design` catalogue, 925 Studios, and the frontend-design guidance. **Edison never uses:**
+Sources: Developers Digest's 16 vibe-coded patterns, the `avoid-ai-design` catalogue, 925 Studios, and the frontend-design guidance. **Edison never uses:**
 
 | Tell | Edison instead |
 |---|---|
@@ -111,7 +111,7 @@ Everything else stays quiet so these three land.
 
 ## The landing page (landing v3, since #166)
 
-The landing page doesn't follow the pad tokens above, and it knowingly breaks two §3 rules on Aarmen's brief (2026-10-02): it is always dark, and its HUD labels are caps mono. Refs are in `docs/design/landing-v3/`. Its palette lives in `edison/landing.css`, not `tokens.css`.
+The landing page doesn't follow the pad tokens above, and it knowingly breaks two §3 rules on Aarmen's brief: it is always dark, and its HUD labels are caps mono. Refs are in `docs/design/landing-v3/`. Its palette lives in `edison/landing.css`, not `tokens.css`.
 
 - **Palette, black only:**
   - `#101010` page and stage;
@@ -136,7 +136,7 @@ The landing page doesn't follow the pad tokens above, and it knowingly breaks tw
     - It is `display: none` under 720 px.
   - **`#hero-stage`:** fills the stage under the HUD and is empty here; the hero frame goes in it.
 - **Caps labels:** written in capitals in the HTML, since the design guard bans `text-transform`. Labels are 11 to 12 px with letter-spacing 0.12em, in the ink; sublines are in the grey text colour.
-- **The footer:** one quiet grey line, "Edison, built for Edison. Not an official SFU site." and the "Switch to classic UI" link.
+- **The footer:** one quiet grey line, "Not an official SFU site." and the "Switch to classic UI" link.
 - **Phone (720 px and under):** a 16 px HUD gutter, the title block kept, the inset hidden. No sideways scroll at 390 px.
 
 v2's giant outlined EDISON, the three sections below the hero (line art, "+" buttons, the 3-column grid) and the dark/light toggle are gone.

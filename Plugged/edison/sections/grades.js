@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 //  edison/sections/grades.js — the course hub's Grades section
-//  (spec §5.2, a dummy): a table of sample marks from
+//  (a dummy): a table of sample marks from
 //  CourseData.grades, and "Push grades to Canvas", which posts to the
 //  local server's dummy route (contract "Dummy endpoints").
 //

@@ -14,7 +14,6 @@
 
 **Why it exists:** adding a part means writing **one file**, `Plugged/circuit3d/js/parts/<type>.js`, and nothing else. The simulator, placement, 3D view, AI tools, save/load, sidebar and inspector all read the registry. There are no per-type tables anywhere else.
 
-**Design note:** decisions, trade-offs and the build order are in `docs/superpowers/specs/2026-09-27-parts-registry-design.md`.
 
 **Loading:**
 - Each part file is a UMD module that calls `Parts.define({...})`.
@@ -65,7 +64,7 @@ Exactly one of these three kinds:
 //   The ghost and hand placement use `default`; the AI may use anything in range.
 //   'v' is allowed ONLY to cross the centre gap: same column, one leg in rows a–e and one in f–j.
 //   Vertical inside one half is refused (both legs would be the same node). Span limits apply to 'h' only.
-//   Phase 1 spans: resistor {3,5,4} · LED {1,3,2} · buzzer {2,2,2} · button {3,3,3} (fixed).
+//   Spans: resistor {3,5,4} · LED {1,3,2} · buzzer {2,2,2} · button {3,3,3} (fixed).
 
 { kind: 'footprint', legs: [[dCol, dRow], ...], straddle?: boolean, rotations: [0, 180] | [0, 90, 180, 270] }
 //   3+ lead parts. One offset per pin, in pin order, from the anchor (pin 0).
@@ -111,7 +110,7 @@ The element `pins` name the part's pins, or internal nodes written `'#name'` (pr
 | `E` | `out:[+,−], ctrl:[+,−], gain, rout?, rails?:[vneg,vpos], headroom?, ilim?` | Voltage-controlled voltage source: `gain·(V(ctrl+) − V(ctrl−))` behind `rout` Ω (default 0). Adds one unknown, its output current. `rails` name pins whose voltages bound the output, `headroom` (V, default 0) keeps it inside them, `ilim` (A) limits its current. With `rails` or `ilim` it is a mode block (table below); without, always linear. `r.current[id]` is **+ when the E sources current out of `out+`** (not pin order). Not a `ref` source. |
 | `G` | `out:[from,to], ctrl:[+,−], gain` | Voltage-controlled current source. Arrives with dependent sources. |
 | `C` | `pins:[a,b], farads, vmax?, polarised?` | Open in a plain solve. With `analyze(components, wires, { dt, state })` it is the backward-Euler companion: `G = C/h` plus a current source `G·v_prev`. `vmax` and `polarised` are for the mistake checker. |
-| `L` | none | **Reserved.** Rejected until Phase 5–6. |
+| `L` | none | **Reserved.** Rejected. |
 
 **`E` modes** (`r.modes[id]`). Levels are node voltages: the drive `u = V(out−) + gain·vd`, `hi = V(vpos) − headroom`, `lo = V(vneg) + headroom` (±∞ with no `rails`; `ilim` ∞ when missing). `I` is the output current, + out of `out+`.
 
@@ -421,7 +420,7 @@ The per-type wrappers (`App.placeResistor` and the rest) and `chat.js`'s `PLACE`
 - **The server's circuit checks** read `elements`: `R` and `SW` conduct, and `D` conducts one way. Placement goes through `Parts.checkPlacement`.
 
 ## Photo → circuit (#134)
-Maya photographs her real breadboard, confirms every lead, and the app rebuilds it so the simulator can find the fault. **The server only reads the photo; the browser builds.** Design, rationale and the task order: `docs/superpowers/specs/2026-10-01-photo-to-circuit-design.md` (here "the photo spec").
+Maya photographs her real breadboard, confirms every lead, and the app rebuilds it so the simulator can find the fault. **The server only reads the photo; the browser builds.**
 
 ```
 photo.js  pick / drop / sample, corner taps → PhotoGrid.homography → PhotoGrid.warp (flattened image)
@@ -538,7 +537,7 @@ The reader's first guess at the board. On the confirm screen Maya moves every wr
 - **`validateReading(raw)` → `{ reading, notes }`**, in `backend/photo-reader.js`, zero dependencies, run on every provider's output: it coerces each field to the shape above (an unknown enum becomes `other`, `unknown` or `?`, a missing number 0, a missing array `[]`), drops what it can't repair (a part with no leads, a wire without 2 ends), and records why in `notes` (strings).
 
 #### Mock Reading (the demo board)
-The prototype's demo board (`docs/superpowers/specs/photo-reference/prototype/check-demo.js`), in the **a-on-top** frame (row a at y = 190, rails a-side above it): a 9 V battery on the a-side rails, 470 Ω from the + rail to a14, and a red LED in **backwards** (cathode c14, anode c17), with a black wire from b17 to the − rail. Built and simulated, LED1 is dark with a `backwards` problem; flipped, about 14.9 mA. Every `pt` is that hole's `holeCentre` in this frame. R1's rail lead makes it import with a bridge and a `moved` flag; the real stage board (#144) follows the photo spec's stage-board rule instead (R1 fully in the main holes, a jumper from the + rail), so it imports with no bridge and no flags.
+The demo board, in the **a-on-top** frame (row a at y = 190, rails a-side above it): a 9 V battery on the a-side rails, 470 Ω from the + rail to a14, and a red LED in **backwards** (cathode c14, anode c17), with a black wire from b17 to the − rail. Built and simulated, LED1 is dark with a `backwards` problem; flipped, about 14.9 mA. Every `pt` is that hole's `holeCentre` in this frame. R1's rail lead makes it import with a bridge and a `moved` flag; the real stage board (#144) follows the stage-board rule instead (R1 fully in the main holes, a jumper from the + rail), so it imports with no bridge and no flags.
 ```json
 {
   "board": {
@@ -589,7 +588,7 @@ The prototype's demo board (`docs/superpowers/specs/photo-reference/prototype/ch
 ```
 
 ### `PhotoGrid` (`circuit3d/js/photo-grid.js`, `window.PhotoGrid`; #135)
-Photo pixels ↔ breadboard holes. Pure: no DOM, no THREE. Design: the photo spec → "The grid"; reference: `photo-reference/prototype/photo-grid.js`.
+Photo pixels ↔ breadboard holes. Pure: no DOM, no THREE.
 
 **The flattened image** (pitch = 0.1", one hole to the next):
 
@@ -622,7 +621,7 @@ Photo pixels ↔ breadboard holes. Pure: no DOM, no THREE. Design: the photo spe
 - **Mock:** none. Tests build grids from synthetic taps (identity and trapezoid round trips).
 
 ### `PhotoImport` (`circuit3d/js/photo-import.js`, `window.PhotoImport`; #136, #137)
-A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `Ids` and the board geometry (`require('./parts')` etc. in Node; `window.Parts`, `window.App`, `App.BOARD_GEOMETRY` in the browser). Design: the photo spec → "From Reading to board"; reference: `photo-reference/prototype/photo-import.js`.
+A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `Ids` and the board geometry (`require('./parts')` etc. in Node; `window.Parts`, `window.App`, `App.BOARD_GEOMETRY` in the browser).
 
 - **`PhotoImport.build(reading, { components })`** → `{ actions, labels, flags, skipped }`. Never throws: anything it can't build lands in `flags` and `skipped`.
   - `components`: the parts already on the board (`{ type, label }`), for numbering labels with `Ids.nextLabel`. The page passes `[]`: a photo always builds on an empty board (see `SparkyChat.applyBuild`).
@@ -699,7 +698,7 @@ A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `
   - **The control she is using is never replaced (#177):** `place` updates the rows and the canvas at once, but the row holding the focused input or select in `#photo-parts` stays the same element (only its name and holes text refreshed), so it keeps its focus, what she has typed and an open picker; every other row is rebuilt around it. Every row control (value, colour, volts, ⇄) writes to the item in `PhotoConfirm.reading` as it is when it fires, looked up by id (`'power:N'` for a battery), since a merge replaces the Reading.
   - Build it works at any time: `PhotoImport.build` of the Reading as it is.
 
-## Edison and the course hub (spec 2026-10-01-edison-ui-revamp)
+## Edison and the course hub
 
 ### UI flag (`Plugged/edison/ui-flag.js`, `window.UiFlag`)
 - `UiFlag.resolve(search, stored)` → `'edison' | 'classic'`. `search` is `location.search`; `stored` is the saved value or null. `?ui=edison|classic` wins, then a valid stored value, else `'classic'`.

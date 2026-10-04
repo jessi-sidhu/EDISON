@@ -1,14 +1,14 @@
-// The ENSC 220 course hub, Edison E4 (issue #150): edison/course.html with a
+// The ENSC 220 course hub (issue #150): edison/course.html with a
 // left text nav, the banner, Home (the LAB-02 procedure card and stepper),
 // the Labs table and stub sections for Textbook, Grades and TA view, all as
 // hash routes on one page drawn from edison/course-data.js (window.CourseData).
 // The data rules themselves are test/course-data.test.js; this spec is what
 // needs a real page: what the student sees, the nav clicks, the hash routes,
-// Back and Forward, and the computed SFU-red rule from the E1 tokens.
+// Back and Forward, and the computed SFU-red rule from the Edison tokens.
 // No AI is called on this page; no sign-in is involved.
 //
 // The page the builder matches (chosen here, stated so it can be built to):
-// - The page is Edison (the E1 tokens apply, so --sfu is #A6192E on <html>).
+// - The page is Edison (the Edison tokens apply, so --sfu is #A6192E on <html>).
 // - One <nav> holds exactly 5 text links, in this order:
 //     <a href="#home">Home</a>, #labs Labs, #textbook Textbook,
 //     #grades Grades, #ta TA view
@@ -35,7 +35,7 @@
 //   ../circuit3d/index.html?lab=lab1|lab2&ui=edison. Rows 3–5 have
 //   aria-disabled="true", read "Opens week …" and have no link.
 // - #textbook, #grades and #ta render their section's <h2>: Textbook,
-//   Grades, TA view (the E4 stubs; E7–E9 replace the bodies).
+//   Grades, TA view (the #150 stubs; #153–#155 replace the bodies).
 // - Only the current section shows.
 // - landing.html and dashboard.html each have an <a> to edison/index.html in
 //   their markup.
@@ -121,7 +121,7 @@ test('Home: text nav, the SFU-red banner rule, the demo footer, and the LAB-02 p
   await expect(page.locator('nav a svg, nav a img'), 'nav links are text only').toHaveCount(0);
   await expectCurrent(page, 'home');
 
-  // The banner: the E1 tokens are on the page, and the title has the SFU rule.
+  // The banner: the Edison tokens are on the page, and the title has the SFU rule.
   const sfu = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--sfu').trim());
   expect(sfu.toLowerCase(), 'the --sfu token from edison/tokens.css').toBe('#a6192e');
   const title = page.locator('h1');
@@ -246,7 +246,7 @@ test('the nav routes: #labs opens directly with Labs 3–5 locked, the stubs ren
   expect(errors).toEqual([]);
 });
 
-// The link is plain markup in each page (plan: one link each), so the served
+// The link is plain markup in each page (one link each), so the served
 // HTML is parsed rather than run: the dashboard sends guests to the landing
 // page, and both pages start Firebase sign-in.
 test('landing.html and dashboard.html each link to edison/index.html', async ({ page, request }) => {

@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
-//  tools/lab-sheet.js — the lab sheet panel in the editor (issue #151,
-//  Edison E5; spec §5.3). The steps and checks are labs/sheets.js.
+//  tools/lab-sheet.js — the lab sheet panel in the editor (issue #151).
+//  The steps and checks are labs/sheets.js.
 //
 //  LabSheet.open(id) docks #lab-sheet (an <aside>) left of the canvas, so
 //  the canvas narrows beside it: the lab code, title and week, an <ol> of

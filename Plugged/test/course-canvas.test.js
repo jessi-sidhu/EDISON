@@ -1,9 +1,9 @@
-// The Canvas dummy endpoint, Edison E8 (issue #154): the Grades section's
+// The Canvas dummy endpoint (issue #154): the Grades section's
 // "Push grades to Canvas" posts here, and the local server answers like a
 // sync that worked, marked as a demo. There is no real Canvas or LTI.
 // The page side (the button, the status line and its fallback when the
 // route is missing on deployed hosting) is e2e/edison-grades.spec.js.
-// Its own file so E9's TA-feed tests don't clash with it.
+// Its own file so the TA feed's tests (#155) don't clash with it.
 //
 // Shapes these tests assume (docs/API-CONTRACT.md, "Dummy endpoints"):
 // - POST /api/course/canvas/sync → 200 { ok: true, demo: true, syncedAt }

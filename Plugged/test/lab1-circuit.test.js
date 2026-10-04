@@ -1,6 +1,6 @@
 // Lab 1, the first "ENSC 220 Labs" starter circuit (issue #98).
 //
-// The circuit, decided by Aarmen (issue #98 comment, 2026-10-01):
+// The circuit, decided by Aarmen (issue #98 comment):
 //   bench supply PS1 at +10 V (PS1.pos → COM; the − rail unused)
 //   → R1 1 kΩ → node A → R2 2.2 kΩ ∥ R3 3.3 kΩ → COM.
 //

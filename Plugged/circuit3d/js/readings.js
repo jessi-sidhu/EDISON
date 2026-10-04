@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-//  readings.js — what every Phase 3 tool reads from a solve (issue #90).
+//  readings.js — what every tool (js/tools/) reads from a solve (issue #90).
 //  The shape is docs/API-CONTRACT.md → "Readings". Units V, mA and W.
 //
 //    Readings.from(result, board)  result from Sim.analyze, board the

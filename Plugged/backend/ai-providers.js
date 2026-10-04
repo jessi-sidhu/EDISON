@@ -109,7 +109,8 @@ function askClaude(markdown, userMsg, history, ctx) {
 // ── DeepSeek provider ────────────────────────────────────────
 // OpenAI-compatible chat completions with native tool calls. Thinking mode
 // is on by default on DeepSeek; it is switched off here because it is
-// slower, bills reasoning tokens, and ignores temperature.
+// slower, bills reasoning tokens, and ignores temperature, unless
+// DEEPSEEK_THINKING=1 (#205, deepSeekRequest).
 const DEEPSEEK_URL   = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-flash';
 
@@ -237,13 +238,13 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
       if (!canRepair || !problems.length) break;
       repairs++;
       console.log(`[repair] round ${repairs}: ${problems.length} problems`);
-      messages.push({ role: 'assistant', content: m.content || '' });
+      messages.push(assistantTurn(m, ctx));
       const heading = actions.some(a => a && a.tool === 'delete_all') ? REPAIR_HEADING : EDIT_REPAIR_HEADING;
       messages.push({ role: 'user', content: `${heading}\n${problems.map(p => `- ${p}`).join('\n')}` });
       continue;
     }
 
-    messages.push({ role: 'assistant', content: m.content || '', tool_calls: calls });
+    messages.push(assistantTurn(m, ctx, { tool_calls: calls }));
     for (const c of calls) {
       // The model can emit invalid JSON arguments; drop that call, keep the rest.
       let args = null;
@@ -355,7 +356,21 @@ async function deepSeekTurn(messages, tools, ctx) {
   }
 }
 
+// Thinking mode (#205), read per request so the eval or a test can set it:
+// DEEPSEEK_THINKING=1 lets the model reason before it answers; unset or 0
+// keeps the request as it was. Explain mode (#169) never thinks.
+const thinkingOn = ctx => !ctx.explain && /^(1|on|true)$/i.test(String(process.env.DEEPSEEK_THINKING || ''));
+
+// The assistant message the loop sends back: in thinking mode DeepSeek needs
+// each one's reasoning_content in every later request of the same ask.
+const assistantTurn = (m, ctx, extra = {}) => ({
+  role: 'assistant', content: m.content || '', ...extra,
+  ...(thinkingOn(ctx) && m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}),
+});
+
 async function deepSeekRequest(messages, tools, ctx, signal) {
+  const think  = thinkingOn(ctx);
+  const effort = process.env.DEEPSEEK_REASONING_EFFORT;
   const res = await (ctx.fetch || fetch)(DEEPSEEK_URL, {
     method: 'POST',
     signal,
@@ -367,9 +382,10 @@ async function deepSeekRequest(messages, tools, ctx, signal) {
       model: ctx.model || DEEPSEEK_MODEL,
       messages,
       ...(tools ? { tools, tool_choice: 'auto' } : {}),   // none in explain mode (#169): both keys left out
-      thinking: { type: 'disabled' },
-      temperature: ctx.explain ? 0 : 0.3,   // an explain answer (#169) as steady as it can be
-      max_tokens: 2048,
+      thinking: { type: think ? 'enabled' : 'disabled' },
+      // Thinking mode ignores temperature; an explain answer (#169) as steady as it can be.
+      ...(think ? (effort ? { reasoning_effort: effort } : {}) : { temperature: ctx.explain ? 0 : 0.3 }),
+      max_tokens: think ? (Number(process.env.DEEPSEEK_MAX_TOKENS) || 16000) : 2048,
     }),
   });
 
@@ -379,7 +395,11 @@ async function deepSeekRequest(messages, tools, ctx, signal) {
   }
 
   const data = await res.json();
-  return (data.choices && data.choices[0] && data.choices[0].message) || {};
+  const choice = (data.choices && data.choices[0]) || {};
+  // A reply cut off at max_tokens (in thinking mode, often all reasoning and
+  // no tool calls yet) would otherwise look like an empty build (#205).
+  if (choice.finish_reason === 'length') console.warn(`[ask] DeepSeek stopped at max_tokens (${think ? 'thinking on' : 'thinking off'}): the reply is cut off`);
+  return choice.message || {};
 }
 
 // ── Shared parser ────────────────────────────────────────────

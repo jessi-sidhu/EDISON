@@ -1,8 +1,8 @@
-// The Edison design guard (issue #147, Edison E1): fails when Edison drifts
-// into the "obvious AI UI" tells of spec §3 (docs/superpowers/specs/
-// 2026-10-01-edison-ui-revamp-design.md), and holds the spec §4 palette.
+// The Edison design guard (issue #147): fails when Edison drifts
+// into the "obvious AI UI" tells (edison/DESIGN.md §3), and holds the §4
+// palette.
 // Scans every .css, .html and .js file under edison/ plus the editor skin
-// circuit3d/css/theme-edison.css once it exists (E2), and the Lab HUD
+// circuit3d/css/theme-edison.css once it exists, and the Lab HUD
 // stylesheets circuit3d/css/edison-hud*.css (issue #189, Lab HUD 1/4).
 // The HUD's caps labels are its design: text-transform: uppercase is allowed
 // in edison-hud*.css only (approved by Aarmen, edison/DESIGN.md "Editor: Lab
@@ -79,7 +79,7 @@ const RULES = [
     good: ['<a href="course.html">Open the course</a>', '<a>Open</a> →', '<button>Run</button><p>Then → check the scope.</p>'] },
   { re: /\s·\s[^<\n]*\s·\s/, what: 'A · B · C meta string',
     bad: '<p>Lab 2 · Week 3 · Due Friday</p>', good: '<p>Lab 2 is due Friday.</p>' },
-  // Added beyond the plan: spec §3 and the plan's banned list include emoji in the nav.
+  // Extra case: edison/DESIGN.md §3 bans emoji in the nav.
   { re: /<nav\b[^>]*>(?:(?!<\/nav>)[\s\S])*?(?:\p{Emoji_Presentation}|\u{FE0F})/u, what: 'emoji in the nav',
     bad: '<nav><a href="#labs">📘 Labs</a></nav>', good: '<nav><a href="#labs">Labs</a></nav><p>✅ done</p>' },
 ];
@@ -177,7 +177,7 @@ const readTokens = () => {
 const token = (name, value, flags = '') => new RegExp(`(?<![\\w-])--${name}\\s*:\\s*${value}`, flags);
 const hexToken = (name, hex) => token(name, `#${hex}(?![0-9a-f])`, 'i');
 
-test('the tokens file holds the spec palette', () => {
+test('the tokens file holds the DESIGN.md palette', () => {
   expect(hexToken('graphite', '262927').test('--graphite-2: #262927;'), '--graphite does not match --graphite-2').toBe(false);
   expect(hexToken('graphite-2', '4D534E').test('--graphite: #4D534E;'), '--graphite-2 does not match --graphite').toBe(false);
   expect(hexToken('graphite', '262927').test('--x-graphite: #262927;'), '--graphite does not match --x-graphite').toBe(false);
@@ -188,10 +188,10 @@ test('the tokens file holds the spec palette', () => {
     expect(css, `--${k} is #${v}`).toMatch(hexToken(k, v));
 });
 
-// Added beyond the plan: the rest of what E1's tokens file produces (plan →
-// Task E1 → Interfaces). Numbers are proportional B612 with tabular figures
+// Extra case: the rest of the tokens file, the fonts and the scene background
+// (edison/DESIGN.md §4). Numbers are proportional B612 with tabular figures
 // (issue #148): B612 Mono's full-cell period read "14.9" as "14. 9".
-test('the tokens file names the spec fonts and a bezel scene background scene.js can read', () => {
+test('the tokens file names the DESIGN.md fonts and a bezel scene background scene.js can read', () => {
   const family = f => `['"]${f}['"]`;
   expect(token('font-num', family('B612')).test("--font-num: 'B612 Mono', ui-monospace, monospace;"),
     "'B612 Mono' does not count as B612").toBe(false);
@@ -201,7 +201,7 @@ test('the tokens file names the spec fonts and a bezel scene background scene.js
     expect(css, `--${k} starts with ${f}`).toMatch(token(k, family(f)));
   // Pin: proportional digits line up in columns only with tabular figures.
   expect(css, '.ed-num keeps tabular figures').toMatch(/\.ed-num\s*\{[^}]*font-variant-numeric\s*:\s*tabular-nums/);
-  // scene.js takes --scene-bg only as a 6-digit hex; the viewport is the bezel (spec §5.4).
+  // scene.js takes --scene-bg only as a 6-digit hex; the viewport is the bezel (DESIGN.md §4).
   expect(css).toMatch(/--scene-bg\s*:\s*#1E2225\s*[;}]/i);
 });
 

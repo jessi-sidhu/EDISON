@@ -7,8 +7,7 @@
 //
 // Run with:  npm test
 //
-// API these tests are written against (spec: docs/superpowers/specs/
-// 2026-10-01-phase-4-op-amp-and-sine-design.md → "The mini scope"), UMD like
+// API these tests are written against, UMD like
 // tools/flow-dots.js: window.Scope in the page, module.exports in Node, the
 // DOM/canvas wiring only when `document` exists.
 //   windowFor(freq)     seconds of history shown: 2 periods (2 / freq) for a

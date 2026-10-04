@@ -1,13 +1,12 @@
-// The Edison UI flag (issue #147, Edison E1): edison/ui-flag.js decides which
+// The Edison UI flag (issue #147): edison/ui-flag.js decides which
 // UI a page shows and sets <html data-ui>. Pure, so it is tested here on plain
 // object stubs; the page round trip (?ui=edison, then classic unchanged) is
-// E2's e2e/edison-skin.spec.js.
+// e2e/edison-skin.spec.js.
 //
 // Run with:  npm test
 //
 // API these tests are written against (contract: docs/API-CONTRACT.md →
-// "Edison and the course hub"; plan: docs/superpowers/plans/
-// 2026-10-01-edison-ui-revamp.md → Task E1), UMD like simulate.js:
+// "Edison and the course hub"), UMD like simulate.js:
 // window.UiFlag in the page (booting itself), module.exports in Node.
 //   resolve(search, stored)  → 'edison' | 'classic'. ?ui=edison|classic wins,
 //                              then a valid stored value, else 'classic'.
@@ -99,7 +98,7 @@ test.each([
   ['edison/demo/inverting-amp.sparky', true], ['circuit3d/labs/lab1.sparky', true],
   ['../backend/server.js', false], ['edison/../backend/x.sparky', false],
   ['edison/demo/x.js', false], ['https://evil.example/x.sparky', false], ['', false],
-  // Added beyond the plan: an absolute path, encoded or deeper traversal, a
+  // Extra cases: an absolute path, encoded or deeper traversal, a
   // query string, a look-alike folder, and the null the viewer gets from
   // URLSearchParams.get when there is no ?circuit= at all.
   ['/edison/demo/x.sparky', false], ['edison/%2e%2e/backend/x.sparky', false],
@@ -139,7 +138,7 @@ test('boot saves a ?ui= choice and a later load with no ?ui= reads it back', () 
   expect(junk.store.get('plugged.ui'), 'an unknown ?ui= is not saved').toBe('edison');
 });
 
-// Review focus 2 (plan): a private window or blocked storage must still show
+// A private window or blocked storage must still show
 // Edison for this page load, and the page must never throw.
 test.each(BLOCKED)('blocked localStorage (%s): boot with ?ui=edison still shows Edison and does not throw', (how, block) => {
   const Flag = UiFlag();

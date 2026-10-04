@@ -1,4 +1,4 @@
-/* edison/tokens.css — the only source of Edison's look (spec §4). */
+/* edison/tokens.css — the only source of Edison's look (DESIGN.md §4). */
 html[data-ui="edison"] {
   --pad: #E9EFE2;  --pad-grid: #CFDCC3;  --pad-grid-line: #E1E9D8;   /* the grid itself, 6% under --pad */
   --graphite: #262927;  --graphite-2: #4D534E;

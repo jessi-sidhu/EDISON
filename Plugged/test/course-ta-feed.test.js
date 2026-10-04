@@ -1,4 +1,4 @@
-// The TA view's live feed endpoint (Edison E9, issue #155):
+// The TA view's live feed endpoint (issue #155):
 // GET /api/course/ta-feed on the local server.
 //
 // Contract (docs/API-CONTRACT.md → Edison and the course hub → Dummy endpoints):
@@ -6,7 +6,7 @@
 //   sample events, timestamps relative to now. Callers fall back to
 //   CourseData.feed when it 404s (deployed hosting has no Node server).
 //
-// Shapes these tests assume (plan Task E9, Step 1 and Step 2; stated so the
+// Shapes these tests assume (from the issue; stated so the
 // builder matches them):
 // - 5 to 8 events, newest first, every `at` an ISO string within the last 30
 //   minutes of the server's clock.

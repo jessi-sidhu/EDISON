@@ -1,8 +1,8 @@
-// The scene's --scene-bg hook (issue #147, Edison E1): circuit3d/js/scene.js
+// The scene's --scene-bg hook (issue #147): circuit3d/js/scene.js
 // takes the CSS variable --scene-bg on <html> (a hex colour) as the 3D scene
 // background when it is set, and keeps classic's #dcdad4 when it isn't
 // (contract: docs/API-CONTRACT.md → "Edison and the course hub" → Page hooks;
-// plan Task E1, Step 5; spec §5.4: Edison's viewport is the bezel, #1E2225).
+// edison/DESIGN.md §4: Edison's viewport is the bezel, #1E2225).
 //
 // Run with:  npm test
 //
@@ -11,7 +11,7 @@
 // number or a clean "#rrggbb"; anything else it warns about and draws black),
 // every other THREE class and DOM object is an inert stand-in, and
 // getComputedStyle answers --scene-bg with the value under test. The page
-// half (the real computed colour in a browser) is E2's e2e/edison-skin.spec.js.
+// half (the real computed colour in a browser) is e2e/edison-skin.spec.js.
 
 const assert = require('node:assert');
 const fs     = require('node:fs');

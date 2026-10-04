@@ -2,7 +2,7 @@
 // side (bug #78). The ± request ("Use the bench supply at ±12 V: an LED with
 // a resistor on the + rail and another on the − rail") fails about 1 in 3 on
 // the real AI: the − rail LED goes in backwards, or the resistor is too
-// small (both LEDs over 20 mA). The fix that worked for every Phase 2 part:
+// small (both LEDs over 20 mA). The fix that worked for every earlier part:
 // ai.recipe, a proven build the server writes into the prompt as numbered
 // steps only when place_bench_supply is sent, and a guide in plain words.
 // The trap is the − side: the LED's ANODE goes toward COM (ground, tn) and

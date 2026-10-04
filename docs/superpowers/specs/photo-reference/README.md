@@ -1,9 +1,0 @@
-# Photo reference code (throwaway, for porting)
-
-Reference code from the photo spike (2026-10-01). **Not part of the app.** Port the ideas into `Plugged/circuit3d/js/photo-grid.js` (#135) and `photo-import.js` (#136, #137), in plain JS with the UMD wrapper, with Vitest tests.
-
-- `geom.py`: the homography from tapped holes (4 or more points, least squares), the real-board frame (columns at x = 0…N−1, rows a–e at y = 0–4 and f–j at y = 7–11 in 0.1" pitches), working out which side row a is on (`orientation`, rejects mirror images), the `Rectifier` (photo ↔ board frame ↔ flattened-image pixels, and the PIL perspective warp), the labelled grid overlays and `snap` (nearest hole, the gap and rail zones).
-- `prototype/`: a validated JS prototype, the best starting point. `photo-grid.js` (homography, snapping, matching `geom.py` to 1e-7 px), `photo-import.js` (Reading → legal actions, rails by sign, the bridge, labels, flags), `harness.js` (runs actions through the app's real `Board.apply`, the Accept path, the server's checks, nets and the solver), and `check-photos.js` / `check-edges.js` / `check-demo.js` (the 6 real boards, 14 edge cases plus a 400-board fuzz, the demo board). Run each with `node <file>` from this folder; they load the app from `Plugged/circuit3d/js` (override with `PLUGGED_JS`). The real modules use `require('./parts')` etc. instead of that path, and the checks become Vitest tests.
-- The test photos, taps and hand-labelled truth it was run on are in `Plugged/test/fixtures/photo/web/` (see `ATTRIBUTION.md` there). `geom.py` loads photos with `ImageOps.exif_transpose`; the fixtures are already upright.
-
-What the spike measured (deepseek-flash, 6 photos, 76 leads): 23–34% of leads in the exact hole, 30–45% in the right node, part count 86–98% right; the labelled grid doubled accuracy over raw photos. That's why Tier 1 has a confirm step: see the spec.

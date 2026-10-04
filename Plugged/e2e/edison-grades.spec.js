@@ -1,18 +1,18 @@
-// The course hub's Grades section and the Canvas dummy, Edison E8 (issue
-// #154): a sample-data table of labs and pre-labs per student, and
+// The course hub's Grades section and the Canvas dummy (issue #154): a
+// sample-data table of labs and pre-labs per student, and
 // "Push grades to Canvas", which posts to the local server's dummy route
 // and always ends on the demo status line. On deployed hosting there is no
-// Node server, so the route is a 404 there (plan, Review focus #1): the push
+// Node server, so the route is a 404 there: the push
 // must fall back and still say "(demo)", never an error.
 // The route itself is test/course-canvas.test.js; this spec is what needs a
 // real page: the table as the student sees it, the button, the click through
 // to the request, and the fallback in the page. No AI is called on this page;
 // no sign-in is involved.
 //
-// The page the builder matches (from the plan's Task E8 and the spec §5.2;
-// details not named there are chosen here, stated so they can be built to):
+// The page the builder matches (from the issue; details not named there are
+// chosen here, stated so they can be built to):
 // - #grades shows one <table> in section[data-route="grades"], with a
-//   <caption> a student can read containing "Sample data" (the plan's
+//   <caption> a student can read containing "Sample data" (the full
 //   caption: "Sample data. Names are invented."). Its font is Barlow Semi
 //   Condensed (var(--font-dense)).
 // - The header row in <thead> has the lab columns (header text with "Lab",
@@ -173,7 +173,7 @@ test('Push grades to Canvas: a solid --mask button that posts to the dummy route
   expect(errors).toEqual([]);
 });
 
-// Deployed hosting has no Node server (Review focus #1): the route is a bare
+// Deployed hosting has no Node server: the route is a bare
 // 404 (as the contract has it), a hosting 404 page, or the request fails
 // outright. Each still ends on the demo line.
 const NO_SERVER = [

@@ -210,7 +210,7 @@ test.each([
 // server cuts that markup out of an explain reply (stripToolMarkup in
 // ai-providers.js, not exported, so through the explain ask), keeps the prose
 // around it, and answers the contract's fallback when no text is left. The
-// replies are the ones recorded in the live runs on #169 (Mac, 2026-10-02).
+// replies are the ones recorded in the live runs on #169 (Mac).
 
 const TOOL_NAMES = Server.CIRCUIT_TOOLS[0].function_declarations.map(d => d.name);
 const TOOL_TAG   = new RegExp(`</?(?:${TOOL_NAMES.join('|')})\\b`);

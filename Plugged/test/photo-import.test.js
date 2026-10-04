@@ -23,7 +23,7 @@
 //   running hole map (wire ends included) and Board.apply gives no errors;
 //   the built board's nets equal the Reading's; LED polarity is never changed.
 //
-// The bridge (#137; the photo spec → "From Reading to board", step 6): a
+// The bridge (#137): a
 // part that can't sit on its two nodes (a lead in a rail, span out of range,
 // diagonal across the gap, both leads in one node) keeps one lead on its
 // real node, puts the other in a free helper column-half H (one the Reading
@@ -51,7 +51,7 @@ const {
   checkInvariants, builtNets, assertSameNets, simulate, backwardsFor,
 } = require('./fixtures/photo-import-helpers.js');
 
-// The stage board (the photo spec's stage-board rule, #144): a 9 V battery
+// The stage board (the stage-board rule, #144): a 9 V battery
 // on the a-side rails, 470 Ω fully in the main holes with a jumper from the
 // + rail, a red LED (backwards unless `ledPart` says otherwise), and a
 // black return wire to the − rail. Imports with no bridge and no flags.

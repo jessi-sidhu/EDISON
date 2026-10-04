@@ -9,7 +9,7 @@
 - **`main`** = `cbf8f23` (PR #195): Edison UI, Lab HUD (#188–#194), the parts redo, the photo feature. This is the demo branch.
 - **`dev`** is ahead of `main` with the bug-fix round of 2026-10-03 (#197–#202 plus seam fixes, see below). Not promoted yet.
 - **Branch `aarmen/204-opamp-repair-checks`** (pushed, not on dev): #204, held until #206 lands.
-- **Branch `aarmen/205-deepseek-thinking`**: the reasoning switch (#205). It goes to dev once its live results are written into `docs/AI-TEST-SET.md`.
+- **The reasoning switch (#205) is on dev**, off by default: `DEEPSEEK_THINKING=1` turns it on (see "Running the AI test set" below).
 
 ### On dev since `main` (the 2026-10-03 bug-fix round)
 - **#197 bench rules:** at most 1 bench supply, 1 function generator and 2 multimeters (`circuit3d/js/bench.js`). Every instrument the AI places gets its own spot in a row in front of the board, never stacked. The server refuses a 2nd supply or generator, or a 3rd meter, while the model is still answering.
@@ -24,14 +24,14 @@
 
 | # | Issue | What | Notes |
 |---|---|---|---|
-| 1 | #205 | Finish the reasoning bake-off: the 16 cases × 3 with thinking on, on `deepseek-flash` and on `deepseek-v4-pro`. Record the pass rate, seconds and cents per build in `docs/AI-TEST-SET.md`, then ship the switch (it's off by default). | Flash + thinking, first 15 runs: **12/15** (was 3/15 with thinking off), 9–76 s per build, about 1¢ a build. |
+| 1 | #205 | The switch is **on dev** (off by default). Finish the bake-off: record the rest of the flash run, then run the 16 cases × 3 on `deepseek-v4-pro` with thinking on (`DEEPSEEK_THINKING=1 DEEPSEEK_MODEL=deepseek-v4-pro DEEPSEEK_TIMEOUT_MS=300000 npm run ai-eval -- --only bank --json <file>`). Record the pass rate, seconds and cents per build in `docs/AI-TEST-SET.md`. | Flash + thinking, first 27 runs: **17/27** (5/27 with thinking off), 9–100 s per build, about 1¢ a build. |
 | 2 | #207 | Turn reasoning on by default with the chosen model. Raise the server deadline (60 s) and the page timeout (75 s) above the slowest build. | Aarmen's call on the model, from #205's numbers. |
 | 3 | #206 | Repair loop: keep the best build, never send a rebuild cut off by the 12-round cap, and repair by edits instead of full rebuilds. | All 5 "parts, no wires" runs came from this. |
 | 4 | #208 | Checker false positives: the superdiode (BANK-07) and back-to-back LEDs on a sine (BANK-15). | These send correct builds into repair. |
 | 5 | #204 | The op-amp repair checks (built, on its branch). Rebase onto dev after #206 and measure. | |
 | 6 | #209 | Wire by pin name (`U1.in1p`), with the server picking the hole. | Only if hole-level mistakes remain after reasoning. |
 | 7 | — | `/promote` dev → main once the AI path is solid, then `/demo-check`. | |
-| 8 | — | Voice: ElevenLabs V1–V3. The plan is in `docs/superpowers/plans/2026-10-02-elevenlabs-voice.md`; issues not filed yet. | |
+| 8 | — | Voice: ElevenLabs V1–V3 (server routes for speech-to-text and text-to-speech, hold-to-talk in the chat, a spoken demo answer). Needs `ELEVENLABS_API_KEY` in the backend env file; issues not filed yet. | |
 | — | #180, #156, #144, #145 | Older open issues: photo-answer wording, the Edison demo walk, stage-board photos (needs Thandi's photos), iPhone camera (stretch). | |
 
 ## The AI: what we learned (2026-10-03)
@@ -42,7 +42,7 @@ Measured on the AI test set, 16 cases × 3 runs, graded in the simulator with wi
 |---|---|---|
 | `deepseek-flash`, thinking **off** (the app today) | **11/48** | Cases 1, 13, 14 pass 3/3; 8 passes 2/3; the rest fail. |
 | Same, plus an exact TL072 pin map in the prompt (#203) | 11/48 | No gain, so it wasn't shipped. Prompt wording isn't the lever. |
-| `deepseek-flash`, thinking **on** (#205) | first 15 runs: **12/15** | Same cases with thinking off: 3/15. The full numbers go in `docs/AI-TEST-SET.md`. |
+| `deepseek-flash`, thinking **on** (#205) | first 27 runs: **17/27** | Same cases with thinking off: 5/27. Builds 9–100 s. Case 06 placed nothing (reasoning used the whole max_tokens). Full numbers in `docs/AI-TEST-SET.md`. |
 
 Why builds failed, by impact:
 1. **Thinking was off.** The model is fast and cheap but didn't reason. Its mistakes were reasoning mistakes: op-amp inputs swapped, the meter on the wrong row of the TL072, wrong gain resistors.

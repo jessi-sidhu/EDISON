@@ -36,7 +36,7 @@ async function openEditor(page) {
   await page.route('**/api/ask', route => route.fulfill({ json: { reply: '', actions: [] } }));
   await page.goto('/circuit3d/index.html');
   await page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
-  // Keep the latest solve, as the Phase 3 tools hear it.
+  // Keep the latest solve, as the tools hear it.
   await page.evaluate(() => document.addEventListener('plugged:sim', e => { window.__lastSim = e.detail.result; }));
 }
 

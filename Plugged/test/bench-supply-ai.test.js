@@ -1,4 +1,4 @@
-// The AI side of the bench supply (issue #34, scope decision 2026-09-29):
+// The AI side of the bench supply (issue #34, scope decision):
 // backend/server.js stops treating "off-board" as "battery".
 //
 // Shapes these tests assume (the agreed design; stated so the builder

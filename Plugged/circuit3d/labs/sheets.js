@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-//  labs/sheets.js — the lab sheets' steps and checks (issue #151, Edison E5).
+//  labs/sheets.js — the lab sheets' steps and checks (issue #151).
 //  The shape is docs/API-CONTRACT.md → "Edison and the course hub" →
 //  "Lab sheets". tools/lab-sheet.js draws a sheet in the editor.
 //

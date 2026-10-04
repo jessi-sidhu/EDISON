@@ -1,5 +1,5 @@
 // When the primary DeepSeek model stalls or breaks, the ask is retried once on
-// a fallback model (issue #130). Found on 2026-10-01: deepseek-flash stopped
+// a fallback model (issue #130). Found live: deepseek-flash stopped
 // answering for over 30 minutes while deepseek-v4-pro answered in 1.5 s.
 //
 // Shapes these tests assume (stated so the builder matches them):

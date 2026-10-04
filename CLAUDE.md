@@ -7,7 +7,6 @@
   - `/ship`: finish it. Runs the checks, then pushes straight to `dev`.
   - `/promote`: quick test of `dev` (the local checks plus a walk of the demo path; CI is off, #165), then move it to `main`.
   - `/new-task`: write an issue.
-  - `/adapt-to-tracks`: re-plan when tracks drop.
   - `/demo-check`: walk the demo on `main` in a browser.
 - **QA:** `/qa-pass` is the full `docs/QA.md` run against `dev` in a real browser, at checkpoints (about daily, and before submitting). It files failures as `bug` issues.
 - **`/start-task` is an orchestrator.** It sizes the issue, then runs the specialists in `.claude/agents/`:

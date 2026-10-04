@@ -1,11 +1,10 @@
-// The editor's Edison skin in the browser (issue #148, Edison E2; plan
-// docs/superpowers/plans/2026-10-01-edison-ui-revamp.md → Task E2, Review
-// focus #4; spec §4 "Edison's annotations" and §5.4). The value-wrapping and
-// label-finding rules are test/edison-skin.test.js; this spec is what needs a
-// real page: the flag and theme on the real editor, the 3D scene colour, a
-// reply's value on screen, the leader from that reply to LED1 in the 3D view,
-// classic left untouched after a switch, and the landing page's ?ask= seam
-// (plan Task E3, the editor side, which lives in edison/skin.js).
+// The editor's Edison skin in the browser (issue #148; edison/DESIGN.md §4).
+// The value-wrapping and label-finding rules are test/edison-skin.test.js;
+// this spec is what needs a real page: the flag and theme on the real
+// editor, the 3D scene colour, a reply's value on screen, the leader from
+// that reply to LED1 in the 3D view, classic left untouched after a switch,
+// and the landing page's ?ask= seam (the editor side, which lives in
+// edison/skin.js).
 // /api/ask is stubbed; no AI is called. Guest only; sign-in is a manual QA case.
 //
 // The page the builder matches:
@@ -21,7 +20,7 @@
 //   Lab HUD's --ink (issue #192, edison-hud-chat.css; the dotted underline is
 //   pinned in e2e/edison-hud-chat.spec.js); user messages are left alone.
 // - A reply that names a part draws one .ed-leader: a straight line element
-//   (the plan's rotated 1 px div) whose bounding box's diagonal is the line,
+//   (a rotated 1 px div) whose bounding box's diagonal is the line,
 //   from the reply bubble to the part's on-screen position. It follows the
 //   part when the camera moves, and doesn't keep the 3D view drawing: with no
 //   input the view goes quiet (render on demand, #109).
@@ -238,7 +237,7 @@ test('?ui=edison: HUD chrome, bezel scene, and a reply\'s value highlighted with
   expect(errors).toEqual([]);
 });
 
-// Review focus #4: a session that was Edison and switches to classic shows
+// A session that was Edison and switches to classic shows
 // today's classic UI, and the skin does nothing to a reply there.
 test('switching to ?ui=classic in the same session leaves no Edison style behind', async ({ page }) => {
   const errors = watchErrors(page);
@@ -266,8 +265,8 @@ test('switching to ?ui=classic in the same session leaves no Edison style behind
   expect(errors).toEqual([]);
 });
 
-// The landing page's prompt box opens the editor with ?ask= (plan Task E3);
-// the editor side is edison/skin.js.
+// The landing page's prompt box opens the editor with ?ask=; the editor
+// side is edison/skin.js.
 test('?ask= on load puts the request in the chat and sends it exactly once', async ({ page }) => {
   const errors = watchErrors(page);
   const asked = await stubAsk(page, 'Here is an LED circuit.');

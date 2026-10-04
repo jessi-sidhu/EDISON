@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────
-   theme-edison.css — the editor's Edison skin (spec §5.4, edison/DESIGN.md).
+   theme-edison.css — the editor's Edison skin (edison/DESIGN.md).
    Every rule is scoped to html[data-ui="edison"], so classic is untouched.
    Pad surfaces with 1 px --pad-grid rules, bezel instruments, no shadows.
    Colours come from edison/tokens.css; the few shades below are derived
@@ -181,9 +181,10 @@ html[data-ui="edison"] #sparky-input {
 html[data-ui="edison"] #sparky-input:focus { background: var(--ed-sheet); border-color: var(--mask); box-shadow: none; }
 @keyframes ed-dot { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
 
-/* The leader (spec §4): a dashed line from Edison's note to the part, ending
-   in a dot on the part. Graphite over a pad keyline, so it reads on the pad,
-   the bezel and the white breadboard alike. Placed by edison/skin.js. */
+/* The leader (edison/DESIGN.md §4): a dashed line from Edison's note to the
+   part, ending in a dot on the part. Graphite over a pad keyline, so it reads
+   on the pad, the bezel and the white breadboard alike. Placed by
+   edison/skin.js. */
 html[data-ui="edison"] .ed-leader {
   position: fixed; z-index: 45; height: 0; pointer-events: none; transform-origin: 0 0;
   border-top: 1px dashed var(--graphite); border-bottom: 1px dashed var(--pad);

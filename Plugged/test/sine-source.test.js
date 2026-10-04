@@ -5,8 +5,7 @@
 //
 // Run with:  npm test
 //
-// Seams these tests assume (spec: docs/superpowers/specs/
-// 2026-10-01-phase-4-op-amp-and-sine-design.md → "The sine source"):
+// Seams these tests assume:
 // - A V element may carry wave: { kind: 'sine', amp, freq, offset }.
 //   - analyze(components, wires) with no third argument: it is `offset`.
 //   - analyze(components, wires, { dt, state, t }): it is

@@ -1,6 +1,6 @@
 # Demo
 
-The pitch and the 3-minute demo for judging. Draft, 2026-10-02. When it settles, the steps move into `docs/PRD.md` under "Demo story", which is the path that must never break.
+The pitch and the 3-minute demo. When it settles, the steps move into `docs/PRD.md` under "Demo story", which is the path that must never break.
 
 ## The pitch
 
@@ -47,7 +47,7 @@ Maya is a second-year SFU engineering student in ENSC 220. Her labs need equipme
 | **A recorded photo of our demo board** (#144). | Beat 4 must replay instantly on stage. A live read takes about 39 s, so live is the backup only. | Needs Thandi's board and photos. |
 | **Landing labels and build-up** (#168, #171). | Beat 1. | Built; review, stack and push left. |
 | **Props.** | A real breadboard with a deliberately backwards LED, a spare LED and a battery. A phone to take the photo, or a pre-taken photo ready to drop in. | Thandi. |
-| **Rehearsal.** | The full path 5 times in a row without error, on the build we demo from. | Before judging. |
+| **Rehearsal.** | The full path 5 times in a row without error, on the build we demo from. | Before the demo. |
 
 ## On the day
 

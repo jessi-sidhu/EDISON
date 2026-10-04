@@ -972,7 +972,7 @@ test('.env.example lists PHOTO_HEDGE_MS, PHOTO_LEADS_TIMEOUT_MS and PHOTO_LEADS_
 });
 
 // ── 8. Retries and the cap in flight (#172) ─────────────────────────────────
-// 24 crops in flight drew 503s and some 429s from Gemini on 2026-10-02, and
+// 24 crops in flight drew 503s and some 429s from Gemini, and
 // an early failure sat idle until the 12 s resend. Now it is retried 1–2 s
 // later, and at most PHOTO_LEADS_CONCURRENCY (16) first calls and retries
 // are out at once. The live check then had 9 of 13 crops time out with no

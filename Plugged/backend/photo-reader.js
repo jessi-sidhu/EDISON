@@ -201,7 +201,7 @@ async function postJSON(ctx, signal, who, url, headers, body) {
 
 // ── Gemini's retry rule (#172), for both photo rounds ────────
 // Gemini answers in ~1 s, but stalls 9–16 s at times and answers 503 under
-// load (measured 2026-10-02). So one request is a short race of identical
+// load (measured). So one request is a short race of identical
 // calls, call(signal) sending it once (it resolves the answer or throws):
 //   - a call that fails at once (5xx, 429, network error, an empty or
 //     invalid reply) is sent again 1–2 s later; a 429 whose body has a
@@ -314,7 +314,7 @@ function geminiText(data, who) {
 }
 
 // ── The box round's fallback model (#176) ────────────────────
-// Robotics-ER can stall model-wide: on 2026-10-02 a call and its resend
+// Robotics-ER can stall model-wide: once, a call and its resend
 // both hung, with no 503 to retry, and the photo ended AI_TIMEOUT. So when
 // it has no valid answer PHOTO_FALLBACK_AT_MS into the box round (or has
 // spent its calls before then, never after a 400/401/403), the same request

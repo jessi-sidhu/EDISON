@@ -1,4 +1,4 @@
-// Part packs (issue #76, AI context v2 spec §3). Each DeepSeek request sends
+// Part packs (issue #76). Each DeepSeek request sends
 // a fixed core plus the rule lines of only the parts in play, so the prompt
 // stops growing with the catalogue.
 //

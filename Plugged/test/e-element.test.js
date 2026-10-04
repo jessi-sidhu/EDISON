@@ -4,8 +4,7 @@
 //
 // Run with:  npm test
 //
-// Contract these tests assume (docs/API-CONTRACT.md → Elements, E, and
-// docs/superpowers/specs/2026-10-01-phase-4-op-amp-and-sine-design.md):
+// Contract these tests assume (docs/API-CONTRACT.md → Elements, E):
 // - { kind: 'E', id, out: [+, −], ctrl: [+, −], gain, rout?, rails?: [vneg, vpos],
 //   headroom?, ilim? }. rails name part pins; their node voltages bound the
 //   output.

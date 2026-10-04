@@ -1,6 +1,5 @@
-// The lab sheet in the editor (issue #151, Edison E5; plan
-// docs/superpowers/plans/2026-10-01-edison-ui-revamp.md → "Task E5", spec
-// §5.3, review focus #3 and #5). ?lab=lab1 loads Lab 1's starter and opens a
+// The lab sheet in the editor (issue #151).
+// ?lab=lab1 loads Lab 1's starter and opens a
 // procedure card whose steps turn Passed or Check failed live from the
 // simulator. The checks' logic and the Lab 1 numbers (I(R1) 4.31 mA,
 // V(R2) 5.69 V, I(R3) 1.72 mA, half-built boards) are test/lab-sheets.test.js;
@@ -24,7 +23,7 @@
 // The steps are read from the page's own LabSheets.get('lab1'), not
 // restated here.
 //
-// Lab 2 (issue #152, Edison E6), the last case: ?lab=lab2&ui=edison loads
+// Lab 2 (issue #152), the last case: ?lab=lab2&ui=edison loads
 // the starter circuit3d/labs/lab2.sparky (U1, PS1 and FG1, unwired) and the
 // LAB-02 sheet; the student's wires and Rin / Rf come from
 // test/fixtures/lab2-finish.js, added through App.placePart and
@@ -206,7 +205,7 @@ test('Edison styling: ?lab=lab1&ui=edison gives the sheet the Lab HUD black rgb(
   expect(errors).toEqual([]);
 });
 
-// ── Lab 2 (issue #152, Edison E6) ─────────────────────────────
+// ── Lab 2 (issue #152) ────────────────────────────────────────
 
 // The starter's labels as saved, read from the file the page loads.
 function starterLabels() {

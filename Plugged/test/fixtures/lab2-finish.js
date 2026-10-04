@@ -1,4 +1,4 @@
-// Lab 2's finishing work (issue #152, Edison E6): what the student adds to
+// Lab 2's finishing work (issue #152): what the student adds to
 // the starter (circuit3d/labs/lab2.sparky: the TL072 U1 across the centre
 // gap, the bench supply PS1 and the function generator FG1 off the board,
 // nothing wired) to build the lab's inverting amplifier. One source for
@@ -40,7 +40,7 @@ function lab2Finish(holes) {
   }
   // The layout puts the resistors below the chip (rows g–j) and V+'s wire
   // above it (row a): pins 1–4 in row f, V+ in row e (the chip at f30, as
-  // the plan's starter has it).
+  // the starter has it).
   const rowsOk = ['out1', 'in1n', 'in1p', 'vneg'].every(p => holes[p][0] === 'f') && holes.vpos[0] === 'e';
   if (!rowsOk) throw new Error(`lab2Finish expects pins 1–4 in row f and V+ in row e (U1 at f30); got ${JSON.stringify(holes)}`);
 

@@ -9,7 +9,7 @@
 
   // ── Scene ──────────────────────────────────────────────────
   const scene = new THREE.Scene();
-  // Edison (spec §5.4) sets --scene-bg on <html>; classic leaves it unset.
+  // Edison sets --scene-bg on <html>; classic leaves it unset.
   const sceneBg = getComputedStyle(document.documentElement).getPropertyValue('--scene-bg').trim();
   scene.background = new THREE.Color(/^#[0-9a-f]{6}$/i.test(sceneBg) ? sceneBg : 0xdcdad4);
 

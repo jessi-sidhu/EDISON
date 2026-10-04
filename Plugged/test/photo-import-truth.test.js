@@ -1,8 +1,8 @@
 // PhotoImport on real boards (issue #137): each spike photo's hand-labelled
 // truth (test/fixtures/photo/web/truth.json) as a confirmed Reading v1 →
 // PhotoImport.build → zero refusals and the truth's nets for every built
-// part (docs/API-CONTRACT.md → "PhotoImport" → "Invariants"; the photo spec
-// → "Testing" and "Prototype results": 27 two-lead parts, 17 of them bridged).
+// part (docs/API-CONTRACT.md → "PhotoImport" → "Invariants"; the prototype
+// imported 27 two-lead parts, 17 of them bridged).
 //
 // The truth → Reading v1:
 // - resistors, LEDs and wires; every other type (button, battery, capacitor,
@@ -67,7 +67,7 @@ function at(h) {
   return m ? { rail: true, node: 'rail:' + m[1] } : null;
 }
 
-// How many helper column-halves a part needs (the photo spec, step 6): 0
+// How many helper column-halves a part needs (the bridge, #137): 0
 // when it sits on its own two nodes (one half, span in range; or straight
 // across the gap in one column; or both in one rail, placed in that rail),
 // 2 for two different rails, else 1.
@@ -86,7 +86,7 @@ function helpersFor(p) {
 const buildable = rd => rd.parts.filter(p => p.type !== 'other' && p.leads.length === 2 && p.leads.every(l => at(l.hole)));
 
 // A check on the fixtures and the conversion above (no PhotoImport): they
-// give the parts the prototype imported (the photo spec → "Prototype results").
+// give the parts the prototype imported.
 test('the truth files hold the 27 two-lead parts the prototype imported, 17 of them needing the bridge', () => {
   const all = Object.keys(TRUTH).flatMap(pid => buildable(toReading(pid)));
   assert.strictEqual(all.length, 27);

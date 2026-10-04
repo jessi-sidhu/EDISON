@@ -3,7 +3,7 @@
 <!-- Aarmen owns the cases and their expected results; Thandi can check the numbers on a real board.
      /qa-pass runs every case here against `dev`: the AI build cases through `npm run ai-eval` (see the note above the AI table), the rest in a real browser, the way a user would.
      Each case: what to do, and what must be true. Keep expected results concrete (numbers, exact messages) so a
-     pass/fail is never a judgment call. At track drop, add the new demo path first. -->
+     pass/fail is never a judgment call. -->
 
 ## Setup
 - The app runs from `Plugged/`. Start it with `cd Plugged/backend && node server.js`, then open http://localhost:5001.

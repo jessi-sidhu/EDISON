@@ -1,4 +1,4 @@
-// The repair loop (issue #83, AI context v2 spec §4). Before the user sees a
+// The repair loop (issue #83). Before the user sees a
 // full rebuild, the server checks and simulates it; if something is wrong,
 // DeepSeek gets the specific problems back and fixes them, at most 2 rounds.
 //
