@@ -44,3 +44,38 @@
 }
 #hover-card .hc-title { font-weight: 600; }
 #hover-card .hc-warn  { color: #dc2626; font-weight: 600; }
+
+/* mistake checker (#95) */
+
+#mistakes-panel {
+  position: absolute;
+  top: 50px;               /* tools/mistakes.js moves it under #sim-results */
+  right: 14px;
+  width: 260px;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.13);
+  display: none;
+  pointer-events: auto;
+}
+
+.mistake-row {
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mistake-row + .mistake-row { border-top: 1px solid var(--border); }
+.mistake-row:hover { background: #f5f2ed; }
+.mistake-icon   { display: inline-block; width: 18px; color: #dc2626; font-weight: 700; }
+.mistake-labels { color: var(--text-primary); font-weight: 600; }
+.mistake-why    { color: #b45309; padding-left: 18px; }
+.mistake-none   { color: #15803d; font-weight: 600; }
+
+/* csv export (#101) */
+#csv-export-btn { color: var(--text-primary); }

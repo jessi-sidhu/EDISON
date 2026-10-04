@@ -1232,6 +1232,7 @@
       (state.components.length || state.wires.length) ? 'flex' : 'none';
 
     scheduleAutoSave();
+    if (window.Connections) Connections.onBoardChange(state);
   }
 
   // ── Inspector ────────────────────────────────────────────────

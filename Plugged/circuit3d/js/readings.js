@@ -10,6 +10,8 @@
 //      part(label)     { V, I, P, rating, over }, or null without readings
 //      kcl(net)        [{ label, pin, amps }], each element's current INTO
 //                      the net in mA; sums to about 0
+//      problems()      [{ kind, labels[], why }], the mistake checker (#95):
+//                      'short' | 'no-resistor' | 'backwards' | 'open' | 'over'
 //    Readings.nets(board)  every net, with no solve
 //
 //  Nets come from simulate.js's own buildGraph, so they always match the
@@ -148,7 +150,64 @@
       return out;
     }
 
-    return { netOf, voltage, part, kcl };
+    // The mistake checker (#95), from the solve's own flags and each part's
+    // own warnings, so it never re-derives the physics. Wording follows
+    // server.js findCircuitProblems where the two overlap.
+    function problems() {
+      try { return findProblems(); } catch { return []; }
+    }
+
+    function findProblems() {
+      const out = [];
+      const add = (kind, labels, why) => { if (labels.length) out.push({ kind, labels, why }); };
+      const labelled = graph.filter(g => g.part && typeof g.comp.label === 'string');
+      const sources  = labelled.filter(g => g.part.def.ref !== undefined).map(g => g.comp.label);
+      const warned   = (label, re) => ((parts[label] && parts[label].warnings) || []).some(w => re.test(w));
+      const warnings = label => parts[label].warnings.join(' ');
+
+      // An LED straight across the battery: led.js's own short warning.
+      const noResistor = labelled.filter(g => warned(g.comp.label, /no current-limiting resistor/i));
+      noResistor.forEach(g => add('no-resistor', [g.comp.label], `${g.comp.label}: ${warnings(g.comp.label)}`));
+
+      // A short through an LED with its no-resistor row is one mistake.
+      if (res.shorted === true && !noResistor.length) {
+        add('short', sources, 'Short circuit: the battery + and − terminals are joined with nothing to limit the current. ' +
+                              'Put a resistor or other part between them.');
+      }
+
+      const backwards = labelled.filter(g => warned(g.comp.label, /backwards/i));
+      backwards.forEach(g => add('backwards', [g.comp.label], `${g.comp.label}: ${warnings(g.comp.label)}`));
+
+      // No current anywhere, and a source with no loop from its + back to its −
+      // through the other elements, every switch counted as closed (an open
+      // switch is normal use), and no backwards part to say why.
+      const still = label => { const p = part(label); return !!p && typeof p.I === 'number' && Math.abs(p.I) < 0.001; };
+      const looped = src => {
+        const own = src.part.els.filter(e => e.el.kind === 'V' || e.el.kind === 'I');
+        const uf = new Sim.UnionFind();
+        graph.forEach(g => g.part && g.part.els.forEach(e => {
+          if (!own.includes(e)) e.nodes.forEach(n => uf.union(e.nodes[0], n));
+        }));
+        return own.some(e => uf.find(e.nodes[0]) === uf.find(e.nodes[1]));
+      };
+      const unlooped = labelled.some(g => g.part.def.ref !== undefined && !looped(g));
+      if (sources.length && res.shorted !== true && unlooped && !backwards.length && sources.every(still)) {
+        add('open', sources, 'No current flows: the circuit is not connected all the way from the battery + terminal ' +
+                             'back to the − terminal. Check for a missing wire, often the one to ground.');
+      }
+
+      labelled.forEach(g => {
+        const label = g.comp.label, p = part(label);
+        if (!p || !p.over) return;
+        const why = p.rating.W !== undefined
+          ? `${label} uses ${Math.abs(p.P).toFixed(2)} W, over its ${p.rating.W} W rating. Use a bigger resistor in series.`
+          : `${label} carries ${Math.abs(p.I).toFixed(1)} mA, over its ${p.rating.mA.toFixed(0)} mA rating. Add more resistance in series.`;
+        add('over', [label], why);
+      });
+      return out;
+    }
+
+    return { netOf, voltage, part, kcl, problems };
   }
 
   return { from, nets };

@@ -299,3 +299,145 @@ test('voltage() and kcl() given something that is not a net give null and [] on 
     assert.deepStrictEqual(list, [], `kcl(${name})`);
   }
 });
+
+// ── 8. problems(): the mistake checker (issue #95) ─────────────
+// problems() → [{ kind, labels[], why }], never throws, `why` plain English.
+// Kinds: 'short', 'no-resistor', 'backwards', 'open', 'over'.
+// - short:       result.shorted (a wire straight across the source, which
+//                solves nothing, or a source shorted through a part), except
+//                when the short is through an LED with a 'no-resistor' row.
+// - no-resistor: the LED's own warning (parts/led.js) for an LED straight
+//                across the battery, over 1 A; an LED that is only over its
+//                20 mA (behind 100 Ω) is 'over', not 'no-resistor'.
+// - backwards:   the LED's own "backwards" warning, so an LED dark only
+//                because an off diode cuts off its anode is not (#73).
+// - open:        a source, not shorted, every source under 0.001 mA, and no
+//                open switch/button or backwards part to explain it. Its
+//                labels include the battery.
+// - over:        one row per part whose part(label).over is true.
+// Where a kind overlaps server.js findCircuitProblems, `why` carries the
+// server's key phrase: "short circuit", "backwards", "not connected".
+// Every circuit was checked against the real simulator first.
+
+const KINDS = ['short', 'no-resistor', 'backwards', 'open', 'over'];
+
+// problems() for a board, each row checked for its shape.
+function problemsOf(readings) {
+  assert.strictEqual(typeof readings.problems, 'function', 'Readings.from(...).problems should be a function');
+  let list;
+  assert.doesNotThrow(() => { list = readings.problems(); }, 'problems() threw');
+  assert.ok(Array.isArray(list), `problems() should be an array; got ${JSON.stringify(list)}`);
+  for (const p of list) {
+    assert.ok(KINDS.includes(p.kind), `kind "${p.kind}" is not one of ${KINDS.join(', ')}`);
+    assert.ok(Array.isArray(p.labels) && p.labels.length && p.labels.every(l => typeof l === 'string'),
+      `${p.kind}: labels should be part labels; got ${JSON.stringify(p.labels)}`);
+    assert.ok(typeof p.why === 'string' && p.why.trim() && !/undefined|NaN|null|\[object/.test(p.why),
+      `${p.kind}: why should be plain English; got ${JSON.stringify(p.why)}`);
+  }
+  return list;
+}
+const problemsOn = (parts, pairs) => problemsOf(solve(parts, pairs).readings);
+const kindsOf = list => list.map(p => p.kind).sort();
+const rowsOf  = (list, kind) => list.filter(p => p.kind === kind);
+const showP   = list => JSON.stringify(list);
+
+test('problems: a wire straight across the battery is a short naming BAT1, why says "short circuit"', () => {
+  // The no-readings case: analyze returns parts {}, shorted true.
+  const list = problemsOn([BAT, res('R1', ['a10', 'a14'], 470)],
+                          [...POWER, ['tp_5', 'tn_5'], ['tp_10', 'c10'], ['c14', 'tn_14']]);
+  assert.deepStrictEqual(kindsOf(list), ['short'], showP(list));
+  assert.ok(list[0].labels.includes('BAT1'), `the short names the battery: ${showP(list)}`);
+  assert.match(list[0].why, /short circuit/i);
+});
+
+test('problems: an LED straight across 9 V is no-resistor and over, with no separate short row', () => {
+  // tp_14 → a14, LED1 anode b14 / cathode b18, a18 → tn_18. LED1 carries
+  // (9 − 2) / 0.1 Ω = 70 A, so analyze says shorted and led.js warns
+  // "…with no current-limiting resistor". The short is through LED1, whose
+  // no-resistor row already says so: one mistake, so no 'short' row too.
+  const list = problemsOn([BAT, led('LED1', ['b18', 'b14'])], [...POWER, ['tp_14', 'a14'], ['a18', 'tn_18']]);
+  assert.deepStrictEqual(kindsOf(list), ['no-resistor', 'over'], showP(list));
+  const nr = rowsOf(list, 'no-resistor')[0], over = rowsOf(list, 'over')[0];
+  assert.deepStrictEqual(nr.labels, ['LED1'], showP(list));
+  assert.match(nr.why, /resistor/i);
+  assert.deepStrictEqual(over.labels, ['LED1'], showP(list));
+});
+
+test('problems: an LED behind 100 Ω is over (LED1 and R1, one row each) but not no-resistor', () => {
+  // (9 − 2) / 100.1 = 69.93 mA: LED1 over 20 mA; R1 6.99 V × 69.93 mA = 0.49 W over ¼ W.
+  const list = problemsOn([BAT, res('R1', ['a10', 'a14'], 100), led('LED1', ['b18', 'b14'])], LOOP_WIRES);
+  assert.deepStrictEqual(kindsOf(list), ['over', 'over'], showP(list));
+  assert.deepStrictEqual(rowsOf(list, 'over').map(p => p.labels).sort(), [['LED1'], ['R1']], showP(list));
+});
+
+test('problems: a reversed LED behind 470 Ω is backwards (LED1), not open', () => {
+  // R1 a10–a14, LED1 cathode b14 (≈ 9 V) / anode b18 (0 V): off, no current.
+  const list = problemsOn([BAT, res('R1', ['a10', 'a14'], 470), led('LED1', ['b14', 'b18'])], LOOP_WIRES);
+  assert.deepStrictEqual(kindsOf(list), ['backwards'], showP(list));
+  assert.ok(list[0].labels.includes('LED1'), showP(list));
+  assert.match(list[0].why, /backwards/i);
+});
+
+test('problems: an LED dark only because an off diode cuts off its anode is not backwards (#73)', () => {
+  // tp_2 → a2; D1 cathode b2 (+9 V), anode b6 (blocks); LED1 anode d6, cathode d10; a10 → tp_10.
+  const list = problemsOn([BAT, { type: 'diode', label: 'D1', holes: ['b2', 'b6'] }, led('LED1', ['d10', 'd6'])],
+                          [...POWER, ['tp_2', 'a2'], ['a10', 'tp_10']]);
+  assert.deepStrictEqual(rowsOf(list, 'backwards'), [], showP(list));
+});
+
+test('problems: battery, 470 Ω and LED with the ground wire missing is open, naming BAT1, why says "not connected"', () => {
+  // The KVL loop without c18 → tn_18: the battery carries under 0.001 mA.
+  const list = problemsOn([BAT, res('R1', ['a10', 'a14'], 470), led('LED1', ['b18', 'b14'])], [...POWER, ['tp_10', 'c10']]);
+  assert.deepStrictEqual(kindsOf(list), ['open'], showP(list));
+  assert.ok(list[0].labels.includes('BAT1'), `the open circuit names the battery: ${showP(list)}`);
+  assert.match(list[0].why, /not connected/i);
+});
+
+// 'open' needs a broken path, not just zero current: it is reported only
+// when no path joins a source's + to its − through the board's elements
+// with every switch treated as closed. A complete loop that carries ~0 mA
+// for another reason is not open.
+
+test('problems: a fully wired loop on 1 V (below the red LED\'s 2 V) carries ~0 mA but is not open', () => {
+  // BAT1 1 V, R1 a10–a14 470 Ω, LED1 anode b14 / cathode b18: LED off, battery ~2e-9 mA.
+  const list = problemsOn([{ type: 'battery', label: 'BAT1', values: { voltage: 1 } },
+                           res('R1', ['a10', 'a14'], 470), led('LED1', ['b18', 'b14'])], LOOP_WIRES);
+  assert.deepStrictEqual(rowsOf(list, 'open'), [], showP(list));
+});
+
+test('problems: a plain diode reversed in a complete loop is not open', () => {
+  // R1 a10–a14 470 Ω, D1 cathode b14 (≈ 9 V) / anode b18 (0 V): off, battery ~2e-8 mA.
+  const list = problemsOn([BAT, res('R1', ['a10', 'a14'], 470), { type: 'diode', label: 'D1', holes: ['b14', 'b18'] }],
+                          LOOP_WIRES);
+  assert.deepStrictEqual(rowsOf(list, 'open'), [], showP(list));
+});
+
+test('problems: the missing-ground board is still open with an unwired slide switch elsewhere on it', () => {
+  // As above, plus SS1 (a a30, common a31, b a32) wired to nothing: a loose
+  // switch does not explain a broken loop it is not in.
+  const list = problemsOn([BAT, res('R1', ['a10', 'a14'], 470), led('LED1', ['b18', 'b14']),
+                           { type: 'slide_switch', label: 'SS1', holes: ['a30', 'a31', 'a32'] }],
+                          [...POWER, ['tp_10', 'c10']]);
+  assert.deepStrictEqual(kindsOf(list), ['open'], showP(list));
+});
+
+// The "Try it out" demo (demo.sparky): BAT1 → tp_4, BAT1.1 → tn_16,
+// tp_3 → a3, R1 470 Ω b3–b7, LED1 cathode c9 / anode c7, a9 → a12,
+// SW1 b12–b15, a15 → tn_15. Pressed: 14.9 mA. Released: no current, but an
+// open button is normal use, not a mistake.
+const DEMO_PARTS = pressed => [BAT, res('R1', ['b3', 'b7'], 470), led('LED1', ['c9', 'c7']),
+  { type: 'button', label: 'SW1', holes: ['b12', 'b15'], controls: { pressed } }];
+const DEMO_WIRES = [['BAT1.0', 'tp_4'], ['BAT1.1', 'tn_16'], ['tp_3', 'a3'], ['a9', 'a12'], ['a15', 'tn_15']];
+
+test('problems: the "Try it out" demo has none, button pressed or released', () => {
+  for (const pressed of [true, false]) {
+    const { readings } = solve(DEMO_PARTS(pressed), DEMO_WIRES);
+    assert.deepStrictEqual(problemsOf(readings), [], `demo with SW1 ${pressed ? 'pressed' : 'released'}`);
+  }
+});
+
+test('problems: an empty board, a blank result or no arguments give [] without throwing', () => {
+  assert.deepStrictEqual(problemsOf(solve([], []).readings), [], 'empty board');
+  assert.deepStrictEqual(problemsOf(Readings.from({}, { components: [], wires: [] })), [], 'blank result');
+  assert.deepStrictEqual(problemsOf(Readings.from()), [], 'Readings.from() with nothing');
+});
