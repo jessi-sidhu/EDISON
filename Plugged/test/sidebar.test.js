@@ -108,10 +108,16 @@ test('search matches the name: "push" finds the Push Button, "BUZZ" the buzzer',
   assert.deepEqual(typesOf(groups(Parts.all(), 'BUZZ')), ['buzzer']);
 });
 
-test('search matches ai.keywords: "ohm" and "limit" find the resistor, "power" the battery', () => {
+test('search matches ai.keywords: "ohm" finds the resistor, "volts" the battery', () => {
   assert.deepEqual(typesOf(groups(Parts.all(), 'ohm')), ['resistor']);
-  assert.deepEqual(typesOf(groups(Parts.all(), 'limit')), ['resistor']);
-  assert.deepEqual(typesOf(groups(Parts.all(), 'power')), ['battery']);
+  assert.deepEqual(typesOf(groups(Parts.all(), 'volts')), ['battery']);
+});
+
+// #34: the bench supply's keywords "current limit" and "power supply" share
+// words with the resistor ("limit") and the battery ("power").
+test('a word in two parts\' keywords finds both: "limit" the resistor and the bench supply, "power" the battery and the bench supply', () => {
+  assert.deepEqual(typesOf(groups(Parts.all(), 'limit')), ['resistor', 'bench_supply']);
+  assert.deepEqual(typesOf(groups(Parts.all(), 'power')), ['battery', 'bench_supply']);
 });
 
 test('search matches the type of a part whose name differs', () => {

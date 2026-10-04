@@ -102,6 +102,10 @@
       if (type === 'wire') {
         setMode('wire');
         document.getElementById('wire-color-row').style.display = 'block';
+      } else if (state.mode === 'place' && state.pickedType === type) {
+        // The part already picked, clicked again: put it down.
+        state.pickedType = null;
+        setMode('select');
       } else {
         state.pickedType = type;
         setMode('place');
@@ -126,7 +130,7 @@
 
   const MODE_HINTS = {
     select: 'Click a component or wire to select it · DEL to delete',
-    place:  'Hover over the board to preview · Click to place · R to rotate · ESC to cancel',
+    place:  'Hover over the board to preview · Click to place · R to rotate · Click the part again or ESC to cancel',
     wire:   'Click any hole or gold pin to start a wire · click again to complete',
   };
 
@@ -885,6 +889,11 @@
           // A one-way part says which leg is which, from its pin names.
           const def = Parts.get(c.type);
           if (def && oneWay(def, c)) { pA += ` (${def.pins[0]})`; pB += ` (${def.pins[1]})`; }
+        } else if (Parts.get(c.type).pins.length > 2) {
+          // Off-board, 3+ pins (a bench supply): every pin by name and wire ref.
+          const refs = Parts.get(c.type).pins.map((pin, k) => `off-board ${pin} → wire ref: ${pinRef(comps, c, k)}`);
+          pA = refs[0];
+          pB = refs.slice(1).join(', ');
         } else {
           // Off-board battery — show the wire reference names the AI must use
           pA = `off-board + → wire ref: ${pinRef(comps, c, 0)}`;
@@ -900,6 +909,11 @@
       md += '\n## Battery wiring (how to connect in add_wire actions)\n';
       batteries.forEach(b => {
         const id = App.componentId(comps, b);
+        if (Parts.get(b.type).pins.length > 2) {
+          const refs = Parts.get(b.type).pins.map((pin, k) => `${pin} → use \`"from": "${pinRef(comps, b, k)}"\``);
+          md += `- **${id}**: ${refs.join('  |  ')}\n`;
+          return;
+        }
         md += `- **${id}**: positive terminal → use \`"from": "${pinRef(comps, b, 0)}"\`  |  negative terminal → use \`"from": "${pinRef(comps, b, 1)}"\`\n`;
       });
     }

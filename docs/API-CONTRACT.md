@@ -191,6 +191,14 @@ The example is `Plugged/circuit3d/js/parts/potentiometer.js` (#31). The toggle s
 - **The scroll gesture:** `gestures: { scroll: 'position' }`. While simulating, the wheel over the part moves the control: wheel up = +, wheel down = −. One tick is 1/20 of the control's range (5 % for 0–100), clamped to min–max, for every slider. One scroll gesture is one undo step, re-simulated at most every 100 ms (#26's dispatcher).
 - **Measure from pin voltages:** `measure(r)` reads `r.controls` and `r.pins` (`wiperVolts = r.pins.wiper`, `null` when the wiper floats), and `report` gives `"50 % · 5.0 kΩ | 5.0 kΩ"`.
 
+### Pattern: off-board multi-terminal source
+The example is `Plugged/circuit3d/js/parts/bench_supply.js` (#34), the first off-board source with more than 2 pins.
+- **Pins and ref:** `pins: ['pos', 'com', 'neg']`, `ref: 'com'` (COM is ground), `place: { kind: 'offboard' }`.
+- **Terminal pairs come from the V elements:** each `V` element's `[plus, minus]` is one pair. The supply is `V(pos, com)` (id `pos`) and `V(com, neg)` (id `neg`); the battery's `V('0', '1')` is its one pair. `backend/server.js` checks every off-board source from these pairs: its ref pin and at least one other pin must be wired, wires alone across a pair are a short, and each part must sit between some pair's plus and minus.
+- **Pin refs are `LABEL.k`**, `k` = the pin's index: `PS1.0` (+), `PS1.1` (COM), `PS1.2` (−). The i-th `place_<type>` in a build is `PREFIX<i+1>`. The battery's old `battery_n_pinK` form stays battery-only.
+- **Board markdown:** a 2-pin off-board part prints as the battery always has. A 3+-pin one lists every pin, `off-board pos → wire ref: PS1.0`, and its wiring cheat-sheet line (`- **PS1**: …`) names every ref.
+- **A limit that only warns:** `measure` gives each rail's mA and an over flag; `warnings` says `+ rail would current-limit: …`, and `view.update` lights a mesh named `limit-light`. There is no constant-current mode.
+
 ## Interfaces
 
 ### `Parts.define(def)`

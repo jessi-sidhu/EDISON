@@ -168,6 +168,11 @@ test('the prompt puts a second battery on the bottom rails (bp_N/bn_N) with its 
 
 // Guard: the recipes, battery rules, wiring rules and board layout stay
 // hand-written, word for word. (These lines are today's prompt.)
+// #34 generalised three battery-only lines to any off-board source ("Only a
+// battery pin can be a wire end by label", "EVERY circuit needs a battery with
+// TWO wires:" and the HOLE NAMES "This label form is only for battery pins."),
+// so they are no longer here; test/bench-supply-ai.test.js checks their
+// replacements.
 const VERBATIM = [
   `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
   "BREADBOARD LAYOUT:",
@@ -177,12 +182,10 @@ const VERBATIM = [
   "- tp_N = positive power rail at column N (+9V). tn_N = GND rail at column N.",
   "- Rails are NOT auto-connected to body holes. Always wire from tp/tn to body holes.",
   "- The board state lists parts by label, so you can talk about them as R1, LED1 and so on.",
-  "- Only a battery pin can be a wire end by label: \"BAT1.0\" (+) or \"BAT1.1\" (-).",
   "- A new part gets the next free number for its type. After delete_all, numbering starts again at 1, so the first place_battery is BAT1.",
   "- Without delete_all, a battery added next to BAT1 is BAT2.",
   "BATTERY (CRITICAL):",
   "- BAT1.0 = positive (+), BAT1.1 = negative (-). The battery sits off-board.",
-  "- EVERY circuit needs a battery with TWO wires:",
   "  1. add_wire from \"BAT1.0\" to \"tp_N\" (red wire)",
   "  2. add_wire from \"BAT1.1\" to \"tn_N\" (black wire)",
   "- Without BOTH battery wires the circuit WILL NOT WORK. ALWAYS include them.",
@@ -191,7 +194,6 @@ const VERBATIM = [
   "HOLE NAMES:",
   "- Body: \"a3\", \"e14\", \"j22\"",
   "- Rail: \"tp_5\" (positive col 5), \"tn_5\" (GND col 5)",
-  "- Battery: \"BAT1.0\" (+), \"BAT1.1\" (-). This label form is only for battery pins.",
   "- Other parts: use the body holes they sit in, e.g. \"b3\", never \"<label>.<k>\".",
   "BUILDING BEHAVIOR:",
   "- When asked to build, fix, or create a circuit: call delete_all FIRST, then rebuild from scratch.",

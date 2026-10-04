@@ -81,14 +81,14 @@ const buildPrompt = tools => [
   'PART LABELS:',
   GENERATED.labels,
   '- The board state lists parts by label, so you can talk about them as R1, LED1 and so on.',
-  '- Only a battery pin can be a wire end by label: "BAT1.0" (+) or "BAT1.1" (-).',
+  '- Only an off-board part\'s pins can be wire ends by label, by pin index: "BAT1.0" (+) or "BAT1.1" (-) on a battery, and the same LABEL.k form for any other off-board part (its guide names them).',
   GENERATED.wiredBy,
   '- A new part gets the next free number for its type. After delete_all, numbering starts again at 1, so the first place_battery is BAT1.',
   '- Without delete_all, a battery added next to BAT1 is BAT2.',
   '',
   'BATTERY (CRITICAL):',
   '- BAT1.0 = positive (+), BAT1.1 = negative (-). The battery sits off-board.',
-  '- EVERY circuit needs a battery with TWO wires:',
+  '- EVERY circuit needs a battery (or another off-board source, wired as its guide says) with TWO wires:',
   '  1. add_wire from "BAT1.0" to "tp_N" (red wire)',
   '  2. add_wire from "BAT1.1" to "tn_N" (black wire)',
   '- Without BOTH battery wires the circuit WILL NOT WORK. ALWAYS include them.',
@@ -112,7 +112,7 @@ const buildPrompt = tools => [
   'HOLE NAMES:',
   '- Body: "a3", "e14", "j22"',
   '- Rail: "tp_5" (positive col 5), "tn_5" (GND col 5)',
-  '- Battery: "BAT1.0" (+), "BAT1.1" (-). This label form is only for battery pins.',
+  '- Off-board parts: "BAT1.0" (+), "BAT1.1" (-), or another off-board part\'s LABEL.k. This label form is only for off-board part pins.',
   '- Other parts: use the body holes they sit in, e.g. "b3", never "<label>.<k>".',
   '',
   'BUILDING BEHAVIOR:',
@@ -270,7 +270,7 @@ const DELETE_ALL = {
 };
 const ADD_WIRE = {
   name: 'add_wire',
-  description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or battery pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -). Other parts are wired through the body holes they sit in.',
+  description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or off-board part pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -, or another off-board part\'s LABEL.k). Other parts are wired through the body holes they sit in.',
   parameters: {
     type: 'OBJECT',
     properties: {
@@ -572,16 +572,26 @@ function checkValues(a) {
 // The old form of a battery pin, "battery_0_pin1".
 const OLD_BATTERY_PIN = /^battery_(\d+)_pin(\d+)$/i;
 
-// A battery pin in either form, as { n, pin } with n counting from 0:
-// "battery_0_pin1" and "BAT1.1" are both { n: 0, pin: 1 }. The i-th
-// place_battery in a build is battery_<i> and BAT<i+1>.
-function batteryPin(ref) {
+// The off-board sources (battery, bench supply): parts with a ref pin that
+// sit beside the board. Their pins are wire ends by label.
+const SOURCES = PARTS.filter(def => def.place.kind === 'offboard' && def.ref !== undefined);
+const isBattery = def => toolName(def) === BATTERY_TOOL;
+
+// An off-board source pin, as { def, n, pin } with n counting from 0:
+// "PS1.2" is { bench_supply, n: 0, pin: 2 }. The battery's old form
+// "battery_0_pin1" and "BAT1.1" are both { battery, n: 0, pin: 1 }. The
+// i-th place_<type> in a build is PREFIX<i+1>.
+function sourcePin(ref) {
   const s = String(ref);
   let m = OLD_BATTERY_PIN.exec(s);
-  if (m) return { n: +m[1], pin: +m[2] };
-  m = /^bat(\d+)\.(\d+)$/i.exec(s);
-  return m && +m[1] > 0 ? { n: +m[1] - 1, pin: +m[2] } : null;
+  if (m) return { def: PART_BY_TOOL.get(BATTERY_TOOL), n: +m[1], pin: +m[2] };
+  m = /^([a-z]+)(\d+)\.(\d+)$/i.exec(s);
+  const def = m && SOURCES.find(d => d.prefix === m[1].toUpperCase());
+  return def && +m[2] > 0 && +m[3] < def.pins.length ? { def, n: +m[2] - 1, pin: +m[3] } : null;
 }
+
+// The node key of a source's pin k: "battery_0_pin1", "bench_supply_0_pin2".
+const sourceKey = (def, n, k) => `${def.type}_${n}_pin${k}`;
 
 // Holes in the same column and same half share a node. Each power rail is one
 // node along its whole length. Both forms of a battery pin are one node.
@@ -591,8 +601,8 @@ function nodeKey(hole) {
   if (rail) return rail[1];
   const body = /^([a-j])(\d+)$/i.exec(hole);
   if (body) return (body[1].toLowerCase() <= 'e' ? 'top' : 'bot') + body[2];
-  const bat = batteryPin(hole);
-  if (bat) return `battery_${bat.n}_pin${bat.pin}`;
+  const src = sourcePin(hole);
+  if (src) return sourceKey(src.def, src.n, src.pin);
   return hole;   // other part pins and anything unrecognised stay as themselves
 }
 
@@ -708,42 +718,69 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   const fromPlus  = edges.concat(diodes.map(d => [d.anode, d.cathode, true]));
   const fromMinus = edges.concat(diodes.map(d => [d.cathode, d.anode, true]));
 
-  // Every battery the build places or wires to.
-  const batteries = new Set();
-  let placed = 0;
-  for (const a of actions) if (a.tool === BATTERY_TOOL) batteries.add(placed++);
-  for (const e of ends) { const b = batteryPin(e); if (b) batteries.add(b.n); }
+  // Every source the build places or wires to, as "<type>|<n>".
+  const sources = new Map();
+  const placed = new Map();   // def → how many the build places
+  for (const a of actions) {
+    const def = PART_BY_TOOL.get(a.tool);
+    if (!SOURCES.includes(def)) continue;
+    const n = placed.get(def) || 0;
+    placed.set(def, n + 1);
+    sources.set(`${def.type}|${n}`, { def, n });
+  }
+  for (const e of ends) { const p = sourcePin(e); if (p) sources.set(`${p.def.type}|${p.n}`, { def: p.def, n: p.n }); }
+  const byOrder = (x, y) => SOURCES.indexOf(x.def) - SOURCES.indexOf(y.def) || x.n - y.n;
+
+  // A source's terminal pairs: [plus, minus] of each of its V elements.
+  const pairsOf = (def, n) => elementsOf(def).filter(el => el.kind === 'V')
+    .map(el => el.pins.map(pin => def.pins.indexOf(pin)));
+  const srcPin = (def, n, k) => (isBattery(def) ? pinName(n, k) : `${def.prefix}${n + 1}.${k}`);
 
   const pos = new Set(), neg = new Set();
+  const terminals = [];
   const railPairs = new Map();   // "tp|tn" → the batteries wired to that rail pair
-  for (const n of [...batteries].sort((a, b) => a - b)) {
-    const plus = `battery_${n}_pin0`, minus = `battery_${n}_pin1`;   // nodeKey form
-    if (n < placed) {
-      if (!wired(plus))  problems.push(`${pinName(n, 0)} is not wired to a positive rail (tp_N), so nothing on the board is powered.`);
-      if (!wired(minus)) problems.push(`${pinName(n, 1)} is not wired to a ground rail (tn_N), so the circuit has no return path.`);
+  for (const { def, n } of [...sources.values()].sort(byOrder)) {
+    const key = k => sourceKey(def, n, k);
+    const ref = def.pins.indexOf(def.ref);
+    if (n < (placed.get(def) || 0)) {
+      if (isBattery(def)) {
+        if (!wired(key(0))) problems.push(`${pinName(n, 0)} is not wired to a positive rail (tp_N), so nothing on the board is powered.`);
+        if (!wired(key(1))) problems.push(`${pinName(n, 1)} is not wired to a ground rail (tn_N), so the circuit has no return path.`);
+      } else {
+        const named = k => `${srcPin(def, n, k)} (${def.pins[k]})`;
+        const others = def.pins.map((_, k) => k).filter(k => k !== ref);
+        if (!wired(key(ref))) problems.push(`${named(ref)} is not wired to a ground rail (tn_N), so the circuit has no return path.`);
+        if (!others.some(k => wired(key(k)))) {
+          problems.push(`${others.map(named).join(' and ')} ${others.length > 1 ? 'are' : 'is'} not wired to a rail, so nothing on the board is powered.`);
+        }
+      }
     }
-    // Wires alone joining + to − is a dead short. A resistor or buzzer in
-    // the path is a load, not a short.
-    const plusWires = reach(plus, wireEdges);
-    if (plusWires.has(minus)) {
-      problems.push(`${pinName(n, 0)} and ${pinName(n, 1)} are joined by wires alone, which is a short circuit across the battery. Put a resistor or other part between them.`);
-    }
-    // The rails each pin is wired to, for the two-batteries check (#51).
-    const rails = set => [...set].filter(k => /^(tp|tn|bp|bn)$/.test(k)).sort().join(',');
-    const pair = `${rails(plusWires)}|${rails(reach(minus, wireEdges))}`;
-    if (!/^\||\|$/.test(pair)) railPairs.set(pair, [...(railPairs.get(pair) || []), n]);
+    for (const [p, m] of pairsOf(def, n)) {
+      const plus = key(p), minus = key(m);
+      terminals.push([plus, minus]);
+      // Wires alone joining + to − is a dead short. A resistor or buzzer in
+      // the path is a load, not a short.
+      const plusWires = reach(plus, wireEdges);
+      if (plusWires.has(minus)) {
+        problems.push(`${srcPin(def, n, p)} and ${srcPin(def, n, m)} are joined by wires alone, which is a short circuit across the ${partName(def)}. Put a resistor or other part between them.`);
+      }
+      // The rails each battery pin is wired to, for the two-batteries check (#51).
+      const rails = set => [...set].filter(k => /^(tp|tn|bp|bn)$/.test(k)).sort().join(',');
+      const pair = `${rails(plusWires)}|${rails(reach(minus, wireEdges))}`;
+      if (isBattery(def) && !/^\||\|$/.test(pair)) railPairs.set(pair, [...(railPairs.get(pair) || []), n]);
 
-    // First each side without diodes, then grown through forward diodes
-    // without crossing into the other side: an LED that lit up one branch
-    // must not carry + round through the ground rail and hide a reversed LED
-    // elsewhere.
-    const plusSide = reach(plus), minusSide = reach(minus);
-    const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
-    const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
-    for (const k of plusSide) pos.add(k);
-    for (const k of minusSide) neg.add(k);
-    for (const k of reach(plus, fromPlus, onlyMinus))  pos.add(k);
-    for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
+      // First each side without diodes, then grown through forward diodes
+      // without crossing into the other side: an LED that lit up one branch
+      // must not carry + round through the ground rail and hide a reversed LED
+      // elsewhere.
+      const plusSide = reach(plus), minusSide = reach(minus);
+      const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
+      const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
+      for (const k of plusSide) pos.add(k);
+      for (const k of minusSide) neg.add(k);
+      for (const k of reach(plus, fromPlus, onlyMinus))  pos.add(k);
+      for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
+    }
   }
 
   // #51: two batteries on one pair of rails fight each other.
@@ -765,7 +802,6 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // its own problem. Any other complete branch makes every node reachable
   // from both terminals, so orientation is undecidable there: prefer saying
   // nothing over accusing a correctly wired LED of being backwards.
-  const terminals = [...batteries].map(n => [`battery_${n}_pin0`, `battery_${n}_pin1`]);
   for (const { i, a, def, holeOf, pinNodes } of fullRebuild ? placedParts : []) {
     if (def.place.kind === 'footprint') {
       problems.push(...footprintProblems(i, a, def, holeOf, pinNodes));

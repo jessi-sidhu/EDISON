@@ -363,7 +363,7 @@ test('sidebar: every registered part once under its category; "led" filters to t
   await expect(page.locator('#sidebar .comp-group[data-category="Passives"]')).toBeHidden();
   await expect(page.locator('#sidebar .comp-group[data-category="Semiconductors"]')).toBeVisible();
 
-  await page.locator('#part-search').fill('LIMIT');       // a resistor keyword, any case
+  await page.locator('#part-search').fill('OHM');         // a resistor keyword, any case ("limit" is also the bench supply's, #34)
   await expect(page.locator('#sidebar .comp-item[data-type]:not([data-type="wire"]):visible')).toHaveCount(1);
   await expect(page.locator('#sidebar .comp-item[data-type="resistor"]')).toBeVisible();
 

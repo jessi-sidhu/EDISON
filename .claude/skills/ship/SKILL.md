@@ -13,7 +13,7 @@ description: Finish the current task - run checks, review, commit, rebase onto t
    - On `main`: stop. Move the work onto `dev` first.
 2. **Check.** This is the gate. From `Plugged/`:
    - Run `npm run check` (lint) and `npm test`.
-   - Also run `npm run e2e` if any file under `circuit3d/`, `*.html`, `firebase-config.js` or `e2e/` changed.
+   - Also run the **full** `npm run e2e` if any file under `circuit3d/`, `*.html`, `firebase-config.js` or `e2e/` changed. Never swap it for a subset of specs, even if the builder ran some or CI is fast: features clash through shared UI, and only the full suite sees it.
    - Fix any failures this change caused. Never push red.
 3. **Review.**
    - If `/start-task`'s reviewer already said SHIP IT for this exact diff, skip this step.

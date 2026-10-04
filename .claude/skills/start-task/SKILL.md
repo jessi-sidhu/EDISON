@@ -42,7 +42,8 @@ Call each with the Agent tool, one at a time, and give it everything it needs, s
    - If it reports "Stuck" or a test it thinks is wrong, stop and show the user. They decide, or ask on the issue.
 4. **reviewer**. Pass the issue text and the branch name.
    - **SHIP IT:** move on to the end.
-   - **FIX:** send the fix list to the builder **once**, then run the reviewer **once** more. If it still says FIX, stop and show the user both lists.
+   - **FIX:** send the `[tests]` items to the **test-writer** first (the builder can't edit tests), then the rest to the builder, each **once**. Run the reviewer **once** more. If it still says FIX, stop and show the user both lists.
+   - **Test notes** don't block. Pass them on to the user, and apply them only if they're cheap.
 
 Every subagent reply is a report: check it before passing anything on. Never fake a step. If an agent failed or was skipped, say so.
 

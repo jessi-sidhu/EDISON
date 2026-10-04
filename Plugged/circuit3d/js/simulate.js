@@ -673,8 +673,11 @@
     }
 
     const src0 = components.find(c => { const d = partDef(c.type); return d && d.ref !== undefined; });
-    const ref  = partDef(src0.type).ref;
-    const out  = [`Status: ${r.shorted ? 'short circuit' : 'solved'}. Voltages are measured from ${labelOf(components, src0)}.${ref} (the first battery's − terminal).`];
+    const def0 = partDef(src0.type), ref = def0.ref;
+    // A 2-pin source reads as today's battery; others name the ref pin by index.
+    const from = def0.pins.length === 2 ? `${labelOf(components, src0)}.${ref} (the first battery's − terminal)`
+      : `${labelOf(components, src0)}.${def0.pins.indexOf(ref)} (${ref.toUpperCase()}, the ${def0.name.toLowerCase()}'s ground)`;
+    const out  = [`Status: ${r.shorted ? 'short circuit' : 'solved'}. Voltages are measured from ${from}.`];
     if (!results) return out.concat(messages);   // a source shorted by a wire solves nothing
 
     // Off-board pins have no hole for voltageAt, so read every pin by node.
