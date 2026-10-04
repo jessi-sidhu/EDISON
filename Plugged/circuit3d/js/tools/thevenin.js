@@ -6,6 +6,12 @@
 //  latest plugged:sim. Esc cancels a pick or closes the card; Stop clears
 //  everything.
 //
+//  While picking (issue #196) the button is pressed (aria-pressed), the
+//  hint asks for the first, then the second hole, and the canvas has a
+//  crosshair (.th-picking, tools.css). Clicking the button again cancels.
+//  When the pick ends, the hint that was there before comes back, unless
+//  something else has changed the hint since.
+//
 //  While picking, pointerdown and pointerup on the canvas are caught on
 //  window in the capture phase and stopped, so interaction.js, equations.js
 //  and the orbit controls never see a pick.
@@ -25,6 +31,8 @@
 
   const MARK    = new THREE.Color(0xff8c00);   // orange, on plain and tinted holes
   const DRAG_PX = 8;                           // as interaction.js: more is an orbit, not a click
+  const HINT_1  = 'Thévenin: click the first hole · Esc to cancel';
+  const HINT_2  = 'Thévenin: click the second hole · Esc to cancel';
 
   let latest  = null;   // readings of the last solve while simulating
   let picking = false;
@@ -33,6 +41,7 @@
   let down    = null;
   let card    = null;
   let raycaster = null;
+  let before  = null;   // the hint before the pick: { text, shown }, or null
 
   // Idempotent: the board looks the same before and after.
   function ensureInstanceColours(m) {
@@ -83,8 +92,30 @@
 
   function unmark() { lift(); }
 
-  function clearAll() {
+  function startPick() {
+    clearAll();
+    picking = true;
+    btn.setAttribute('aria-pressed', 'true');
+    if (App.renderer) App.renderer.domElement.classList.add('th-picking');
+    before = { text: document.getElementById('hint-text').textContent,
+               shown: !document.getElementById('hint-box').classList.contains('hint-hidden') };
+    App.setHint(HINT_1);
+  }
+
+  // Unpresses the button, drops the crosshair and puts back the hint from
+  // before the pick, if the hint still shows ours.
+  function endPick() {
     picking = false;
+    btn.setAttribute('aria-pressed', 'false');
+    if (App.renderer) App.renderer.domElement.classList.remove('th-picking');
+    if (!before) return;
+    const now = document.getElementById('hint-text').textContent;
+    if (now === HINT_1 || now === HINT_2) App.setHint(before.shown ? before.text : '');
+    before = null;
+  }
+
+  function clearAll() {
+    endPick();
     picked = [];
     down = null;
     unmark();
@@ -157,8 +188,8 @@
     if (!hole) return;
     picked.push(hole);
     mark(hole);
-    if (picked.length < 2) return;
-    picking = false;
+    if (picked.length < 2) { App.setHint(HINT_2); return; }
+    endPick();
     showCard(picked[0], picked[1], e.clientX, e.clientY);
   }, true);
 
@@ -168,13 +199,15 @@
   btn.className = 'btn-colouring';
   btn.title = 'Pick two holes to see the Thévenin and Norton equivalent between them';
   btn.textContent = 'Thévenin';
+  btn.setAttribute('aria-pressed', 'false');
   btn.hidden = true;
   const after = document.getElementById('colouring-toggle') || document.getElementById('sim-stop-btn');
   if (after) after.after(btn);
 
+  // A second click while picking cancels.
   btn.addEventListener('click', () => {
-    clearAll();
-    picking = true;
+    if (picking) clearAll();
+    else startPick();
   });
 
   document.addEventListener('keydown', e => { if (e.key === 'Escape') clearAll(); });

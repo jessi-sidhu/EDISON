@@ -309,7 +309,8 @@ test('selectTools sends place_function_generator for sine, signal, wave, functio
 
 test('pin: selectTools does not send place_function_generator for the demo or for any other ai-eval case message', () => {
   const t = toolName(fg());
-  const others = [DEMO, ...CASES.filter(c => c.message !== FADE).map(c => c.message)];
+  // An op-amp build's input is the function generator (#198), so the opamp-tagged cases send it too.
+  const others = [DEMO, ...CASES.filter(c => c.message !== FADE && !(c.tags || []).includes('opamp')).map(c => c.message)];
   assert.ok(others.length > 5, `sanity: the cases file has its messages (${others.length})`);
   const wrong = others.filter(m => selected(m).includes(t));
   assert.deepStrictEqual(wrong, [], `messages with no sine in them that send ${t}`);

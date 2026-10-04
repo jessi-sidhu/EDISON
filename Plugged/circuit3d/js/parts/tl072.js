@@ -206,68 +206,71 @@
     report,
     line,
 
-    // The input is a second bench supply, PS2 (PS2.0 the signal, PS2.1 on
-    // COM), so ai-eval can turn it with set_value whatever holes the AI chose.
+    // One bench supply (PS1, wired as a lab does: one wire per post, COM2
+    // grounded for ±12 V) and the input from the one function generator,
+    // FG1 (FG1.0 OUT, FG1.1 on COM): a plain solve reads its offset, so
+    // ai-eval turns the input with set_value FG1 offset, whatever holes the
+    // AI chose. Never a second supply (#198).
     ai: {
       about:    'A TL072 dual op-amp, a DIP-8 across the centre gap: pin 1 (OUT1) in hole. ' +
                 'Each output swings to 1.5 V inside its supply rails and limits at 20 mA.',
       keywords: ['op-amp', 'op amp', 'opamp', 'amplifier', 'comparator', 'tl072', 'follower', 'buffer'],
       listed:   'in-play',
-      guide:    'Pins: 1 OUT1, 2 IN1−, 3 IN1+, 4 V−, 5 IN2+, 6 IN2−, 7 OUT2, 8 V+; hole=fC, direction=right: ' +
-                '1-4 at fC-fC+3, 8-5 eC-eC+3. place_bench_supply PS1: V+ to tp, V− to bn (±12), or tn for a ' +
-                'comparator. Input PS2.0; PS2.1 to tn. Inverting: PS2.0→Rin→IN1−; gain −Rf/Rin (place_resistor). ' +
-                'Follower, comparator: PS2.0 to IN1+. Follower: OUT1 to IN1−. Comparator: divider sets IN1−, ' +
-                'OUT1→R→LED→tn. Use op-amp 1.',
+      guide:    'Pins 1 OUT1, 2 IN1−, 3 IN1+, 4 V−, 5 IN2+, 6 IN2−, 7 OUT2, 8 V+; hole=fC, right: 1-4 fC..fC+3, 8-5 eC..eC+3. ' +
+                'One place_bench_supply PS1; ±12: V+ tp, V− bn. Input: one place_function_generator FG1, COM to tn, ' +
+                'OUT to input, offset = DC in. Inverting: FG1.0→Rin→IN1−, −Rf/Rin (place_resistor). Follower: ' +
+                'FG1.0→IN1+, OUT1→IN1−. Comparator: 12 V (V− tn), FG1.0→IN1+, divider→IN1−, OUT1→R→place_led→tn.',
       recipe:   {
-        // Vout1 = −(100k/10k)·0.5 V = −5.000 V (finite gain: < 1 mV off).
-        name:  'inverting amplifier, gain −10, on ±12 V: PS2 (0.5 V) through Rin 10 kΩ into IN1− (pin 2), ' +
-               'Rf 100 kΩ from IN1− to OUT1 (pin 1), IN1+ (pin 3) to COM: OUT1 = −5 V',
+        // Vout1 = −(100k/(10k + 50 Ω))·0.5 V = −4.975 V (the generator's 50 Ω; finite gain: < 1 mV off).
+        name:  'inverting amplifier, gain −10, on ±12 V: FG1 (offset 0.5 V) through Rin 10 kΩ into IN1− (pin 2), ' +
+               'Rf 100 kΩ from IN1− to OUT1 (pin 1), IN1+ (pin 3) to COM: OUT1 ≈ −5 V',
         parts: [{ type: 'bench_supply', label: 'PS1', values: { voltage: 12 } },
-                { type: 'bench_supply', label: 'PS2', values: { voltage: 0.5 } },
+                { type: 'function_generator', label: 'FG1', values: { amplitude: 0, offset: 0.5, frequency: 1 } },
                 { type: 'tl072', label: 'U1', holes: ['f30', 'f31', 'f32', 'f33', 'e33', 'e32', 'e31', 'e30'] },
                 { type: 'resistor', label: 'R1', holes: ['g27', 'g31'], values: { resistance: 10000 } },     // Rin
                 { type: 'resistor', label: 'R2', holes: ['h31', 'h35'], values: { resistance: 100000 } }],  // Rf
-        wires: [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63'], ['PS1.2', 'bn_63'], ['PS2.1', 'tn_62'],
+        wires: [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63'], ['PS1.3', 'tn_62'], ['PS1.2', 'bn_63'],   // ±12 V, COM2 grounded
+                ['FG1.1', 'tn_61'],                                  // the generator's COM on ground
                 ['tp_30', 'a30'], ['bn_33', 'j33'],                  // V+ (pin 8) +12 V, V− (pin 4) −12 V
-                ['PS2.0', 'h27'], ['i35', 'i30'], ['j32', 'tn_32']], // input into Rin, Rf to OUT1, IN1+ to COM
-        expect: { U1: { vout1: [-5.01, -4.99], mode1: 'linear', unused2: true } },
+                ['FG1.0', 'h27'], ['i35', 'i30'], ['j32', 'tn_32']], // input into Rin, Rf to OUT1, IN1+ to COM
+        expect: { U1: { vout1: [-5.0, -4.95], mode1: 'linear', unused2: true } },
       },
       // One worked build per op-amp request (the AI copies the nearest one),
       // in the same layout: the chip at f30, op-amp 2 unused.
       recipes:  [
         {
-          // OUT1 on IN1− makes Vout1 = Vin: 3.000 V (finite gain: < 0.1 mV off).
-          name:  'voltage follower on ±12 V: PS2 (3 V) into IN1+ (pin 3), OUT1 (pin 1) wired to IN1− (pin 2): OUT1 = 3 V',
+          // OUT1 on IN1− makes Vout1 = Vin: 3.000 V (finite gain: < 0.1 mV off; no input current, so no drop in 50 Ω).
+          name:  'voltage follower on ±12 V: FG1 (offset 3 V) into IN1+ (pin 3), OUT1 (pin 1) wired to IN1− (pin 2): OUT1 = 3 V',
           parts: [{ type: 'bench_supply', label: 'PS1', values: { voltage: 12 } },
-                  { type: 'bench_supply', label: 'PS2', values: { voltage: 3 } },
+                  { type: 'function_generator', label: 'FG1', values: { amplitude: 0, offset: 3, frequency: 1 } },
                   { type: 'tl072', label: 'U1', holes: ['f30', 'f31', 'f32', 'f33', 'e33', 'e32', 'e31', 'e30'] }],
-          wires: [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63'], ['PS1.2', 'bn_63'], ['PS2.1', 'tn_62'],
+          wires: [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63'], ['PS1.3', 'tn_62'], ['PS1.2', 'bn_63'],
+                  ['FG1.1', 'tn_61'],
                   ['tp_30', 'a30'], ['bn_33', 'j33'],                  // V+ (pin 8) +12 V, V− (pin 4) −12 V
-                  ['PS2.0', 'j32'], ['g30', 'g31']],                   // input into IN1+, OUT1 to IN1−
+                  ['FG1.0', 'j32'], ['g30', 'g31']],                   // input into IN1+, OUT1 to IN1−
           expect: { U1: { vout1: [2.99, 3.01], mode1: 'linear', unused2: true } },
         },
         {
           // Single 12 V supply (V− on COM). IN1− = 12·5k/(7k + 5k) = 5.000 V.
           // 6 V in: OUT1 high at 10.5 V behind 50 Ω, (10.5 − 2.0)/(1000 + 50) = 8.09 mA
           // through the red LED. Under 5 V, OUT1 sits at 1.5 V, under the LED's 2 V: dark.
-          name:  'comparator on one 12 V supply (V− pin 4 on COM): PS2 (6 V) into IN1+ (pin 3), a 7k/5k divider sets ' +
+          name:  'comparator on one 12 V supply (V− pin 4 on COM): FG1 (offset 6 V) into IN1+ (pin 3), a 7k/5k divider sets ' +
                  'IN1− (pin 2) to 5 V, OUT1 (pin 1) through 1 kΩ to a red LED to COM: lit above 5 V',
           parts: [{ type: 'bench_supply', label: 'PS1', values: { voltage: 12 } },
-                  { type: 'bench_supply', label: 'PS2', values: { voltage: 6 } },
+                  { type: 'function_generator', label: 'FG1', values: { amplitude: 0, offset: 6, frequency: 1 } },
                   { type: 'tl072', label: 'U1', holes: ['f30', 'f31', 'f32', 'f33', 'e33', 'e32', 'e31', 'e30'] },
                   { type: 'resistor', label: 'R1', holes: ['b41', 'b45'], values: { resistance: 7000 } },
                   { type: 'resistor', label: 'R2', holes: ['c37', 'c41'], values: { resistance: 5000 } },
                   { type: 'resistor', label: 'R3', holes: ['h26', 'h30'], values: { resistance: 1000 } },
                   { type: 'led', label: 'LED1', holes: ['i24', 'i26'], values: { color: 'red' } }],   // cathode i24, anode i26
-          wires: [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63'], ['PS2.1', 'tn_62'],
+          wires: [['PS1.0', 'tp_63'], ['PS1.1', 'tn_63'], ['FG1.1', 'tn_61'],
                   ['tp_30', 'a30'], ['j33', 'tn_33'],                  // V+ (pin 8) +12 V, V− (pin 4) on COM
                   ['tp_45', 'a45'], ['a37', 'tn_37'], ['d41', 'g31'],  // the divider, its 5 V into IN1−
-                  ['PS2.0', 'j32'], ['j24', 'tn_24']],                 // input into IN1+, LED cathode to COM
+                  ['FG1.0', 'j32'], ['j24', 'tn_24']],                 // input into IN1+, LED cathode to COM
           expect: { U1: { mode1: 'high' }, LED1: { on: true, current: [7.9, 8.3] } },
         },
       ],
     },
-
     view: { build },
 
     examples: [

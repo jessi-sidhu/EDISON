@@ -17,9 +17,9 @@ function watchErrors(page) {
   return errors;
 }
 
-async function openEditor(page) {
+async function openEditor(page, query = '') {
   await page.route('**/api/ask', route => route.fulfill({ json: { reply: 'ok', actions: [] } }));
-  await page.goto('/circuit3d/index.html');
+  await page.goto('/circuit3d/index.html' + query);
   await page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
 }
 
@@ -202,3 +202,86 @@ test('pick, Colours off, Esc, Stop: the picked hole ends plain, not stuck on its
 
   expect(errors).toEqual([]);
 });
+
+// Issue #196: Thévenin shows that it's waiting for picks. On the click the
+// button is pressed (aria-pressed="true", and it looks different), the hint
+// asks for the first hole and names Esc, and the canvas cursor is a
+// crosshair; after one hole the hint asks for the second. The card, Esc
+// mid-pick, or a second click on the button ends the pick: unpressed, no
+// pick hint, no crosshair. Both UIs; the pick code is shared, the pressed
+// look is per UI (tools.css, edison-hud.css).
+const PICK_HINT = /click the (first|second) hole/i;
+const hintText  = page => page.locator('#hint-text');
+const canvasCursor = page => page.evaluate(() => getComputedStyle(App.renderer.domElement).cursor);
+// The hint as the user sees it: '' when the box is hidden.
+const shownHint = page => page.evaluate(() =>
+  document.getElementById('hint-box').classList.contains('hint-hidden') ? '' : document.getElementById('hint-text').textContent);
+const look = loc => loc.evaluate(el => {
+  const s = getComputedStyle(el);
+  return [s.color, s.backgroundColor, s.borderColor, s.boxShadow, s.outlineStyle].join(' | ');
+});
+
+for (const ui of ['classic', 'edison']) {
+  test(`${ui}: Thévenin shows it's waiting: pressed button, first- then second-hole hint, crosshair; the card, Esc and a second click unpress it`, async ({ page }) => {
+    const errors = watchErrors(page);
+    await openEditor(page, `?ui=${ui}`);
+    await buildDivider(page);
+
+    const btn  = page.locator('#thevenin-btn');
+    const card = page.locator('#thevenin-card');
+    const eq   = page.locator('#equation-card');
+
+    await page.locator('#sim-run-btn').click();
+    await expect(btn).toBeVisible();
+
+    // The click: pressed, the first-hole hint naming Esc, a crosshair.
+    await btn.click();
+    await expect(btn, 'the click presses the Thévenin button').toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#hint-box'), 'the hint shows').not.toHaveClass(/hint-hidden/);
+    await expect(hintText(page), 'the hint asks for the first hole').toHaveText(/click the first hole/i);
+    await expect(hintText(page), 'the hint says Esc cancels').toHaveText(/esc/i);
+    expect(await canvasCursor(page), 'the canvas cursor is a crosshair while picking').toBe('crosshair');
+
+    // One hole: the second-hole hint; still pressed, still a crosshair.
+    await clickHole(page, 'e14');
+    await expect(hintText(page), 'one hole picked: the hint asks for the second').toHaveText(/click the second hole/i);
+    await expect(page.locator('#hint-box')).not.toHaveClass(/hint-hidden/);
+    await expect(btn, 'still pressed after one hole').toHaveAttribute('aria-pressed', 'true');
+    expect(await canvasCursor(page), 'still a crosshair after one hole').toBe('crosshair');
+    const pressedLook = await look(btn);   // the mouse is on the canvas, not hovering the button
+
+    // The second hole: the card, the button unpressed, no pick hint, no crosshair.
+    await clickHole(page, 'e18');
+    await expect(card, 'two holes picked: the card shows').toBeVisible();
+    await expect(btn, 'the card shows: the button is unpressed').toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => shownHint(page), { message: 'the card shows: the hint no longer asks for a hole' }).not.toMatch(PICK_HINT);
+    expect(await canvasCursor(page), 'the card shows: the cursor is back').not.toBe('crosshair');
+    const unpressedLook = await look(btn);
+    expect(pressedLook, `the pressed button looks different from the unpressed one (${unpressedLook})`).not.toBe(unpressedLook);
+    await page.keyboard.press('Escape');
+    await expect(card).toBeHidden();
+
+    // Esc mid-pick cancels.
+    await btn.click();
+    await clickHole(page, 'e14');
+    await expect(btn).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('Escape');
+    await expect(btn, 'Esc mid-pick unpresses the button').toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => shownHint(page), { message: 'Esc mid-pick: the hint no longer asks for a hole' }).not.toMatch(PICK_HINT);
+    expect(await canvasCursor(page), 'Esc mid-pick: the cursor is back').not.toBe('crosshair');
+
+    // A second click on the button while picking cancels: the next hole
+    // click is an ordinary one and opens the equation card.
+    await btn.click();
+    await expect(btn).toHaveAttribute('aria-pressed', 'true');
+    await btn.click();
+    await expect(btn, 'a second click unpresses the button').toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => shownHint(page), { message: 'a second click: the hint no longer asks for a hole' }).not.toMatch(PICK_HINT);
+    expect(await canvasCursor(page), 'a second click: the cursor is back').not.toBe('crosshair');
+    await clickHole(page, 'e18');
+    await expect(card, 'the pick was cancelled: no Thévenin card').toBeHidden();
+    await expect(eq, 'after the toggle a hole click opens the equation card again').toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
+}

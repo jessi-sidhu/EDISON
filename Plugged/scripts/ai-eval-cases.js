@@ -197,40 +197,53 @@ module.exports = [
               expect: { PS1: { posOver: false, negOver: false } },
               expectAll: { led: { on: true, current: [9.5, 10.5] } }, status: 'ok' },
   },
-  // The op-amp (#118): `npm run ai-eval -- --only opamp`. The input is a
-  // second bench supply, PS2 (the TL072's guide and recipe), turned with
-  // set_value, so a build that ignores its input fails the second reading.
+  // The op-amp (#118): `npm run ai-eval -- --only opamp`. One bench supply
+  // (#198: never a second); the input is the function generator, FG1 (the
+  // TL072's guide and recipe), its offset turned with set_value, so a build
+  // that ignores its input fails the second reading.
   {
-    // Gain −10 (Rf/Rin, 100k/10k) on ±12 V: 0.5 V in → −5.0 V, 0.8 V in → −8.0 V (±2 %).
+    // Gain −10 (Rf/Rin, 100k/10k) on ±12 V: 0.5 V in → −5.0 V, 0.8 V in → −8.0 V (±2 %;
+    // the generator's 50 Ω makes it −4.975 and −7.96).
     id: 'OPAMP-inverting', tags: ['opamp'],
     message: 'Build an inverting amplifier with a gain of −10',
-    after: [{ tool: 'set_value', part: 'PS2', voltage: 0.5 }],
-    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 2 },
+    after: [{ tool: 'set_value', part: 'FG1', offset: 0.5 }],
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1 },
               expect: { U1: { vout1: [-5.1, -4.9], mode1: 'linear' } }, status: 'ok' },
-    states: [{ name: 'Vin 0.8 V', after: [{ tool: 'set_value', part: 'PS2', voltage: 0.8 }],
+    states: [{ name: 'Vin 0.8 V', after: [{ tool: 'set_value', part: 'FG1', offset: 0.8 }],
                checks: { expect: { U1: { vout1: [-8.16, -7.84], mode1: 'linear' } } } }],
   },
   {
-    // A 5 V reference on IN1−, PS2 on IN1+, the LED behind a resistor from
+    // A 5 V reference on IN1−, FG1 on IN1+, the LED behind a resistor from
     // OUT1. On a single supply (V− on COM) the low output is 1.5 V, under
     // the LED's 2 V: dark, not reversed. 5.5 V in → lit; 4.5 V in → dark.
     id: 'OPAMP-comparator', tags: ['opamp'],
     message: 'Build a comparator that lights an LED when the input is above 5 V',
-    after: [{ tool: 'set_value', part: 'PS2', voltage: 5.5 }],
-    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 2, led: 1 },
+    after: [{ tool: 'set_value', part: 'FG1', offset: 5.5 }],
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1, led: 1 },
               expect: { LED1: { on: true } }, status: 'ok' },
-    states: [{ name: 'Vin 4.5 V', after: [{ tool: 'set_value', part: 'PS2', voltage: 4.5 }],
+    states: [{ name: 'Vin 4.5 V', after: [{ tool: 'set_value', part: 'FG1', offset: 4.5 }],
                checks: { expect: { LED1: { on: false } } } }],
   },
   {
-    // OUT1 to IN1−, PS2 into IN1+: 3 V in → 3.0 V, 7 V in → 7.0 V (±2 %),
+    // OUT1 to IN1−, FG1 into IN1+: 3 V in → 3.0 V, 7 V in → 7.0 V (±2 %),
     // inside the rails on ±12 V or a single 12 V.
     id: 'OPAMP-follower', tags: ['opamp'],
     message: 'Build a voltage follower',
-    after: [{ tool: 'set_value', part: 'PS2', voltage: 3 }],
-    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 2 },
+    after: [{ tool: 'set_value', part: 'FG1', offset: 3 }],
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1 },
               expect: { U1: { vout1: [2.94, 3.06], mode1: 'linear' } }, status: 'ok' },
-    states: [{ name: 'Vin 7 V', after: [{ tool: 'set_value', part: 'PS2', voltage: 7 }],
+    states: [{ name: 'Vin 7 V', after: [{ tool: 'set_value', part: 'FG1', offset: 7 }],
+               checks: { expect: { U1: { vout1: [6.86, 7.14], mode1: 'linear' } } } }],
+  },
+  {
+    // Aarmen's own words (#198): it once placed a second bench supply for the
+    // input, five wires on one stacked box. One supply, the input from FG1.
+    id: 'ASKED-follower', tags: ['opamp'],
+    message: 'build me a non inverting voltage follower circuit',
+    after: [{ tool: 'set_value', part: 'FG1', offset: 3 }],
+    checks: { noHeadsUp: true, parts: { tl072: 1, bench_supply: 1, function_generator: 1 },
+              expect: { U1: { vout1: [2.94, 3.06], mode1: 'linear' } }, status: 'ok' },
+    states: [{ name: 'Vin 7 V', after: [{ tool: 'set_value', part: 'FG1', offset: 7 }],
                checks: { expect: { U1: { vout1: [6.86, 7.14], mode1: 'linear' } } } }],
   },
   {

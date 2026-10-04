@@ -100,6 +100,10 @@ html[data-ui="edison"] #topbar #labs-menu-btn::after, html[data-ui="edison"] #to
 html[data-ui="edison"] #topbar button[aria-pressed="false"] { color: var(--hud-grey); }
 html[data-ui="edison"] #topbar .hud-led { display: inline-block; flex: none; width: 6px; height: 6px; background: var(--hud-led-off); }
 html[data-ui="edison"] #topbar button[aria-pressed="true"] > .hud-led { background: var(--hud-blue); }
+/* Thévenin is a tool, not a toggle: white when idle, an inverted cell while
+   it waits for its two holes (issue #196). */
+html[data-ui="edison"] #topbar #thevenin-btn[aria-pressed="false"] { color: var(--hud-ink); }
+html[data-ui="edison"] #topbar #thevenin-btn[aria-pressed="true"] { background: var(--hud-ink); color: var(--hud-k); }
 /* RUNNING and the sim clock (edison/skin.js), shown while simulating. */
 html[data-ui="edison"] #topbar .hud-run {
   display: flex; align-items: center; gap: 10px; flex: none; padding: 0 12px; border-right: 1px solid var(--hud-rule);

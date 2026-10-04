@@ -85,6 +85,9 @@
 /* thevenin (#93) */
 
 #thevenin-btn { color: var(--text-primary); }
+/* Picking (#196): pressed, and a crosshair on the canvas. */
+#thevenin-btn[aria-pressed="true"] { background: var(--text-primary); border-color: var(--text-primary); color: #fff; }
+canvas.th-picking { cursor: crosshair; }
 
 #thevenin-card {
   position: fixed;

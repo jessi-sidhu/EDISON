@@ -173,6 +173,7 @@ const buildPrompt = tools => [
   '- Body: "a3", "e14", "j22"',
   '- Rail: "tp_5" (positive col 5), "tn_5" (GND col 5)',
   '- Off-board parts: "BAT1.0" (+), "BAT1.1" (-), or another off-board part\'s LABEL.k. This label form is only for off-board part pins.',
+  '- The bench holds ONE bench supply (PS1, two channels), ONE function generator (FG1) and at most TWO multimeters: never place a second supply or generator, or a third meter. One wire per terminal.',
   '- Other parts: use the body holes they sit in, e.g. "b3", never "<label>.<k>".',
   '',
   'BUILDING BEHAVIOR:',
