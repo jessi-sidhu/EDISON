@@ -17,6 +17,9 @@
   <link rel="stylesheet" href="css/lab-sheet.css" />
   <link rel="stylesheet" href="css/theme-edison.css" />
   <link rel="stylesheet" href="css/edison-hud.css" />
+  <link rel="stylesheet" href="css/edison-hud-canvas.css" />
+  <link rel="stylesheet" href="css/edison-hud-callouts.css" />
+  <link rel="stylesheet" href="css/edison-hud-chat.css" />
 </head>
 <body>
 
@@ -211,6 +214,8 @@
           <input type="file" id="photo-file" accept="image/*" hidden>
         </div>
         <textarea id="sparky-input" rows="1" placeholder="Ask Edison anything…"></textarea>
+        <!-- Edison only (css/edison-hud-chat.css shows it): the same send as Enter -->
+        <button id="sparky-ask-btn" type="button" hidden onclick="sparkyAsk()">Ask</button>
       </div>
 
     </div>
@@ -344,6 +349,8 @@
 <script src="js/photo-confirm.js"></script>
 <script src="js/photo.js"></script>
 <script src="../edison/skin.js"></script>
+<script src="../edison/hud-status.js"></script>
+<script src="../edison/result-callouts.js"></script>
 
 </body>
 </html>

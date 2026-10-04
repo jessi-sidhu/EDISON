@@ -1,0 +1,148 @@
+/* ─────────────────────────────────────────────
+   edison-hud-chat.css — Lab HUD (4/4): the chat as a clean log (issue #192;
+   mockup docs/design/editor-hud/1-lab-hud-closeup-chat.png, source hud.css).
+   Black panel, DM Mono, caps labels with grey sublines, hairline rules,
+   square outlined buttons with "+". Caps come from CSS only: the DOM text
+   stays as classic has it, and tests match that text.
+   Every rule is scoped to html[data-ui="edison"], so classic is untouched.
+   The hooks are edison/skin.js's: .ed-chat-head, .ed-val, .ed-tag, .ed-leader.
+───────────────────────────────────────────── */
+
+html[data-ui="edison"] {
+  --chat-k: #101010;     --chat-rule: #242424;  --chat-line: #676767;
+  --chat-ink: #F4F4F4;   --chat-grey: #8A8A8A;  --chat-user: #D6D6D6;  --chat-hover: #1A1A1A;
+  --chat-mono: 'DM Mono', ui-monospace, Menlo, Consolas, monospace;
+  /* The 📷 button's outline camera; its colour comes from the background it masks. */
+  --chat-camera: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5'%3E%3Cpath d='M3 7h4l2-3h6l2 3h4v13H3z'/%3E%3Ccircle cx='12' cy='13' r='4'/%3E%3C/svg%3E");
+}
+
+/* ── The panel and its header row ──────────── */
+html[data-ui="edison"] #sparky-panel {
+  width: 340px; background: var(--chat-k); border-left: 1px solid var(--chat-rule); color: var(--chat-ink);
+}
+html[data-ui="edison"] #sparky-panel, html[data-ui="edison"] #sparky-panel button,
+html[data-ui="edison"] #sparky-panel textarea { font-family: var(--chat-mono); }
+html[data-ui="edison"] .ed-chat-head {
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; height: 40px; padding: 0 16px;
+  border-bottom: 1px solid var(--chat-rule); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--chat-ink); white-space: nowrap;
+}
+html[data-ui="edison"] .ed-chat-sub { color: var(--chat-grey); }
+
+/* ── The log ───────────────────────────────── */
+html[data-ui="edison"] #sparky-messages {
+  background-color: var(--chat-k); background-image: none; padding: 20px 16px; gap: 22px;
+  scrollbar-color: #333333 transparent;
+}
+html[data-ui="edison"] #sparky-messages::-webkit-scrollbar-thumb { background: #333333; border-radius: 0; }
+
+/* Messages: no bubbles. A caps label over each, from ::before (no element
+   inside the message, whose text other specs pin). */
+html[data-ui="edison"] .chat-msg.user, html[data-ui="edison"] .chat-msg.ai,
+html[data-ui="edison"] .chat-msg.typing, html[data-ui="edison"] .chat-msg.system {
+  max-width: 100%; align-self: stretch; padding: 0; background: transparent; border: 0; border-radius: 0;
+  color: var(--chat-ink); font: 400 13px/1.65 var(--chat-mono); letter-spacing: 0;
+}
+html[data-ui="edison"] .chat-msg.user::before, html[data-ui="edison"] .chat-msg.ai::before,
+html[data-ui="edison"] .chat-msg.typing::before {
+  display: block; margin-bottom: 6px; font-size: 11px; line-height: 1.5; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--chat-grey); white-space: normal;
+}
+html[data-ui="edison"] .chat-msg.user::before { content: 'You'; }
+html[data-ui="edison"] .chat-msg.ai::before, html[data-ui="edison"] .chat-msg.typing::before { content: 'Edison'; color: var(--chat-ink); }
+html[data-ui="edison"] .chat-msg.user { padding-left: 12px; border-left: 1px solid var(--chat-line); color: var(--chat-user); }
+html[data-ui="edison"] .chat-msg.system { font-size: 12px; line-height: 1.6; font-style: normal; text-align: left; color: var(--chat-grey); }
+html[data-ui="edison"] .chat-msg.ai strong { font-weight: 500; color: var(--chat-ink); }
+html[data-ui="edison"] .typing-dots span { background: var(--chat-grey); border-radius: 0; }
+
+/* A value: the textbook's dotted underline, in the ink. */
+html[data-ui="edison"] .chat-msg.ai .ed-val {
+  font-family: var(--chat-mono); font-size: 13px; font-weight: 400; font-variant-numeric: tabular-nums;
+  color: var(--chat-ink); text-decoration: underline dotted var(--chat-grey); text-underline-offset: 4px;
+}
+/* A part on the board, named in a reply: an outlined tag. */
+html[data-ui="edison"] .chat-msg.ai .ed-tag {
+  display: inline-block; padding: 0 4px; border: 1px solid var(--chat-line); font-size: 12px; line-height: 1.35;
+}
+
+/* The leader (reply → part, placed by edison/skin.js): a grey hairline
+   ending in an ink dot, as on the landing; the dot's dark keyline keeps it
+   on the white breadboard. */
+html[data-ui="edison"] .ed-leader { border-top: 1px solid var(--chat-line); border-bottom: 0; }
+html[data-ui="edison"] .ed-leader::after {
+  width: 7px; height: 7px; right: -4px; top: -4px; background: var(--chat-ink); border: 1px solid var(--chat-k);
+}
+
+/* ── The pending bar: square ACCEPT + (inverted) and DECLINE. chat.js shows
+   and hides it (inline display), so no display here. ── */
+html[data-ui="edison"] #sparky-pending-bar {
+  align-items: stretch; justify-content: flex-end; gap: 0; height: 44px; padding: 0;
+  background: var(--chat-k); border-top: 1px solid var(--chat-rule);
+}
+html[data-ui="edison"] .pending-accept, html[data-ui="edison"] .pending-decline {
+  flex: none; padding: 0 16px; border: 0; border-left: 1px solid var(--chat-rule); border-radius: 0;
+  font-size: 11px; font-weight: 400; letter-spacing: 0.12em; text-transform: uppercase;
+}
+html[data-ui="edison"] .pending-accept { background: var(--chat-ink); color: var(--chat-k); }
+html[data-ui="edison"] .pending-accept::after { content: ' +'; }
+html[data-ui="edison"] .pending-accept:hover { background: #FFFFFF; }
+html[data-ui="edison"] .pending-decline { background: transparent; color: var(--chat-ink); }
+html[data-ui="edison"] .pending-decline:hover { background: var(--chat-hover); border-color: var(--chat-rule); color: var(--chat-ink); }
+
+/* ── The Ask box: the landing's square box. 📷 | input | ASK +, one frame
+   (the row's ::before) with hairline cells; a future 🎤 fits beside 📷. ── */
+html[data-ui="edison"] #sparky-input-row {
+  position: relative; align-items: stretch; gap: 0; padding: 17px;
+  background: var(--chat-k); border-top: 1px solid var(--chat-rule);
+}
+html[data-ui="edison"] #sparky-input-row::before {
+  content: ''; position: absolute; inset: 16px; border: 1px solid var(--chat-line); pointer-events: none;
+}
+html[data-ui="edison"] #sparky-input-row:focus-within::before { border-color: var(--chat-ink); }
+html[data-ui="edison"] #photo-wrap { display: flex; border-right: 1px solid var(--chat-line); }
+html[data-ui="edison"] #photo-btn {
+  display: flex; align-items: center; justify-content: center; width: 44px; height: auto;
+  background: transparent; border: 0; border-radius: 0; font-size: 0; color: var(--chat-ink);
+}
+html[data-ui="edison"] #photo-btn::before {
+  content: ''; width: 16px; height: 16px; background: currentColor;
+  -webkit-mask: var(--chat-camera) center / contain no-repeat; mask: var(--chat-camera) center / contain no-repeat;
+}
+html[data-ui="edison"] #photo-btn:hover { background: var(--chat-hover); }
+html[data-ui="edison"] #photo-menu { background: var(--chat-k); border: 1px solid var(--chat-line); border-radius: 0; box-shadow: none; }
+html[data-ui="edison"] #photo-menu button { border-radius: 0; color: var(--chat-ink); font-size: 12px; }
+html[data-ui="edison"] #photo-menu button:hover { background: var(--chat-hover); }
+html[data-ui="edison"] #sparky-input {
+  min-height: 42px; padding: 11px 12px; background: transparent; border: 0; border-radius: 0;
+  color: var(--chat-ink); font: 400 13px/1.5 var(--chat-mono);
+}
+html[data-ui="edison"] #sparky-input:focus { background: transparent; border: 0; box-shadow: none; }
+html[data-ui="edison"] #sparky-input::placeholder { color: var(--chat-grey); }
+/* "Ask Edison about your circuit" is wider than the box at 13 px; while it
+   shows, it takes two 11 px lines in the same 44 px box. Typed text stays 13 px. */
+html[data-ui="edison"] #sparky-input:placeholder-shown { padding-top: 7px; padding-bottom: 7px; }
+html[data-ui="edison"] #sparky-input:placeholder-shown::placeholder { font-size: 11px; line-height: 1.3; }
+html[data-ui="edison"] #sparky-ask-btn {
+  display: flex; align-items: center; flex-shrink: 0; padding: 0 14px; background: transparent;
+  border: 0; border-left: 1px solid var(--chat-line); border-radius: 0; color: var(--chat-ink);
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; cursor: pointer;
+}
+html[data-ui="edison"] #sparky-ask-btn::after { content: ' +'; white-space: pre; }
+html[data-ui="edison"] #sparky-ask-btn:hover { background: var(--chat-hover); }
+
+/* ── The empty state on the black panel ────── */
+html[data-ui="edison"] .sparky-welcome-title {
+  font-family: var(--chat-mono); font-size: 17px; font-weight: 400; line-height: 22px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--chat-ink);
+}
+html[data-ui="edison"] .sparky-welcome-sub { font-size: 13px; color: var(--chat-grey); }
+html[data-ui="edison"] .sparky-suggest-btn {
+  padding: 10px 12px; background: transparent; border: 1px solid var(--chat-line); border-radius: 0;
+  color: var(--chat-ink); font-size: 11px; line-height: 1.4; letter-spacing: 0.12em; text-transform: uppercase;
+}
+html[data-ui="edison"] .sparky-suggest-btn:hover { background: var(--chat-hover); border-color: var(--chat-ink); }
+
+/* ── Stacked layout (chat.css → RESPONSIVE) ── */
+@media (max-width: 1024px) and (min-height: 600px) {
+  html[data-ui="edison"] #sparky-panel { width: 100%; border-left: 0; border-top: 1px solid var(--chat-rule); }
+}

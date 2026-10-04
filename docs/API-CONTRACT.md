@@ -367,6 +367,7 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
   - `kcl(net)` → `[{ label, pin, amps }]`: each element current into the net, signed, in mA. It sums to 0 within 1 µA. An `E` enters at its `out` pins: +Iout into the `out+` net, −Iout into the `out−` net.
   - `thevenin(a, b)` → `{ Vth, Rth, In }` or `{ why }`. It solves copies of the board when called, never on every solve. `{ why }` when there is no source, or when a and b are on the same net.
   - `problems()` → `[{ kind, labels[], why, info? }]`, built from the simulation result. It covers shorts, LEDs with no resistor, backwards parts, open circuits and parts over their rating, and op-amps: `no-supply`, `output-shorted` (an output at its current limit: tied straight to ground, a rail or the other output, or a load that takes too much current), and `clipped`, the only row with `info: true` (a note, never an error: a comparator clips on purpose; an unused half gives none). `why` is plain English.
+  - `lines()` → `[{ label, title, sub: [string…], level }]`, one entry per part with something to say, for the Edison callouts (#191, `edison/result-callouts.js`). `level` is `'fault'` when a problem that isn't info names the part, `'warn'` when only an info one does, else `'ok'`. A fault or warn takes its title from the problem's kind ("No supply") and its `sub` from the `why`; an ok part takes its part name as the title and its own results-panel text (headline, line, or the ON line) as `sub`. A part with neither has no entry. Faults first, then warn, then ok, each in board order. No new wording for the physics.
 - **`Readings.nets(board)`:** which holes and pins are joined, with no solve needed (for the connection highlight). `board` is `{ components, wires }`, as for `Readings.from`.
 - **Errors:** never throws. `voltage` gives `null` when floating; `thevenin` gives `{ why }`; `part(label)` for an unknown label and `netOf(hole)` for a hole not on the board give `null`.
 - **Mock:** none. Tests build a real result in Node with `Board.toSim` and `Sim.analyze`.
@@ -713,6 +714,11 @@ A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `
 ### Course data (`Plugged/edison/course-data.js`, `window.CourseData`)
 - `{ course: { code, title, term, instructor: 'Instructor' }, announcements[{ date, text }], labs[{ id, code, title, due, status: 'open'|'done'|'locked', opens? }], chapters[{ n, title, sections[{ n, title, body, figure? }] }], grades: { students[{ name, lab1, lab2, prelab1 }], sample: true }, heatmap: { lab, cells[{ hole, count, note }], total }, feed[{ minsAgo, lab, step, label, text }] }`
 - Sample names are invented. `grades.sample` is always true.
+
+### Result callouts (`Plugged/edison/result-callouts.js`, `window.ResultCallouts`; #191)
+- `ResultCallouts.MAX` (4): the clutter cap. `ResultCallouts.pick(lines)` → at most `MAX` of `Readings.lines()`: faults, then warn, then ok, stable within a level.
+- `ResultCallouts.layoutCallouts(items, viewport, avoid?)` → one `{ label, left, top, width, height, side, leader }` per item `{ label, x, y, w, h }`, in order: inside `viewport { width, height }`, never overlapping; `leader` is the elbow's three `[x, y]` points from the dot.
+- The page half, Edison only: `#result-callouts` over the canvas, one `.result-callout[data-label][data-level]` per shown line and a `.result-callout-dot[data-label]` on the part's group top centre, leaders in one SVG. Redraws on `plugged:sim`, clears on `plugged:sim-stop`, re-projects on the orbit controls' `'change'` and on resize; no animation loop. `#sim-results` and the mistakes panel are unchanged. Nothing touches the DOM in Node.
 
 ### Dummy endpoints (local server only)
 - `POST /api/course/canvas/sync` → `200 { ok: true, demo: true, syncedAt: <ISO> }`

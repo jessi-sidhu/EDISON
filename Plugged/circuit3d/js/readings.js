@@ -22,6 +22,12 @@
 //                      'clipped' with info: true (a note, never an error)
 //      thevenin(a, b)  two holes → { Vth V, Rth Ω, In mA } between them, or
 //                      { why } (#93); solves a copy of the board when called
+//      lines()         [{ label, title, sub[], level }], one per part with
+//                      something to say (#191, the Edison callouts): level
+//                      'fault' (a problem names it), 'warn' (only an info
+//                      one does) or 'ok'; title and sub from the problem's
+//                      why, or the part's own results-panel text. Faults
+//                      first, then warn, then ok, each in board order
 //    Readings.nets(board)  every net, with no solve
 //
 //  Nets come from simulate.js's own buildGraph, so they always match the
@@ -317,7 +323,66 @@
       return { Vth, Rth, In: Vth / Rth * 1000 };
     }
 
-    return { netOf, voltage, part, kcl, problems, thevenin };
+    // One entry per part with something to say (#191): a problem's why
+    // (a fault, or a warn for an info row) or a working part's own
+    // results-panel text (its headline, its line, or the ON line). Never
+    // new wording for the physics: only the texts the panel already shows.
+    function lines() {
+      try { return findLines(); } catch { return []; }
+    }
+
+    function findLines() {
+      const said = problems(), out = [], seen = new Set();
+      graph.forEach(g => {
+        const label = g.comp.label;
+        if (!g.part || typeof label !== 'string' || seen.has(label)) return;
+        seen.add(label);
+        const named = said.filter(p => p.labels.includes(label));
+        const why = named.filter(p => !p.info).concat(named.filter(p => p.info));
+        if (why.length) {
+          out.push({ label, title: TITLES[why[0].kind] || sentence(why[0].kind.replace(/-/g, ' ')),
+                     sub: why.flatMap(p => clauses(p.why, label)), level: why[0].info ? 'warn' : 'fault' });
+          return;
+        }
+        const sub = panelText(g.part.def, parts[label], label);
+        if (sub.length) out.push({ label, title: g.part.def.name, sub, level: 'ok' });
+      });
+      return out.sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level]);   // stable: board order within a level
+    }
+
+    return { netOf, voltage, part, kcl, problems, thevenin, lines };
+  }
+
+  // lines(): a problem kind's title, its rank, and the text tidying.
+  const TITLES = { short: 'Short circuit', 'no-resistor': 'No resistor', backwards: 'Backwards', open: 'Circuit open',
+                   over: 'Over rating', 'no-supply': 'No supply', 'output-shorted': 'Output shorted', clipped: 'Clipped' };
+  const LEVEL_RANK = { fault: 0, warn: 1, ok: 2 };
+  const sentence = s => s.charAt(0).toUpperCase() + s.slice(1);
+  const escapeRe = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // "SERIES ±12V" → "Series ±12 V": caps words and unit gaps, nothing else.
+  const tidy = s => sentence(s.replace(/\b([A-Z])([A-Z]{3,})\b/g, (_, a, b) => a + b.toLowerCase()).replace(/(\d)V\b/g, '$1 V'));
+  const plain = t => String(t).replace(/[☀-➿]|[\u{1F300}-\u{1FAFF}]|️/gu, '').replace(/\s+/g, ' ').trim();
+
+  // A why as sublines: its "U1: " dropped, split at each ": " into sentences.
+  function clauses(why, label) {
+    const parts = String(why).replace(new RegExp(`^${escapeRe(label)}:\\s*`), '').split(/:\s+/).filter(Boolean);
+    return parts.map((s, k) => sentence(s) + (k < parts.length - 1 && !/[.!?]$/.test(s) ? '.' : ''));
+  }
+
+  // A working part's results-panel text, its "Bench supply 1: " or
+  // "TL072 U1: " lead dropped, one subline per " · " piece; [] when the
+  // panel says nothing about it.
+  function panelText(def, pr, label) {
+    if (!pr) return [];
+    let line = null;
+    try { line = (def.headline && def.headline(pr.r, pr.m)) || (def.line && def.line(pr.r, pr.m)) || null; } catch { line = null; }
+    let text = line && line.text ? plain(line.text) : '';
+    if (!text && pr.m && pr.m.on === true && typeof pr.m.current === 'number') text = `ON (${pr.m.current.toFixed(1)} mA)`;
+    const num = label.replace(/^\D+/, '');
+    const lead = num ? `\\b${escapeRe(label)}|\\s${escapeRe(num)}` : `\\b${escapeRe(label)}`;
+    text = text.replace(new RegExp(`^[^:]*?(?:${lead})\\s*:\\s*`), '')
+               .replace(new RegExp(`^${escapeRe(def.name)}\\s+`, 'i'), '');
+    return text ? text.split(/\s+·\s+/).filter(Boolean).map(tidy) : [];
   }
 
   return { from, nets };

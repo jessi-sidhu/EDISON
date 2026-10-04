@@ -1,0 +1,107 @@
+/* ─────────────────────────────────────────────
+   edison-hud-canvas.css — the Lab HUD's canvas frame (issue #190, Lab HUD
+   2/4; mockup docs/design/editor-hud/1-lab-hud-full.png). Corner brackets
+   and the Breadboard title block (built by edison/hud-status.js), the hint
+   as a caps grey line at the bottom, Clear All and Reset View as square
+   outlined buttons, the scope and meter as thin-framed instruments.
+   Every rule is scoped to html[data-ui="edison"], so classic is untouched.
+   Caps come from CSS only (the HUD stylesheets' approved exception), so the
+   DOM text stays what classic and the tests read. Loaded after
+   theme-edison.css, so these win over its viewport rules.
+   The text blocks sit on --hc-veil, the HUD black at 88 %: over the dark
+   floor they read as the mockup's bare text, and they stay legible when the
+   camera puts the white breadboard behind them.
+───────────────────────────────────────────── */
+
+html[data-ui="edison"] #canvas-wrap {
+  --hc-k: #101010; --hc-line: #676767; --hc-ink: #F4F4F4; --hc-grey: #8A8A8A;
+  --hc-pink: #FF3D7F; --hc-blue: #3D7BFF; --hc-veil: rgba(16, 16, 16, 0.88);
+  --hc-mono: 'DM Mono', var(--font-num);
+  border: 0;
+}
+
+/* ── The frame: 20 px L shapes, 16 px in from each corner ── */
+html[data-ui="edison"] .hud-bracket {
+  position: absolute; width: 20px; height: 20px; border: 0 solid var(--hc-line); pointer-events: none;
+}
+html[data-ui="edison"] .hud-bracket-tl { top: 16px; left: 16px; border-top-width: 1px; border-left-width: 1px; }
+html[data-ui="edison"] .hud-bracket-tr { top: 16px; right: 16px; border-top-width: 1px; border-right-width: 1px; }
+html[data-ui="edison"] .hud-bracket-bl { bottom: 16px; left: 16px; border-bottom-width: 1px; border-left-width: 1px; }
+html[data-ui="edison"] .hud-bracket-br { bottom: 16px; right: 16px; border-bottom-width: 1px; border-right-width: 1px; }
+
+/* ── Title block, top left: the name over the live status line ── */
+html[data-ui="edison"] .hud-title {
+  position: absolute; top: 7px; left: 42px; padding: 6px 10px 5px; pointer-events: none;
+  background: var(--hc-veil); font-family: var(--hc-mono); color: var(--hc-ink);
+}
+html[data-ui="edison"] .hud-title p { margin: 0; white-space: nowrap; }
+html[data-ui="edison"] .hud-title-name {
+  font-size: 17px; font-weight: 400; line-height: 22px; letter-spacing: 0.1em; text-transform: uppercase;
+}
+html[data-ui="edison"] .hud-status {
+  margin-top: 6px; font-size: 11px; line-height: 16px; letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums; color: var(--hc-grey);
+}
+html[data-ui="edison"] .hud-status-on { color: var(--hc-ink); }
+/* The ● drawn as the mockup's square: blue when the circuit is OK, pink when open */
+html[data-ui="edison"] .hud-status-dot {
+  display: inline-block; width: 6px; height: 6px; margin: 0 2px 0 0; vertical-align: 1px; overflow: hidden;
+  background: var(--hc-blue); color: transparent; font-size: 0;
+}
+html[data-ui="edison"] .hud-status-bad { background: var(--hc-pink); }
+
+/* ── The hint: a caps grey line at the bottom, clear of Reset View ── */
+html[data-ui="edison"] #hint-box {
+  top: auto; bottom: 11px; left: 44px; transform: none;
+  width: max-content; max-width: calc(100% - 236px);
+  padding: 3px 8px; background: var(--hc-veil); border: 0; border-radius: 0; box-shadow: none; text-align: left;
+  font: 400 11px/16px var(--hc-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--hc-grey);
+}
+/* Readouts that sat where the hint is now: under the title block instead */
+html[data-ui="edison"] #hole-label, html[data-ui="edison"] #rotate-badge {
+  bottom: auto; left: 44px; transform: none; padding: 3px 8px;
+  background: var(--hc-veil); border: 0; border-radius: 0; box-shadow: none;
+  font: 400 11px/16px var(--hc-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--hc-ink);
+}
+html[data-ui="edison"] #hole-label { top: 70px; }
+html[data-ui="edison"] #rotate-badge { top: 96px; color: var(--hc-grey); }
+html[data-ui="edison"] #rotate-badge kbd {
+  padding: 0 4px; background: transparent; border: 1px solid var(--hc-line); border-radius: 0;
+  font: 400 10px/14px var(--hc-mono); color: var(--hc-ink);
+}
+
+/* ── Clear All and Reset View: square outlined buttons ── */
+html[data-ui="edison"] #clear-all-btn, html[data-ui="edison"] #reset-cam-btn {
+  height: 28px; gap: 8px; padding: 0 12px; background: var(--hc-k); border: 1px solid var(--hc-line); border-radius: 0;
+  font: 400 11px var(--hc-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--hc-ink); box-shadow: none;
+}
+html[data-ui="edison"] #clear-all-btn svg, html[data-ui="edison"] #reset-cam-btn svg { display: none; }
+html[data-ui="edison"] #clear-all-btn { top: 13px; right: 52px; }
+html[data-ui="edison"] #reset-cam-btn { bottom: 9px; right: 52px; }
+html[data-ui="edison"] #reset-cam-btn::after { content: '+'; content: '+' / ''; }
+html[data-ui="edison"] #clear-all-btn:hover { background: var(--hc-k); border-color: var(--hc-pink); color: var(--hc-pink); }
+html[data-ui="edison"] #reset-cam-btn:hover { background: var(--hc-k); border-color: var(--hc-ink); color: var(--hc-ink); }
+
+/* ── Scope: a thin-framed instrument under a caps caption ── */
+html[data-ui="edison"] #scope {
+  bottom: 44px; right: 44px; padding: 6px 8px 8px; background: var(--hc-veil); border: 0; border-radius: 0; box-shadow: none;
+  font: 400 11px/1.7 var(--hc-mono); letter-spacing: 0.06em; font-variant-numeric: tabular-nums; color: var(--hc-ink);
+}
+html[data-ui="edison"] #scope::before {
+  content: 'Scope'; display: block; margin-bottom: 6px; letter-spacing: 0.12em; text-transform: uppercase;
+}
+html[data-ui="edison"] #scope-canvas { border: 1px solid var(--hc-line); border-radius: 0; }
+html[data-ui="edison"] #scope-ch1 { margin-top: 6px; color: var(--ch1); }
+html[data-ui="edison"] #scope-ch2 { color: var(--ch2); }
+html[data-ui="edison"] #scope-probe-btn {
+  height: 24px; margin-top: 4px; padding: 0 10px; background: var(--hc-k); border: 1px solid var(--hc-line); border-radius: 0;
+  font: 400 11px var(--hc-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--hc-ink);
+}
+html[data-ui="edison"] #scope-probe-btn:hover { background: var(--hc-k); border-color: var(--hc-ink); }
+html[data-ui="edison"] #scope-probe-btn[aria-pressed="true"] { background: var(--hc-k); border-color: var(--ch2); color: var(--ch2); }
+
+/* The multimeter's screen: the same frame, bottom left inside the brackets */
+html[data-ui="edison"] #meter-display {
+  bottom: 52px; left: 52px; background: var(--hc-k); border: 1px solid var(--hc-line); border-radius: 0;
+  color: var(--hc-ink); font-family: var(--hc-mono);
+}

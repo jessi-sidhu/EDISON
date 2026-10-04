@@ -1,11 +1,13 @@
 // ─────────────────────────────────────────────────────────────
 //  edison/skin.js — the editor's Edison skin, script half (spec §4
 //  "Edison's annotations", §5.4). With <html data-ui="edison"> it wraps
-//  the measured values in Edison's replies (B612 on --mask), draws a
-//  dashed leader from a reply to the first part it names, names the chat
-//  Edison, sends a ?ask= request once, and gives the Lab HUD top bar its
+//  the measured values (.ed-val) and the board's part labels (.ed-tag) in
+//  Edison's replies, draws a leader from a reply to the first part it
+//  names, names the chat Edison (with the Lab HUD's header row, issue
+//  #192), sends a ?ask= request once, and gives the Lab HUD top bar its
 //  status LEDs and RUNNING cell (#189). chat.js doesn't change; in
-//  classic none of this runs. The pure half loads in Node for
+//  classic none of this runs. The look is circuit3d/css/edison-hud.css
+//  and edison-hud-chat.css. The pure half loads in Node for
 //  test/edison-skin.test.js.
 // ─────────────────────────────────────────────────────────────
 (function (root, factory) {
@@ -30,6 +32,17 @@
 
   const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const word = l => new RegExp(`(?<!\\w)${escapeRe(l)}(?!\\w)`);
+
+  // The board's part labels in a reply's html as outlined tags (issue #192):
+  // whole words in the text between tags become <span class="ed-tag">, so
+  // "LED1" is tagged but not the "D1" inside it, nor anything in an entity.
+  function tagLabels(html, labels) {
+    const names = [...new Set(labels.filter(l => typeof l === 'string' && l))].sort((a, b) => b.length - a.length);
+    if (!names.length) return String(html);
+    const re = new RegExp(`(?<![\\w#&])(${names.map(escapeRe).join('|')})(?!\\w)`, 'g');
+    return String(html).split(/(<[^>]+>)/).map(part => (part.startsWith('<') ? part
+      : part.replace(re, '<span class="ed-tag">$1</span>'))).join('');
+  }
 
   // The labels named in text as whole words ("D1" is not in "LED1").
   function labelsIn(text, labels) {
@@ -116,9 +129,18 @@
     const title = doc.querySelector('.sparky-welcome-title');
     if (title) { title.textContent = 'Edison'; title.title = NAME_LINE; }
     const input = doc.getElementById('sparky-input');
-    if (input) { input.placeholder = 'Ask Edison about your circuit'; input.title = NAME_LINE; }
+    if (input) { input.placeholder = 'Ask about your circuit'; input.title = NAME_LINE; }
     // The suggestion chips lose their emoji; their onclick stays.
     for (const b of doc.querySelectorAll('.sparky-suggest-btn')) b.textContent = b.textContent.replace(/^[^\p{L}\p{N}]+/u, '');
+    // The Lab HUD's header row over the panel (issue #192); caps come from CSS.
+    const panel = doc.getElementById('sparky-panel');
+    if (panel && !panel.querySelector('.ed-chat-head')) {
+      const head = doc.createElement('div');
+      head.className = 'ed-chat-head';
+      head.innerHTML = '<span class="ed-chat-name">Edison</span><span class="ed-chat-sub">Tutor / ENSC 220</span>';
+      head.firstChild.title = NAME_LINE;
+      panel.prepend(head);
+    }
   }
 
   // ?ask=<text> (the landing page's prompt): sent once, then dropped from the URL.
@@ -195,7 +217,8 @@
       if (log) new win.MutationObserver(muts => {
         for (const m of muts) for (const n of m.addedNodes) {
           if (n.nodeType !== 1 || !n.classList.contains('chat-msg') || !n.classList.contains('ai')) continue;
-          n.innerHTML = highlightValues(n.innerHTML);
+          const labels = ((win.App && win.App.state && win.App.state.components) || []).map(c => c.label);
+          n.innerHTML = tagLabels(highlightValues(n.innerHTML), labels);
           annotate(win, n);
         }
       }).observe(log, { childList: true });
@@ -206,5 +229,5 @@
     else start();
   }
 
-  return { NAME_LINE, highlightValues, labelsIn, firstNamed, wire };
+  return { NAME_LINE, highlightValues, tagLabels, labelsIn, firstNamed, wire };
 });

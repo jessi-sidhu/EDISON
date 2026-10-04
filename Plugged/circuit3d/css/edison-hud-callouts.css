@@ -1,0 +1,47 @@
+/* ─────────────────────────────────────────────
+   edison-hud-callouts.css — Lab HUD 3/4 (issue #191): results and mistakes
+   as callouts pinned to their parts, placed by edison/result-callouts.js.
+   The landing's leader language: an elbow hairline from a dot on the part
+   to a caps label block with grey sublines. Pink marks a fault only.
+   Every rule is scoped to html[data-ui="edison"]; classic draws none.
+───────────────────────────────────────────── */
+
+html[data-ui="edison"] #result-callouts {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+}
+html[data-ui="edison"] #result-callouts[hidden] { display: none; }
+
+/* One SVG for every leader and dot */
+html[data-ui="edison"] .result-callouts-leaders {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible;
+}
+html[data-ui="edison"] .result-callout-leader { fill: none; stroke: #8A8A8A; stroke-width: 1; }
+html[data-ui="edison"] .result-callout-dot { fill: #F4F4F4; }
+html[data-ui="edison"] .result-callout-dot[data-level="fault"] { fill: #FF3D7F; }
+
+/* The label block: caps title, grey sublines, square, no shadow */
+html[data-ui="edison"] .result-callout {
+  position: absolute; left: 0; top: 0; box-sizing: border-box; width: max-content; max-width: 280px; margin: 0;
+  padding: 6px 10px 7px; background: rgba(16, 16, 16, 0.88); border: 0; border-radius: 0; box-shadow: none;
+  color: #F4F4F4; font: 400 11px/1.6 'DM Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  text-align: left;
+}
+html[data-ui="edison"] .result-callout[hidden] { display: none; }
+html[data-ui="edison"] .result-callout[data-side="left"] { text-align: right; }
+html[data-ui="edison"] .result-callout p { margin: 0; }
+html[data-ui="edison"] .result-callout-title {
+  display: flex; align-items: center; gap: 8px; color: #F4F4F4;
+  letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap;
+}
+html[data-ui="edison"] .result-callout[data-side="left"] .result-callout-title { justify-content: flex-end; }
+html[data-ui="edison"] .result-callout-label { margin-right: 2px; }
+html[data-ui="edison"] .result-callout-sub { margin-top: 3px; color: #8A8A8A; letter-spacing: 0.02em; }
+
+/* The status LED before the title: pink for a fault, a pink outline for a note */
+html[data-ui="edison"] .result-callout-led { display: none; flex: none; box-sizing: border-box; width: 6px; height: 6px; }
+html[data-ui="edison"] .result-callout[data-level="fault"] .result-callout-led { display: inline-block; background: #FF3D7F; }
+html[data-ui="edison"] .result-callout[data-level="warn"] .result-callout-led { display: inline-block; border: 1px solid #FF3D7F; }
+
+/* A part off the canvas: its dot is a ring on the canvas edge, toward the part */
+html[data-ui="edison"] .result-callout-dot[data-off="true"] { fill: #101010; stroke: #F4F4F4; stroke-width: 1; }
+html[data-ui="edison"] .result-callout-dot[data-off="true"][data-level="fault"] { stroke: #FF3D7F; }

@@ -16,10 +16,10 @@
 //   bar the HUD black #101010 (was Barlow on --pad before #189), the scene
 //   background --bezel (#1e2225), and the 3D view reads as the dark bezel: the
 //   default camera's far workbench (the top of the canvas, beige in classic)
-//   is dark. The value pins below (B612 on --mask) are the chat's, left for #192.
-// - An AI reply's values are <span class="ed-num ed-val"> in proportional B612
-//   (first family exactly "B612", not "B612 Mono", so "14.9" has no gap) on
-//   --mask; user messages are left alone.
+//   is dark.
+// - An AI reply's values are <span class="ed-num ed-val"> in DM Mono on the
+//   Lab HUD's --ink (issue #192, edison-hud-chat.css; the dotted underline is
+//   pinned in e2e/edison-hud-chat.spec.js); user messages are left alone.
 // - A reply that names a part draws one .ed-leader: a straight line element
 //   (the plan's rotated 1 px div) whose bounding box's diagonal is the line,
 //   from the reply bubble to the part's on-screen position. It follows the
@@ -31,7 +31,7 @@
 const { test, expect } = require('@playwright/test');
 
 const HUD_BLACK      = 'rgb(16, 16, 16)';      // the Lab HUD's chrome, #101010 (issue #189)
-const MASK           = 'rgb(29, 106, 69)';     // --mask, #1D6A45
+const VALUE_INK      = 'rgb(244, 244, 244)';   // the Lab HUD's --ink, #F4F4F4 (issue #192)
 const CLASSIC_TOPBAR = 'rgb(250, 249, 246)';   // classic --bg-topbar, #FAF9F6
 const REPLY          = 'LED1 gets 14.9 mA';
 
@@ -185,14 +185,14 @@ test('?ui=edison: HUD chrome, bezel scene, and a reply\'s value highlighted with
   await placeLed(page);
   await ask(page, 'How much current does LED1 get at 9 V?');
 
-  // The value, in proportional B612 on --mask, in Edison's reply only. B612
-  // Mono's cells left a gap in "14.9"; the first family must be B612 itself.
+  // The value, in DM Mono on the Lab HUD's --ink (issue #192, hud.css), in
+  // Edison's reply only.
   const value = page.locator('.chat-msg.ai .ed-val');
   await expect(value).toHaveText(['14.9 mA']);
   const style = await value.evaluate(el => ({ font: getComputedStyle(el).fontFamily, color: getComputedStyle(el).color }));
   const firstFamily = style.font.split(',')[0].trim().replace(/^["']|["']$/g, '');
-  expect.soft(firstFamily, `the value's first font family (computed: ${style.font})`).toBe('B612');
-  expect(style.color, 'the value\'s colour (--mask)').toBe(MASK);
+  expect.soft(firstFamily, `the value's first font family (computed: ${style.font})`).toBe('DM Mono');
+  expect(style.color, 'the value\'s colour (the HUD\'s --ink)').toBe(VALUE_INK);
   await expect(page.locator('.chat-msg.user .ed-val'), 'the user\'s "9 V" is not highlighted').toHaveCount(0);
 
   // One leader, from the reply to LED1 in the 3D view.
