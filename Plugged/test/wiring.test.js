@@ -656,6 +656,23 @@ test('the editor loads photo-grid.js and photo-import.js between ids.js and app.
   assert.ok(!order.some(f => /board-model\.js$/.test(f)), `board-model.js is not on the page: ${list}`);
 });
 
+// ── Photo crops, issue #160 ───────────────────────────────────────
+//  photo-crops.js (window.PhotoCrops) cuts each part's crop with
+//  PhotoGrid.warp and photo.js calls it, so it loads after photo-grid.js and
+//  before photo.js. flatten() and the crops share one way of scaling H to
+//  the downsized photo: PhotoCrops.scaleH, not a second inline copy.
+test('the editor loads photo-crops.js after photo-grid.js and before photo.js, and photo.js scales H with PhotoCrops.scaleH', () => {
+  const order = scriptOrder(read('circuit3d/index.html'));
+  const at = f => order.indexOf(f);
+  const list = order.join(', ');
+  assert.ok(at('js/photo-crops.js') >= 0, `circuit3d/index.html loads js/photo-crops.js: ${list}`);
+  assert.ok(at('js/photo-grid.js') < at('js/photo-crops.js') && at('js/photo-crops.js') < at('js/photo.js'),
+    `photo-crops.js loads after photo-grid.js and before photo.js: ${list}`);
+  const src = read('circuit3d/js/photo.js');
+  assert.match(src, /PhotoCrops\.scaleH\(/, 'photo.js scales H to the downsized photo with PhotoCrops.scaleH');
+  assert.doesNotMatch(src, /H\[0\]\.map\(\s*q\s*=>\s*q\s*\*\s*sx\s*\)/, 'no inline copy of scaleH left in photo.js');
+});
+
 test('the 📷 button sits in the chat input row', () => {
   const row = elementHtml(read('circuit3d/index.html'), 'sparky-input-row');
   assert.ok(row, 'circuit3d/index.html has #sparky-input-row');

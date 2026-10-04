@@ -12,6 +12,13 @@
 //         a live labelled grid) → Looks right
 //    📷 → Use sample photo → its stored taps (window.PhotoSamples)
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
+//    → the crop round (#160): parts and wires still 'leads' unsure and a
+//      `key` → "Found N parts · placing legs…", a labelled crop of each
+//      (PhotoCrops.render, from the same resized photo) → one
+//      POST /api/photo/leads → PhotoCrops.merge. A timeout (35 s), an
+//      error, a network failure or any throw keeps the placeholders, no
+//      message. Skipped after a 'deepseek' reading (#161); items() leaves
+//      out off-image boxes and sends at most 24.
 //    → the Reading opens the confirm screen (PhotoConfirm.open) on the same
 //      flattened image; Build it hands its result back here: the board
 //      (SparkyChat.applyBuild), window.PhotoFlags, the simulation, then her
@@ -25,15 +32,18 @@
 //
 //  EXPORTS
 //  ───────
-//  Browser: window.PhotoCapture = { timeoutMs, grid, lastReading }
+//  Browser: window.PhotoCapture = { timeoutMs, leadsTimeoutMs, grid, lastReading }
+//  (lastReading: the Reading the confirm screen opened with, crops merged)
 // ─────────────────────────────────────────────────────────────
 
 (function () {
 
   const PHOTO_PAGE_TIMEOUT_MS = 60000;   // above the server's 45 s PHOTO_TIMEOUT_MS
+  const PHOTO_LEADS_PAGE_TIMEOUT_MS = 35000;   // the server's 25 s PHOTO_LEADS_TIMEOUT_MS plus the upload
   const MAX_SIDE  = 3000;                // the original is resized to this before flattening
   const SAMPLE    = 'demo-board';
   const READING   = 'Reading your board…';
+  const PLACING   = n => `Found ${n} part${n === 1 ? '' : 's'} · placing legs…`;
   const DEFAULT_Q = "What's wrong with my circuit?";       // Build it with nothing typed
   // docs/API-CONTRACT.md → "POST /api/photo" → Errors
   const BAD_IMAGE  = "I can't read that file. Try a JPEG or PNG photo, or use the sample photo.";
@@ -41,7 +51,8 @@
   const AI_TIMEOUT = 'Reading the photo took too long. Try again, or use the sample photo.';
 
   // grid: the PhotoGrid grid of the current 4 taps (null until then).
-  const Capture = window.PhotoCapture = { timeoutMs: PHOTO_PAGE_TIMEOUT_MS, grid: null, lastReading: null };
+  const Capture = window.PhotoCapture = { timeoutMs: PHOTO_PAGE_TIMEOUT_MS, leadsTimeoutMs: PHOTO_LEADS_PAGE_TIMEOUT_MS,
+                                          grid: null, lastReading: null };
 
   const $ = id => document.getElementById(id);
   const modal   = $('photo-modal'),   menu   = $('photo-menu'),   fileIn = $('photo-file');
@@ -58,6 +69,7 @@
   const names   = () => ['a1', 'a' + cols(), 'j' + cols(), 'j1'];
   const isOpen  = () => modal.style.display !== 'none';
   const nextJob = () => { job++; if (ctrl) ctrl.abort(); return job; };
+  const paint   = () => new Promise(r => requestAnimationFrame(() => setTimeout(r)));   // let the status show
 
   function open() {
     clearFlags();                                          // a new photo: the last one's flags are done
@@ -198,53 +210,91 @@
 
   // ── Send ───────────────────────────────────────────────────
 
-  // The original resized to ≤ MAX_SIDE, warped into the grid's frame: a canvas.
-  function flatten(im, grid) {
+  // The original resized to ≤ MAX_SIDE: its pixels, and H scaled to them
+  // (flattened → resized photo). flatten() and the crops both warp from it.
+  function downsize(im, grid) {
     const s   = Math.min(1, MAX_SIDE / Math.max(im.naturalWidth, im.naturalHeight));
     const src = document.createElement('canvas');
     src.width  = Math.round(im.naturalWidth * s);
     src.height = Math.round(im.naturalHeight * s);
     const sctx = src.getContext('2d');
     sctx.drawImage(im, 0, 0, src.width, src.height);
-    const sx = src.width / im.naturalWidth, sy = src.height / im.naturalHeight;
-    const H  = [grid.H[0].map(q => q * sx), grid.H[1].map(q => q * sy), grid.H[2]];   // flattened → resized photo
+    return { pixels: sctx.getImageData(0, 0, src.width, src.height),
+             H: PhotoCrops.scaleH(grid.H, src.width / im.naturalWidth, src.height / im.naturalHeight) };
+  }
+
+  // The resized photo warped into the grid's frame: a canvas.
+  function flatten(src, grid) {
     const out  = document.createElement('canvas');
     out.width  = grid.width;
     out.height = grid.height;
     const octx = out.getContext('2d');
-    const flat = PhotoGrid.warp(sctx.getImageData(0, 0, src.width, src.height), H, octx.createImageData(grid.width, grid.height));
-    octx.putImageData(flat, 0, 0);
+    octx.putImageData(PhotoGrid.warp(src.pixels, src.H, octx.createImageData(grid.width, grid.height)), 0, 0);
     return out;
+  }
+
+  // POST JSON as the request in flight (the next job or close() aborts it),
+  // given up after ms. res is null on a network error, abort or timeout.
+  async function post(url, body, ms) {
+    const ac = ctrl = new AbortController();
+    let timedOut = false, res = null, data = null;
+    const timer = setTimeout(() => { timedOut = true; ac.abort(); }, ms);
+    try {
+      res  = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(body), signal: ac.signal });
+      data = await res.json().catch(() => null);
+    } catch { /* network error or abort: the caller decides */ }
+    clearTimeout(timer);
+    return { res, data, timedOut };
   }
 
   async function send(im, grid, sample) {
     const my = nextJob();
     showStatus(READING, false);
-    await new Promise(r => requestAnimationFrame(() => setTimeout(r)));   // paint the status before the warp
+    await paint();                                         // paint the status before the warp
     if (my !== job) return;
-    const flat = flatten(im, grid);
+    const src  = downsize(im, grid);
+    const flat = flatten(src, grid);
     const body = { image: flat.toDataURL('image/jpeg', 0.9),
                    grid: { cols: grid.cols, pitch: grid.pitch, x0: grid.x0, y0: grid.y0, width: grid.width, height: grid.height } };
     if (sample) body.sample = sample;
 
     corners.hidden = true;                                 // in the same task as the request
-    const ac = ctrl = new AbortController();
-    let timedOut = false, res = null, data = null;
-    const timer = setTimeout(() => { timedOut = true; ac.abort(); }, Capture.timeoutMs);
-    try {
-      res  = await fetch('/api/photo', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                         body: JSON.stringify(body), signal: ac.signal });
-      data = await res.json().catch(() => null);
-    } catch { /* network error or abort: handled below */ }
-    clearTimeout(timer);
+    const { res, data, timedOut } = await post('/api/photo', body, Capture.timeoutMs);
     if (my !== job) return;                                // closed or replaced meanwhile
+    if (!(res && res.ok && data && data.reading)) return showStatus(timedOut ? AI_TIMEOUT : (data && data.reply) || AI_FAILED, true);
 
-    if (res && res.ok && data && data.reading) {
-      Capture.lastReading = data.reading;
-      showStatus('', false);
-      return PhotoConfirm.open(data.reading, flat, grid, built);
+    const reading = await placeLegs(my, data, src, grid);
+    if (my !== job) return;                                // Cancel while placing legs drops the round
+    Capture.lastReading = reading;
+    showStatus('', false);
+    PhotoConfirm.open(reading, flat, grid, built);
+  }
+
+  // The crop round (#160): one labelled crop per item → /api/photo/leads →
+  // the legs merged in. Anything short of an answer keeps the placeholders:
+  // a deepseek reading (Gemini failed, #161) gets no round, and any throw
+  // (a crop that won't render, a bad answer) returns the Reading as read.
+  async function placeLegs(my, reply, src, grid) {
+    const { reading, key } = reply;
+    if (!key || reply.provider === 'deepseek') return reading;
+    try {
+      const items = PhotoCrops.items(reading, grid);
+      if (!items.length) return reading;
+      showStatus(PLACING(items.length), false);
+      await paint();                                       // paint the status before the crops
+      if (my !== job) return reading;
+      const rails = reading.board && reading.board.rails;
+      const sent  = items.map(it => {
+        const win = PhotoCrops.window(grid, it.box);
+        return { id: it.id, kind: it.kind, type: it.type, value: it.value, image: PhotoCrops.render(src.pixels, src.H, grid, win, rails), window: win };
+      });
+      const { res, data } = await post('/api/photo/leads', { key, items: sent }, Capture.leadsTimeoutMs);
+      return res && res.ok && data && Array.isArray(data.items) ? PhotoCrops.merge(reading, data.items) : reading;
+    } catch (err) {
+      console.warn('Crop round failed; the placeholders stay:', err && err.message);
+      return reading;
     }
-    showStatus(timedOut ? AI_TIMEOUT : (data && data.reply) || AI_FAILED, true);
   }
 
   // Build it on the confirm screen: { actions, flags, labels, skipped }.

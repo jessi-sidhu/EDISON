@@ -21,6 +21,8 @@ module.exports = defineConfig({
     command: 'node backend/server.js',
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: false,
-    env: { PORT: String(PORT), AI_PROVIDER: 'fixture' },
+    // PHOTO_PROVIDERS=fixture: no photo route reaches Gemini through a
+    // GEMINI_API_KEY in the shell, whatever a spec forgets to stub.
+    env: { PORT: String(PORT), AI_PROVIDER: 'fixture', PHOTO_PROVIDERS: 'fixture' },
   },
 });

@@ -44,8 +44,12 @@
 //       .grid             the PhotoGrid grid of the current 4 taps (taps in the
 //                         photo's own pixels), null before the 4th tap / after
 //                         Redo.
-//       .lastReading      the Reading the last /api/photo returned; it opens
-//                         the confirm screen, #photo-confirm (#141).
+//       .lastReading      the Reading the confirm screen, #photo-confirm
+//                         (#141), opened with: the last /api/photo Reading
+//                         with the crop round's legs merged in (#160). With
+//                         no crop round (no 'leads' flags, no key, or a
+//                         deepseek reading, #161) it is /api/photo's Reading
+//                         as returned, as for MOCK_READING here.
 //   - window.PhotoSamples['demo-board'] from samples/samples.js:
 //                         { file: 'samples/demo-board.jpg', cols: 63, taps }.
 //   - While #photo-modal is open, keydown is swallowed in the capture phase:
