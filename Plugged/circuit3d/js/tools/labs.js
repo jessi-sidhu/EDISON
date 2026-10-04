@@ -14,7 +14,8 @@
 //  Plugged/, e.g. edison/figures/ohm.sparky) loads that circuit, but only
 //  if UiFlag.allowedCircuit passes it. Anything else is never fetched.
 //  With &run=1 too (the textbook's "Test in lab +"), the loaded circuit
-//  starts simulating, as if Simulate were pressed.
+//  starts simulating, as if Simulate were pressed; &set= first puts the
+//  textbook's values on it (setsFromSearch).
 //
 //  EXPORTS
 //  ───────
@@ -25,6 +26,8 @@
 //  urlFor(id)  → the lab sheet's starter, relative to circuit3d/index.html
 //                (null for an id with no sheet)
 //  labFromSearch(search) → the ?lab= id in a location.search, or null
+//  setsFromSearch(search) → [{ label, key, value }] from ?set= (an ?open=
+//                link's values: a resistance or a voltage per part label)
 //  FRAME_DISTANCE  the closest the camera comes when a lab opens
 //                (App.frameCircuit's minDistance; a saved circuit gets 6)
 //  paperWidth(w, room) → the lab paper's width once a pull ends (Edison,
@@ -56,6 +59,22 @@
   };
 
   const labFromSearch = search => new URLSearchParams(search || '').get('lab') || null;
+
+  // ?set= on an ?open= link (the textbook's "Test in lab +"): the values the
+  // page shows, as LABEL.key:number pairs, e.g. R2.resistance:47000,PS2.voltage:0.5.
+  // Only a resistance (1 Ω to 10 MΩ) or a voltage (0 to 30 V) on a part
+  // label; anything else is dropped.
+  const SET_RANGE = { resistance: [1, 1e7], voltage: [0, 30] };
+  function setsFromSearch(search) {
+    const raw = new URLSearchParams(search || '').get('set');
+    if (!raw) return [];
+    return raw.split(',').map(pair => {
+      const m = /^([A-Z]{1,3}\d{1,2})\.(resistance|voltage):(-?\d+(?:\.\d+)?)$/.exec(pair.trim());
+      if (!m) return null;
+      const value = Number(m[3]), [lo, hi] = SET_RANGE[m[2]];
+      return Number.isFinite(value) && value >= lo && value <= hi ? { label: m[1], key: m[2], value } : null;
+    }).filter(Boolean);
+  }
 
   // Picked from 1440×900 screenshots of Lab 2 with the sheet and chat open
   // (a 608 px canvas): at 12, U1, all four supply rails and a strip of mat
@@ -96,7 +115,15 @@
       App.setHint(`Can't open ${path}: only Edison figures and lab circuits can be opened this way.`, 5000);
       return;
     }
-    load({ id: path, title: path }, `../${path}`).then(ok => { if (ok && run && !App.simRunning) App.runSimulation(); });
+    load({ id: path, title: path }, `../${path}`).then(ok => {
+      if (!ok) return;
+      // The textbook's values (?set=), on the parts they name, before the run.
+      for (const s of setsFromSearch(location.search)) {
+        const c = App.state.components.find(x => x.label === s.label);
+        if (c && c.values && s.key in c.values) App.setValues(c, { [s.key]: s.value });
+      }
+      if (run && !App.simRunning) App.runSimulation();
+    });
   }
 
   function wire() {
@@ -154,5 +181,5 @@
     App.frameCircuit({ minDistance: FRAME_DISTANCE, whole });
   }
 
-  return { LABS, urlFor, labFromSearch, FRAME_DISTANCE, frame, PAPER_WIDTH, PAPER_MIN_BOARD, paperWidth };
+  return { LABS, urlFor, labFromSearch, setsFromSearch, FRAME_DISTANCE, frame, PAPER_WIDTH, PAPER_MIN_BOARD, paperWidth };
 });

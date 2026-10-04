@@ -17,11 +17,23 @@
        Values with data-var can be dragged or stepped with the arrow keys;
        data-show values follow them. textbook-figures.js draws the figures
        and plots into [data-figure] and [data-plot] and wires it all. -->
+  <!-- The way out of the book: home, the course, the two labs. Caps are
+       written here (the design guard bans text-transform outside the HUD). -->
+  <nav class="tb-bar" aria-label="Edison">
+    <a class="tb-bar-mark" href="index.html">EDISON</a>
+    <span class="tb-bar-title">ENSC 220 TEXTBOOK</span>
+    <span class="tb-bar-links">
+      <a href="course.html">COURSE <span aria-hidden="true">+</span></a>
+      <a href="../circuit3d/index.html?ui=edison&amp;lab=lab1">LAB 1 <span aria-hidden="true">+</span></a>
+      <a href="../circuit3d/index.html?ui=edison&amp;lab=lab2">LAB 2 <span aria-hidden="true">+</span></a>
+    </span>
+  </nav>
+
   <main class="tb-spread">
     <h1 class="tb-sr">ENSC 220 textbook, pages 4 and 5: basic principles and applications</h1>
 
     <!-- ── Page 4 ── -->
-    <article class="tb-page tb-verso" data-fig="inverting" aria-labelledby="tb-s14">
+    <article class="tb-page tb-verso" id="p4" data-fig="inverting" aria-labelledby="tb-s14">
       <header class="tb-run"><span class="tb-folio">4</span><span>BASIC PRINCIPLES AND APPLICATIONS</span></header>
 
       <h2 id="tb-s14" class="tb-h"><span class="tb-h-n">1.4</span> Inverting Op-Amp with Negative Feedback</h2>
@@ -51,12 +63,13 @@
 
       <p class="tb-check"><label for="tb-check-inv">Check yourself: with <var>R</var><sub>2</sub> = 47 kΩ, what is <var>V</var><sub>out</sub> for 0.5 V in?</label>
         <input id="tb-check-inv" data-check="inverting" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="? V"><span class="tb-tick" aria-live="polite"></span></p>
+      <p class="tb-labref">Lab 2 builds this amplifier on the bench, with a sine in and the meter on the output. <a href="../circuit3d/index.html?ui=edison&amp;lab=lab2">Open Lab 2 <span aria-hidden="true">+</span></a></p>
 
       <footer class="tb-foot">ENSC 220 / CIRCUITS</footer>
     </article>
 
     <!-- ── Page 5 ── -->
-    <article class="tb-page tb-recto" data-fig="non-inverting" aria-labelledby="tb-s15">
+    <article class="tb-page tb-recto" id="p5" data-fig="non-inverting" aria-labelledby="tb-s15">
       <header class="tb-run"><span>BASIC PRINCIPLES AND APPLICATIONS</span><span class="tb-folio">5</span></header>
 
       <h2 id="tb-s15" class="tb-h"><span class="tb-h-n">1.5</span> Non-Inverting Amplifier</h2>

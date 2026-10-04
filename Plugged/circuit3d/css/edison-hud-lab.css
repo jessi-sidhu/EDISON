@@ -89,6 +89,8 @@ html[data-ui="edison"] .lab-paper-sec p { margin: 0 0 10px; }
 html[data-ui="edison"] .lab-paper-h { display: flex; gap: 14px; margin: 0 0 10px; font: 400 15px/1.4 var(--hud-mono); color: var(--pp-ink); }
 html[data-ui="edison"] .lab-paper-h-n { color: var(--pp-grey); }
 html[data-ui="edison"] .lab-paper-dim { color: var(--pp-grey); font-size: 12px; }
+html[data-ui="edison"] .lab-paper-reading { color: var(--pp-ink); text-decoration: none; border-bottom: 1px solid var(--pp-line); }
+html[data-ui="edison"] .lab-paper-reading:hover { border-bottom-color: var(--pp-ink); }
 
 /* Equipment */
 html[data-ui="edison"] .lab-paper-equip, html[data-ui="edison"] .lab-paper-data { width: 100%; border-collapse: collapse; font-size: 12px; }

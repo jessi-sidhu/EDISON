@@ -193,7 +193,18 @@
     if (manual) {
       const s1 = sec(1, 'Objective');
       if (sheet.objective) s1.append(make('p', '', sheet.objective));
-      if (sheet.reading) s1.append(make('p', 'lab-paper-dim', sheet.reading));
+      if (sheet.reading) {
+        // The reading links to its textbook page, in a new tab so the lab stays put.
+        const p = make('p', 'lab-paper-dim');
+        if (sheet.readingHref) {
+          const link = make('a', 'lab-paper-reading', sheet.reading);
+          link.href = sheet.readingHref;
+          link.target = '_blank';
+          link.rel = 'noopener';
+          p.append(link);
+        } else p.textContent = sheet.reading;
+        s1.append(p);
+      }
 
       if (sheet.equipment) {
         const t = make('table', 'lab-paper-equip');

@@ -45,11 +45,26 @@ sub { font-family: var(--tb-serif); font-size: 0.74em; line-height: 1; }
 var + sub { margin-left: 0.04em; }
 
 /* ── The spread: one frame, a rule down the gutter ── */
+/* The bar above the book: Edison's way back to the course and the labs. */
+.tb-bar {
+  display: flex; align-items: center; gap: 20px; max-width: 1480px; margin: 12px auto 0; padding: 0 24px;
+  font: 400 11px/1 var(--tb-mono); letter-spacing: 0.12em; color: var(--tb-dim);
+}
+.tb-bar a { color: var(--tb-ink); text-decoration: none; }
+.tb-bar a:hover { text-decoration: underline; }
+.tb-bar a:focus-visible { outline: 1px solid var(--tb-line); outline-offset: 3px; }
+.tb-bar-mark { letter-spacing: 0.16em; }
+.tb-bar-links { margin-left: auto; display: flex; gap: 20px; }
+/* A page's line to its lab. */
+.tb-labref { margin-top: 10px; font-size: 12px; color: var(--tb-grey); }
+.tb-labref a { color: var(--tb-ink); text-decoration: none; border-bottom: 1px solid var(--tb-frame); }
+.tb-labref a:hover { border-bottom-color: var(--tb-ink); }
+
 .tb-spread {
   display: grid;
   grid-template-columns: 1fr 1fr;
   max-width: 1480px;
-  margin: 18px auto;
+  margin: 10px auto 18px;
   border: 1px solid var(--tb-frame);
   background: var(--tb-page);
 }

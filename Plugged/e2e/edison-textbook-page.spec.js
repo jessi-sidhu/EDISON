@@ -130,3 +130,36 @@ test('Test in lab + on the left page opens the editor with the inverting amp bui
 
   expect(errors).toEqual([]);
 });
+
+// The page and the simulator agree: R2 dragged to 47 kΩ (four steps down
+// from 100 kΩ: 82, 68, 56, 47) puts 47 kΩ in "Test in lab +", and the editor
+// opens the figure with R2 at 47 kΩ, already running: Vout = −47/10 × 0.5 = −2.35 V.
+// The bar above the book leads back to the course and the labs.
+test('Test in lab + carries the page\'s values: R2 at 47 kΩ on the page opens the circuit with R2 at 47 kΩ, running; the bar leads to the course and both labs', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.route('**/api/ask', route => route.fulfill({ json: { reply: '', actions: [] } }));
+  await page.goto('/edison/textbook.html');
+  await expect(page.locator('.tb-bar a[href="course.html"]')).toBeVisible();
+  await expect(page.locator('.tb-bar a[href*="lab=lab1"]')).toHaveCount(1);
+  await expect(page.locator('.tb-bar a[href*="lab=lab2"]')).toHaveCount(1);
+  await expect(page.locator('#p4 .tb-labref a[href*="lab=lab2"]'), 'page 4 points to Lab 2').toHaveCount(1);
+
+  const r2 = page.locator('#p4 .tb-scrub[data-var="r2"]').first();
+  await r2.focus();
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowLeft');
+  await expect(r2).toHaveText(/47\s*kΩ/);
+  const link = page.locator('#p4 a.tb-lab');
+  expect(await link.getAttribute('href')).toContain('R2.resistance:47000');
+
+  await link.click();
+  await page.waitForFunction(() => window.App && App.state && App.state.components.some(c => c.label === 'R2'));
+  await expect.poll(() => page.evaluate(() => App.state.components.find(c => c.label === 'R2').values.resistance), { message: 'R2 is 47 kΩ in the simulator' }).toBe(47000);
+  await expect.poll(() => page.evaluate(() => !!App.simRunning), { message: 'already running' }).toBe(true);
+  await expect.poll(async () => page.evaluate(() => {
+    const m = (document.getElementById('sim-results') || {}).textContent || '';
+    return /−?2\.3[45]\s*V/.test(m.replace('-', '−'));
+  }), { message: 'the results read about −2.35 V at the output', timeout: 20_000 }).toBe(true);
+  expect(errors).toEqual([]);
+});

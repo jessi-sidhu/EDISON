@@ -109,6 +109,7 @@
     due: 'Oct 3',
     objective: 'Build a series-parallel circuit on the 10 V bench supply, predict its currents and voltages with Ohm\'s law and KCL, and check them against the simulator.',
     reading: 'Read first: textbook chapter 2, Kirchhoff\'s laws and dividers.',
+    readingHref: '../edison/course.html#textbook',
     equipment: [
       { label: 'PS1', text: 'Bench supply, set to 10 V' },
       { label: 'R1',  text: 'Resistor, 1 kΩ' },
@@ -181,6 +182,7 @@
     due: 'Oct 9',
     objective: 'Build an inverting amplifier with a gain of −10 on the ±12 V supply, drive it with a 0.5 V sine from the function generator, and read its output on the scope and the multimeter.',
     reading: 'Read first: textbook §1.4, the inverting op-amp. The TL072 (U1) starts seated across the centre gap at f30; you wire the rest.',
+    readingHref: '../edison/textbook.html#p4',
     equipment: [
       { label: 'U1',  text: 'TL072 dual op-amp, across the centre gap' },
       { label: 'R1',  text: 'Rin, 10 kΩ' },
