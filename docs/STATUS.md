@@ -2,16 +2,33 @@
 
 **Read this first when you pick the project up on any machine.** It's the shared memory: where things stand, what's next, what we learned, and how Aarmen likes to work. Claude Code's own memory lives on one laptop only, so anything worth keeping goes here. Update it at the end of each session (Claude: do it as part of wrapping up).
 
-*Last updated: 2026-10-04 early morning, Mac session.*
+*Last updated: 2026-10-04 ~5:45 am, Mac session.*
 
-## In progress (2026-10-04): hard-coded photo samples and Thandi's upload
-Aarmen's call: the photo samples are **hard-coded** (no Gemini read). The rectifier and the 555 are dropped. The course labs (hard-coded lab steps) are a separate, later job.
-- **#15, `leds-buttons` (photo 2):** on `dev`. It adds the `board` field: a sample shows its photo with "Reading your board…" for 1 s, then builds a fixed action list.
-- **#16, `ensc-lab` (photo 11, Aarmen's ENSC 220 bench, a TL072 comparator):** built on `aarmens702-hub/16-ensc-lab-sample` (`.worktrees/16`). Its browser specs, review and ship are next. The server checker flags R3 (the 470 Ω into IN1+) as "not between power and ground"; that's a false alarm for a comparator input.
-- **Next: Thandi's upload.** His real board photos (IMG_2011–2013, in Messages) are the op-amp LED blinker from the "photoexample" sketch (`docs/boards/`), with the op-amp one spot off and one wire missing.
-  - Uploading that exact photo file (grid taps as usual) builds the hard-coded broken board.
-  - Edison's fix is hard-coded too, giving the sketch's working circuit.
-  - The simulator can't run this oscillator yet: it sticks about 0.5 s in. That's a separate fix.
+## Morning of 2026-10-04: read this first (all on `dev` at eb44795; `main` NOT promoted yet)
+Overnight, all shipped to `dev`:
+- **#15** `leds-buttons` and **#16** `ensc-lab` (Aarmen's ENSC 220 bench): hard-coded photo samples. A sample shows its photo with "Reading your board…" for 1 s, then builds a fixed board, with no AI.
+- **#17 Thandi's upload (the demo's photo beat):**
+  - Upload `~/Downloads/thandi-board-1.jpg` (or `-2` / `-3`; the originals are IMG_2011–2013 in Messages), then tap the 4 corners and press Looks right.
+  - It builds the board **as photographed**: U1 turned around and 2 columns off, and pin 4 (V−) not wired.
+  - Edison's first answer names both mistakes. Type **"fix it"**: the canned fix moves U1 to e32 facing left and adds a29 → tn_29. Accept, and the LED blinks.
+  - The photo is recognised by its file's SHA-256, so it has to be **that exact file**, picked on localhost. A phone re-save or an http LAN address goes to Gemini instead.
+  - The fix triggers on "fix", "correct", "repair" or "solve". It's also a sample tile, as a fallback.
+- **#18 simulator:** an op-amp with positive feedback now snaps between its rails with hysteresis, so the blinker blinks (Thandi's board: period 1.23 s; 60 s with every step ok). Before, it stuck at about 0.5 s; then it froze at 5.4 s, which was fixed after review.
+- **Checked in the real browser (Mac Chrome)** on eb44795: upload → corners → broken board → Edison → "fix it" → Accept → LED on 5.1 mA / off, repeating, "CIRCUIT OK" throughout, no console errors.
+- **Screenshots for Aarmen** are in `~/Downloads/edison-morning/`:
+  - `1-side-by-side.jpg` (photo vs app);
+  - the broken, LED-on and LED-off shots;
+  - Thandi's photo with every lead marked, and the decode notes.
+- **Testing was lean, at Aarmen's call** (2026-10-04, "it just needs to run and be correct"): #16 and #17 shipped on lint, unit and the photo/chat specs, without a full browser run. **Run the full `npm run e2e` in `/promote`.**
+
+**For Aarmen to decide in the morning:**
+1. Look at `1-side-by-side.jpg` (does the app board match Thandi's photo?), then `/promote`.
+2. **Ask Thandi to check 4 hidden ends** on the real board: j32, j22, i26, g36 (`thandi-board-decode.md`). Also, R3 is 5.6 kΩ (green-blue-red), not 10 kΩ.
+3. **The app mirrors real breadboards:** a DIP's pins can't sit at a photo's printed holes, so Thandi's board is stored with its rows flipped (A↔J). The 3D view looks like IMG_2013, which is why that's the sample photo.
+4. **Polish:** after the fix, U1's callout says "clipped… fine for a comparator; in an amplifier lower the gain". Accurate, but off-message for a blinker.
+5. **The server checker's false alarm on `ensc-lab`:** R3 "not between power and ground" (a comparator input resistor).
+6. **Small things:** a stale comment in `test/tl072.test.js` section 4 (the 5.4 s freeze was at the lower threshold); `fingerprint()` hashes any picked file (cap it at, say, 50 MB).
+7. **Not done:** the course labs with hard-coded steps (Aarmen: a separate job, later).
 
 ## Where things are
 
