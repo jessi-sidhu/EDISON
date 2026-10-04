@@ -397,7 +397,11 @@ test('server.js builds its tools from the registry, with no per-type tables left
 // set_control, every control key of some part (BOOLEAN for toggle and
 // momentary, NUMBER for slider). Nothing but `part` is required.
 
-const aiValueKeys = def => (def.ai && def.ai.values) || Object.keys(def.values || {});
+// A value or control marked ai: false (e.g. the bench supply's CH2, #124)
+// stays out of the AI's tools.
+const aiValueKeys = def => ((def.ai && def.ai.values) || Object.keys(def.values || {}))
+  .filter(k => !(def.values && def.values[k] && def.values[k].ai === false));
+const aiControlEntries = def => Object.entries(def.controls || {}).filter(([, c]) => c.ai !== false);
 
 test('set_value, set_control and delete_part are generated, valid tools', () => {
   for (const name of ['set_value', 'set_control', 'delete_part']) {
@@ -432,11 +436,11 @@ test("set_value offers every AI value key of every part, typed as in that part's
   assert.equal(props.maxCurrent, undefined, "the LED's maxCurrent is not an AI value");
 });
 
-test('set_control offers every control key of every part: the button\'s pressed is a BOOLEAN', () => {
+test('set_control offers every AI control key of every part: the button\'s pressed is a BOOLEAN', () => {
   const props = tool('set_control').parameters.properties;
   const want = new Set(['part']);
   for (const def of Parts.all()) {
-    for (const [key, spec] of Object.entries(def.controls || {})) {
+    for (const [key, spec] of aiControlEntries(def)) {
       want.add(key);
       assert.ok(props[key], `set_control has no "${key}" param (a ${def.type} control)`);
       assert.equal(props[key].type, spec.type === 'slider' ? 'NUMBER' : 'BOOLEAN', `set_control.${key}`);

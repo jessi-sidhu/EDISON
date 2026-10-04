@@ -202,6 +202,19 @@ const BROKEN = [
   ['span default above max',          variant(testSpan, d => { d.place.span = { min: 3, max: 5, default: 6 }; }), [/span/, /default/]],
   ['span min above max',              variant(testSpan, d => { d.place.span = { min: 5, max: 3, default: 4 }; }), [/span/]],
 
+  // Choice controls, ai: false, clickAnytime, a V element's ref (#124)
+  ['a choice control with 1 option',  variant(testSpan, d => { d.controls.mode = { type: 'choice', options: ['a'], default: 'a', saved: true }; }), [/controls\.mode/, /options/, /2/]],
+  ['a choice control naming an option twice',
+                                      variant(testSpan, d => { d.controls.mode = { type: 'choice', options: ['a', 'a'], default: 'a', saved: true }; }), [/controls\.mode/, /options/, /twice/]],
+  ['a choice control defaulting off its options',
+                                      variant(testSpan, d => { d.controls.mode = { type: 'choice', options: ['a', 'b'], default: 'c', saved: true }; }), [/controls\.mode/, /default/, /"c"/]],
+  ['a value with ai: true',           variant(testSpan, d => { d.values.resistance.ai = true; }),     [/values\.resistance\.ai/, /only be false/]],
+  ['a control with ai: true',         variant(testSpan, d => { d.controls.closed.ai = true; }),       [/controls\.closed\.ai/, /only be false/]],
+  ['a control with clickAnytime "yes"',
+                                      variant(testSpan, d => { d.controls.closed.clickAnytime = 'yes'; }), [/controls\.closed\.clickAnytime/, /true or false/]],
+  ['a V element whose ref is not one of its pins',
+                                      variant(testOff, d => { d.elements = v => [{ kind: 'V', pins: ['a', 'b'], volts: v.voltage, ref: 'nope' }]; }), [/\(V\)/, /ref/, /nope/], 'test_off'],
+
   // Examples and keywords
   ['no examples',                     variant(testSpan, d => { d.examples = []; }),                   [/example/]],
   ['9 keywords',                      variant(testSpan, d => { d.ai.keywords = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8', 'k9']; }), [/keyword/, /8/]],
@@ -242,6 +255,12 @@ const AT_LIMIT = [
   ['ai.recipes of two Examples (#118)', variant(testSpan, d => { d.ai.recipes = [d.examples[0], { ...d.examples[0], name: 'second' }]; })],
   ['16 pins',                nPins(16)],
   ['a fixed span',           variant(testSpan, d => { d.place.span = { min: 3, max: 3, default: 3 }; })],
+  // The valid twins of the #124 rejections above, so each of those fails on its one rule.
+  ['a choice control of 2 options',  variant(testSpan, d => { d.controls.mode = { type: 'choice', options: ['a', 'b'], default: 'b', saved: true }; })],
+  ['ai: false on a value and a control, clickAnytime on a control',
+                             variant(testSpan, d => { d.values.resistance.ai = false; Object.assign(d.controls.closed, { ai: false, clickAnytime: true }); })],
+  ['a V element whose ref is one of its pins',
+                             variant(testOff, d => { d.elements = v => [{ kind: 'V', pins: ['a', 'b'], volts: v.voltage, ref: 'b' }]; })],
 ];
 
 for (const [what, def] of AT_LIMIT) {

@@ -173,3 +173,23 @@
 }
 .labs-menu-item:hover,
 .labs-menu-item:focus-visible { background: #f5f2ed; outline: none; }
+
+/* mini scope (#121): built by js/tools/scope.js, bottom right above Reset View */
+#scope {
+  position: absolute;
+  bottom: 50px;
+  right: 14px;
+  padding: 6px;
+  background: #10161c;
+  border: 1px solid #26323d;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  font: 500 11px/1.5 monospace;
+  pointer-events: auto;
+}
+#scope[hidden], #scope .scope-ch[hidden] { display: none; }
+#scope-canvas { display: block; position: static; width: 240px; height: 120px; border-radius: 6px; }
+#scope-ch1 { color: #ffd25a; margin-top: 4px; }
+#scope-ch2 { color: #5ad2ff; }
+#scope-probe-btn { margin: 4px 0 0; }
+#scope-probe-btn[aria-pressed="true"] { color: var(--text-primary); border-color: #5ad2ff; }

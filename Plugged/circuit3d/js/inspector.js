@@ -60,6 +60,8 @@
         const row = { kind: 'slider', key, value, min: spec.min, max: spec.max, step: spec.step, saved: spec.saved };
         if (spec.unit !== undefined) row.unit = spec.unit;
         out.push(row);
+      } else if (spec.type === 'choice') {
+        out.push({ kind: 'option', key, options: [...spec.options], value, saved: spec.saved });
       } else {
         out.push({ kind: spec.type, key, value, saved: spec.saved });
       }
@@ -203,6 +205,20 @@
     row.append(select);
   }
 
+  // A choice control (e.g. a supply's mode): its options, set through App
+  // like the other controls, not as a value.
+  function optionRow(comp, r, row) {
+    const select = el('select', 'inspector-input');
+    for (const name of r.options) {
+      const o = el('option', null, name);
+      o.value = name;
+      select.append(o);
+    }
+    select.value = r.value;
+    select.addEventListener('change', () => controlEdit(comp, r.key, select.value, true));
+    row.append(select);
+  }
+
   function sliderRow(comp, r, row) {
     const field = el('div', 'inspector-field');
     const input = el('input', 'inspector-slider');
@@ -229,7 +245,7 @@
     return unit ? `${v}${unit === '%' ? '' : ' '}${unit}` : String(v);
   }
 
-  const BUILD = { number: numberRow, choice: choiceRow, slider: sliderRow, toggle: checkRow, momentary: checkRow };
+  const BUILD = { number: numberRow, choice: choiceRow, option: optionRow, slider: sliderRow, toggle: checkRow, momentary: checkRow };
 
   function show(comp) {
     if (!panel) return;

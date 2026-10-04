@@ -15,7 +15,8 @@
 //  formatPower(W)          '9.5 mW' below 10 mW, '104 mW' to under 1 W, '1.72 W'
 //  formatEnergy(µJ)        '850 µJ', '12.5 mJ' from 1 mJ, '1.24 J' from 1 J
 //  cardLines(label, part)  [label, 'V · mA · P', 'over its … rating'?], or null;
-//                          an op-amp (part.opamps): [label, one line per op-amp]
+//                          an op-amp (part.opamps): [label, one line per op-amp];
+//                          part.channels: [label, 'CH1 5.0 V · CH2 9.0 V', '106 mW total'?]
 //  holeLines(hole, volts)  [hole, '9.0 V'] signed, or [hole, 'floating']
 // ─────────────────────────────────────────────────────────────
 
@@ -63,6 +64,14 @@
   function cardLines(label, part) {
     if (!part) return null;
     if (Array.isArray(part.opamps) && part.opamps.length) return [label].concat(part.opamps.map(opampLine));
+    // A part with channels (an independent bench supply): each channel's
+    // |V|, then its total power, since one I would be only CH1's.
+    if (Array.isArray(part.channels)) {
+      const volts = ch => (typeof ch.V === 'number' ? fixed(Math.abs(ch.V), 1) + ' V' : 'floating');
+      const lines = [label, part.channels.map(ch => `${ch.name} ${volts(ch)}`).join(' · ')];
+      if (part.P !== null) lines.push(formatPower(part.P) + ' total');
+      return lines;
+    }
     const bits = [];
     if (part.V !== null) bits.push(fixed(Math.abs(part.V), 1) + ' V');
     if (part.I !== null) bits.push(fixed(Math.abs(part.I), 1) + ' mA');

@@ -49,6 +49,21 @@
       return null;
     }
 
+    // Whether a click on comp's mesh hit works its click gesture: while
+    // simulating, or any time for a clickAnytime control (the bench
+    // supply's mode, #124). A model with a click target (a mesh marked
+    // userData.clickTarget, e.g. that mode button) works it only there; a
+    // click elsewhere on it selects the part.
+    function clickWorks(comp, hit) {
+      const def = Parts.get(comp.type);
+      const key = def && def.gestures && def.gestures.click;
+      if (!key || !(App.simRunning || def.controls[key].clickAnytime)) return false;
+      let targeted = false, onTarget = false;
+      comp.group.traverse(o => { if (o.userData.clickTarget) targeted = true; });
+      for (let o = hit; o && o !== comp.group; o = o.parent) if (o.userData.clickTarget) onTarget = true;
+      return !targeted || onTarget;
+    }
+
     function getAllPinMeshes() {
       const out = [];
       state.components.forEach(c => (c.pinMeshes || []).forEach(pm => out.push(pm)));
@@ -630,7 +645,7 @@
         // The owning component. While simulating, a click on a part with a
         // click gesture (a button) works its control instead of selecting it.
         const comp = ownerOf(hitObj);
-        if (comp && App.simRunning && App.partGesture(comp, 'click')) return;
+        if (comp && clickWorks(comp, hitObj) && App.partGesture(comp, 'click')) return;
         if (comp) { App.selectItem(comp, 'component'); return; }
 
         App.deselect();

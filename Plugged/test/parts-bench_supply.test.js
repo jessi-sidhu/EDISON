@@ -10,12 +10,16 @@
 // stated so the builder matches them):
 // - Identity: type 'bench_supply', prefix 'PS' (labels PS1, PS2…), category
 //   'Sources' (beside the battery). name / sub / icon are the builder's pick.
-// - pins ['pos', 'com', 'neg'], ref 'com' (COM is ground), place offboard.
+// - pins ['pos', 'com', 'neg', 'com2'], ref 'com' (COM is ground), place
+//   offboard. com2 (CH2+) was appended by #124; its two channels and the
+//   SERIES / INDEPENDENT mode are test/bench-two-channel.test.js.
 // - values: voltage { V, default 12, min 0, max 30 } (both rails track),
-//           limit   { A, default 0.5, min 0.001, max 3 }.
-// - elements(values): exactly two V elements, V(pos, com, voltage) and
-//   V(com, neg, voltage), no `limit` field on either. Each has an `id` so
-//   r.current names them (e.g. 'pos' and 'neg').
+//           limit   { A, default 0.5, min 0.001, max 3 }, plus #124's
+//           voltage2 / limit2 (used only when independent).
+// - elements(values) in series (the default): two V elements,
+//   V(pos, com, voltage) and V(com, neg, voltage), no `limit` field on
+//   either, plus #124's closed SW joining com and com2. Each V has an `id`
+//   so r.current names them (e.g. 'pos' and 'neg').
 // - measure(r) → { posAmps, negAmps, posOver, negOver }, nothing else.
 //   posAmps / negAmps are each rail's current in mA as a POSITIVE magnitude
 //   (like the battery's `current`), so a supplying rail reads + 12, not − 12.
@@ -90,7 +94,7 @@ function circuit() {
   return {
     components, wires,
     supply(label, values) {
-      return add({ type: 'bench_supply', label, pins: pinsOf(3), holeRefs: null,
+      return add({ type: 'bench_supply', label, pins: pinsOf(supply().pins.length), holeRefs: null,
                    values: Object.assign({ voltage: 12, limit: 0.5 }, values) });
     },
     battery(label, voltage = 9) {
@@ -171,17 +175,19 @@ test("identity: type bench_supply, category Sources, prefix PS (labels PS1, PS2)
   assert.equal(Ids.nextLabel([{ type: 'bench_supply', label: 'PS1' }], 'bench_supply'), 'PS2');
 });
 
-test("pins ['pos', 'com', 'neg'], ref 'com' (COM is ground), placed off the board", () => {
+test("pins ['pos', 'com', 'neg', 'com2'] (#124 appends com2), ref 'com' (COM is ground), placed off the board", () => {
   const def = supply();
-  assert.deepStrictEqual([...def.pins], ['pos', 'com', 'neg']);
+  assert.deepStrictEqual([...def.pins], ['pos', 'com', 'neg', 'com2']);
   assert.equal(def.ref, 'com');
   assert.deepStrictEqual(plain(def.place), { kind: 'offboard' });
 });
 
-test('values: voltage 0–30 V (12 V default), limit 1 mA–3 A (0.5 A default)', () => {
+test('values: voltage 0–30 V (12 V default), limit 1 mA–3 A (0.5 A default), and #124\'s voltage2 / limit2', () => {
   assert.deepStrictEqual(plain(supply().values), {
-    voltage: { unit: 'V', default: 12, min: 0, max: 30 },
-    limit:   { unit: 'A', default: 0.5, min: 0.001, max: 3 },
+    voltage:  { unit: 'V', default: 12, min: 0, max: 30 },
+    limit:    { unit: 'A', default: 0.5, min: 0.001, max: 3 },
+    voltage2: { unit: 'V', default: 12, min: 0, max: 30, ai: false },   // kept from the AI (#124)
+    limit2:   { unit: 'A', default: 0.5, min: 0.001, max: 3, ai: false },
   });
 });
 
@@ -194,9 +200,9 @@ test('checkValue: 0 V and 30 V ok, 31 V refused; a 0.05 A limit ok, 5 A refused'
   assert.equal(Parts.checkValue('bench_supply', 'limit', 5).ok, false);
 });
 
-test('elements(): V(pos, com, volts) and V(com, neg, volts), each with an id and no limit field', () => {
-  const els = supply().elements({ voltage: 12, limit: 0.5 }, {});
-  assert.equal(els.length, 2, `two elements; got ${JSON.stringify(els)}`);
+test('elements() in series: V(pos, com, volts) and V(com, neg, volts), each with an id and no limit field', () => {
+  const els = supply().elements({ voltage: 12, limit: 0.5 }, {}).filter(e => e.kind !== 'SW');   // #124's com–com2 link aside
+  assert.equal(els.length, 2, `two V elements; got ${JSON.stringify(els)}`);
   for (const e of els) {
     assert.equal(e.kind, 'V', JSON.stringify(e));
     assert.equal(e.volts, 12, JSON.stringify(e));
@@ -205,7 +211,7 @@ test('elements(): V(pos, com, volts) and V(com, neg, volts), each with an id and
   }
   assert.deepStrictEqual(els.map(e => [...e.pins]).sort(), [['com', 'neg'], ['pos', 'com']]);
   assert.notEqual(els[0].id, els[1].id, 'two different ids');
-  const at5 = supply().elements({ voltage: 5, limit: 0.5 }, {});
+  const at5 = supply().elements({ voltage: 5, limit: 0.5 }, {}).filter(e => e.kind === 'V');
   assert.deepStrictEqual(at5.map(e => e.volts), [5, 5], 'both rails track the one voltage');
 });
 
@@ -504,7 +510,7 @@ test('in a browser-like page with no THREE or document, bench_supply.js defines 
   vm.runInContext(fs.readFileSync(file, 'utf8'), win);
   const def = win.Parts.get('bench_supply');
   assert.ok(def, 'window.Parts.get("bench_supply") after loading bench_supply.js');
-  assert.equal(def.elements({ voltage: 12, limit: 0.5 }, {}).length, 2);
+  assert.equal(def.elements({ voltage: 12, limit: 0.5 }, {}).filter(e => e.kind === 'V').length, 2);
 });
 
 test('parts/bench_supply.js draws only through ctx: a view.build and a view.update (the LIMIT light), no App, no document', () => {

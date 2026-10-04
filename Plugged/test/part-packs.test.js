@@ -39,7 +39,9 @@ const BENCH = 'Power an LED from the bench supply at 5 V with a series resistor.
 const MIXED = 'Build two LEDs in parallel, a button, a motor and a diode.';
 
 const toolName = def => (def.ai && def.ai.tool) || 'place_' + def.type;
-const aiValues = def => (def.ai.values || Object.keys(def.values || {})).filter(k => def.values && def.values[k]);
+// ai: false values and controls (the bench supply's CH2 and mode, #124) stay out of the AI's tools and lines.
+const aiValues = def => (def.ai.values || Object.keys(def.values || {})).filter(k => def.values && def.values[k] && def.values[k].ai !== false);
+const aiControls = def => Object.entries(def.controls || {}).filter(([, c]) => c.ai !== false).map(([k]) => k);
 
 // ── Sending a request ───────────────────────────────────────────────────────
 
@@ -126,14 +128,14 @@ function checkEditToolsMatchTools(body, label) {
   const inPlay = Parts.all().filter(d => names.includes(toolName(d)));
   const out    = Parts.all().filter(d => !names.includes(toolName(d)));
   const valueKeys   = new Set(inPlay.flatMap(aiValues));
-  const controlKeys = new Set(inPlay.flatMap(d => Object.keys(d.controls || {})));
+  const controlKeys = new Set(inPlay.flatMap(aiControls));
   const sv = propsOf(body, 'set_value'), sc = propsOf(body, 'set_control');
   assert.deepEqual([...valueKeys].filter(k => !sv.includes(k)), [], `${label}: set_value lacks keys of parts in play`);
   assert.deepEqual([...controlKeys].filter(k => !sc.includes(k)), [], `${label}: set_control lacks keys of parts in play`);
   const onlyOut = (keysOf, have) => [...new Set(out.flatMap(keysOf))].filter(k => !have.has(k));
   assert.deepEqual(onlyOut(aiValues, valueKeys).filter(k => sv.includes(k)), [],
     `${label}: set_value offers keys only parts NOT in play have (tools: ${names.join(', ')})`);
-  assert.deepEqual(onlyOut(d => Object.keys(d.controls || {}), controlKeys).filter(k => sc.includes(k)), [],
+  assert.deepEqual(onlyOut(aiControls, controlKeys).filter(k => sc.includes(k)), [],
     `${label}: set_control offers keys only parts NOT in play have (tools: ${names.join(', ')})`);
   assert.ok(sv.includes('part') && sc.includes('part'), `${label}: set_value and set_control keep "part"`);
 }
@@ -252,6 +254,14 @@ test('bench: the bench supply pack (voltage and limit lines) is sent, and only p
   assert.deepEqual(bench.values.filter(l => !lines.includes(l)), [], 'bench supply values lines missing');
   checkPacksMatchTools(sent.bench, 'bench');
   checkEditToolsMatchTools(sent.bench, 'bench');
+  // #124: CH2's values and the mode control are ai: false, so the body sent stays as before
+  assert.ok(namesOf(sent.bench).includes('place_bench_supply'), 'sanity: the bench supply is in play');
+  for (const [name, hidden] of [['place_bench_supply', ['voltage2', 'limit2', 'mode']],
+                                ['set_value', ['voltage2', 'limit2']], ['set_control', ['mode']]]) {
+    const props = propsOf(sent.bench, name);
+    assert.deepEqual(hidden.filter(k => props.includes(k)), [], `${name} offers an ai: false key: ${JSON.stringify(props)}`);
+  }
+  assert.deepEqual(lines.filter(l => /voltage2|limit2/.test(l)), [], 'the prompt sent names CH2\'s values');
 });
 
 // ── 3. A part only on the board ─────────────────────────────────────────────

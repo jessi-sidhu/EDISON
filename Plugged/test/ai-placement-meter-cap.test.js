@@ -94,11 +94,15 @@ function packIn(body, def) {
   };
 }
 
-// The value and control keys only this part has (no other part shares them),
-// so a schema that carries one is carrying this part.
+// The value and control keys only this part has (no other part shows them to
+// the AI), so a schema that carries one is carrying this part. Another part's
+// key marked ai: false (the bench supply's mode control, #124) is never in any
+// schema, so it doesn't count as shared.
 function ownKeys(def) {
-  const keysOf = d => [...Object.keys(d.values || {}), ...Object.keys(d.controls || {})];
-  const others = new Set(Parts.all().filter(d => d !== def && d.ai !== false).flatMap(keysOf));
+  const keysOf   = d => [...Object.keys(d.values || {}), ...Object.keys(d.controls || {})];
+  const aiKeysOf = d => [...Object.entries(d.values || {}), ...Object.entries(d.controls || {})]
+    .filter(([, spec]) => !spec || spec.ai !== false).map(([k]) => k);
+  const others = new Set(Parts.all().filter(d => d !== def && d.ai !== false).flatMap(aiKeysOf));
   return keysOf(def).filter(k => !others.has(k));
 }
 

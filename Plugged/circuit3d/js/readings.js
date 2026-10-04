@@ -11,7 +11,9 @@
 //                      capacitor; or null without readings. A part with E
 //                      elements (an op-amp) also has opamps[{ pin, vout,
 //                      mode, iout, ilim, unused }] and V, I are op-amp 1's Vout
-//                      (signed, vs ground) and Iout (+ sourcing)
+//                      (signed, vs ground) and Iout (+ sourcing). A part
+//                      def's reading(r) hook may set V and P and add
+//                      channels[{ name, V }] (an independent bench supply)
 //      kcl(net)        [{ label, pin, amps }], each element's current INTO
 //                      the net in mA; sums to about 0
 //      problems()      [{ kind, labels[], why, info? }], the mistake checker
@@ -132,11 +134,14 @@
       if (!pr || ci < 0) return null;
       const ops = opampsOf(graph[ci], pr);
       if (ops.length) return { V: ops[0].vout, I: ops[0].iout, P: null, rating: null, over: false, opamps: ops };
-      const pins = graph[ci].part.def.pins;
+      const def = graph[ci].part.def, pins = def.pins;
       const a = pr.r.pins[pins[0]], b = pr.r.pins[pins[pins.length - 1]];
-      const V = typeof a === 'number' && typeof b === 'number' ? a - b : null;
+      // A part's own reading(r) hook (the bench supply) overrides V and P, and may add channels.
+      let own = {};
+      try { own = (typeof def.reading === 'function' && def.reading(pr.r)) || {}; } catch { /* the defaults below */ }
+      const V = 'V' in own ? own.V : typeof a === 'number' && typeof b === 'number' ? a - b : null;
       const I = typeof res.currents[ci] === 'number' ? res.currents[ci] * 1000 : null;   // simulate.js partAmps, pin 0 → pin 1
-      const P = V !== null && I !== null ? V * I / 1000 : null;
+      const P = 'P' in own ? own.P : V !== null && I !== null ? V * I / 1000 : null;
       const rating = ratingOf(graph[ci].comp.type, pr.r.values, graph[ci].part.els);
       // A rated-volts part (an electrolytic capacitor) is over past its
       // rating or when it says it is backwards: reversed, it vents too.
@@ -145,6 +150,7 @@
                               : (V !== null && Math.abs(V) > rating.V) || saysBackwards(pr));
       const out = { V, I, P, rating, over };
       if (pr.m && typeof pr.m.energy === 'number') out.energy = pr.m.energy;
+      if (Array.isArray(own.channels)) out.channels = own.channels;
       return out;
     }
 

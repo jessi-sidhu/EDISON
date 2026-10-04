@@ -48,6 +48,7 @@ Passed to `Parts.define()`. **Required** fields are marked ●. Anything not lis
 | ● `report` | `(r, m) → string` | One results line, ≤ 80 chars, e.g. `"ON, 14.9 mA"`. |
 | `headline` | `(r, m) → { text, cls }` | One line at the top of the results panel, e.g. `Battery 1: 9V` (`sim-info`). Headlines are in board order, with sources (parts with `ref`) after the others. Before a solve (or when there is none) it gets `r` without readings and `m = {}`. |
 | `line` | `(r, m) → { text, cls } \| null` | Replaces the generic `💡 NAME ON (x.x mA)` line for this part, e.g. the buzzer's `🔔 BUZZER ON (x.x mA)`. `null`: no line. |
+| `reading` | `(r) → { V?, P?, channels? }` | Overrides what `Readings.part` gives for this part: `V` and `P` replace the defaults, and `channels` is added as is. The bench supply uses it so its V doesn't depend on pin order. |
 | ● `ai` | `AiSpec` | See below. |
 | ● `view` | `ViewSpec` | Browser only. See below. |
 | ● `examples` | `Example[]` | At least 1 known-answer circuit. See the testing contract. |
@@ -80,13 +81,19 @@ Exactly one of these three kinds:
 //   e.g. LED colour: { red: { vf: 2.0 }, green: { vf: 2.2 }, ... }. A choice may set other values.
 ```
 The default must be valid. `Parts.checkValue` is the only validator, and the inspector, AI path and file loading all use it.
+- Either form may add `ai: false`: the value is left out of the AI's `place_` tool and `set_value` (the inspector still shows it), e.g. the bench supply's `voltage2` / `limit2` (#124).
 
 ### `ControlSpec`
 ```js
 { type: 'toggle',    default: boolean, saved: boolean }
 { type: 'momentary', default: false,   saved: false }            // button: true only while held/pressed
 { type: 'slider',    default: number,  min, max, step, unit?, saved: boolean }
+{ type: 'choice',    default: name,    options: [name, ...], saved: boolean }   // 2+ names; the default is one of them
 ```
+- Any type may add `ai: false`: the control is left out of `set_control`.
+- Any type may add `clickAnytime: true`: its click gesture also works while editing, not only while simulating (one undo step).
+- A `choice` control's click gesture moves it to its next option (wrapping).
+- A model may mark one mesh `userData.clickTarget = true` (the bench supply's mode button): its click gesture then works only on that mesh, and a click elsewhere selects the part.
 
 ### `Element` (the simulator's building blocks)
 The element `pins` name the part's pins, or internal nodes written `'#name'` (private to the part). The optional `id` names the element for `r.current[id]`.
@@ -94,7 +101,7 @@ The element `pins` name the part's pins, or internal nodes written `'#name'` (pr
 | `kind` | Fields | Notes |
 |---|---|---|
 | `R` | `pins:[a,b], ohms` | `ohms > 0` |
-| `V` | `pins:[plus,minus], volts, wave?` | Adds one unknown. `wave: { kind: 'sine', amp, freq, offset }` (V, Hz, V) replaces `volts`: `offset` in a plain solve, `offset + amp·sin(2π·freq·t)` in a time step at `t`. A wave with a non-finite `amp`, `freq` or `offset` falls back to `volts`. |
+| `V` | `pins:[plus,minus], volts, wave?, ref?` | Adds one unknown. `wave: { kind: 'sine', amp, freq, offset }` (V, Hz, V) replaces `volts`: `offset` in a plain solve, `offset + amp·sin(2π·freq·t)` in a time step at `t`. A wave with a non-finite `amp`, `freq` or `offset` falls back to `volts`. `ref` (one of its pins, on a source part) grounds that pin's circuit when this element is the earliest source there, after the part's own `ref` (#124: the bench supply's CH2 −). |
 | `I` | `pins:[from,to], amps` | Arrives with the first part that needs it. |
 | `SW` | `pins:[a,b], closed` | Closed = 1 mΩ, open = removed. Never an ideal short. |
 | `D` | `pins:[anode,cathode], vf, ron, vz?` | Mode block: `off` / `on` / (`breakdown` if `vz`). Replaces today's LED special case. |
@@ -345,7 +352,8 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
 - **Output:** an object with:
   - `netOf(hole)` → `{ id, holes[], pins[] }`
   - `voltage(hole | net)` → volts, or `null` when floating
-  - `part(label)` → `{ V, I, P, rating, over, energy?, opamps? }`
+  - `part(label)` → `{ V, I, P, rating, over, energy?, opamps?, channels? }`
+    - `channels: [{ name, V }]` only from a part's `reading` hook: an independent bench supply gives `[{ name: 'CH1', V: pos − com }, { name: 'CH2', V: com2 − neg }]`, and its V is CH1's. In series its V is pos − neg, with no `channels`.
     - A part with `E` elements (an op-amp) has `opamps: [{ pin, vout, mode, iout, ilim, unused }]`, one per E: its `out+` pin, Vout there (V vs ground, signed), the E's mode, Iout (mA, + sourcing out of `out+`), `ilim` (mA), and `unused` (both `ctrl` pins floating: a half nobody wired). Its V and I are op-amp 1's Vout and Iout, P is `null`.
     - V is the voltage across the part's outer pins, I is its current, and P = V·I, in W (I is in mA, so P = V × I ÷ 1000).
     - `rating` comes from the part's own values where it has one. Resistors are rated **¼ W**. A part with no rating has none.
@@ -358,7 +366,7 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
 - **Mock:** none. Tests build a real result in Node with `Board.toSim` and `Sim.analyze`.
 
 ### Page events (`plugged:sim`, `plugged:sim-stop`)
-- **`plugged:sim`** on `document`, with `detail: { result, readings }`. Sent after every solve, and once per frame while time runs.
+- **`plugged:sim`** on `document`, with `detail: { result, readings, t? }`. Sent after every solve, and once per frame while time runs. `t` is the sim time in seconds, only on time-run frames (#121).
 - **`plugged:sim-stop`** on `document`, sent on Stop.
 - **Tools** live in `Plugged/circuit3d/js/tools/`. They only read `Readings`. A tool never calls the solver itself; the one exception is `thevenin()`.
 

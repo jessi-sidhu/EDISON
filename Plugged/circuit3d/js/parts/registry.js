@@ -21,7 +21,7 @@
   const UNITS      = ['Ω', 'V', 'A', 'F', 'H', '%', '°C', 'lux', 'Hz'];
   const FIELDS     = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'ref', 'place', 'values',
                       'controls', 'gestures', 'elements', 'measure', 'warnings', 'report', 'headline', 'line',
-                      'ai', 'view', 'examples'];
+                      'reading', 'ai', 'view', 'examples'];
   const REQUIRED   = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'place',
                       'elements', 'report', 'ai', 'view', 'examples'];
   const TYPE_RE    = /^[a-z][a-z0-9_]*$/;
@@ -175,15 +175,17 @@
     for (const [key, spec] of Object.entries(values)) {
       const at = 'values.' + key;
       if (!isObj(spec)) { bad(`${at} must be a ValueSpec object`); continue; }
+      // ai: false keeps the value out of the AI's tools; the inspector still shows it.
+      if (spec.ai !== undefined && spec.ai !== false) bad(`${at}.ai may only be false`);
       if ('choices' in spec) {
-        unknownFields(spec, ['choices', 'default'], at, bad);
+        unknownFields(spec, ['choices', 'default', 'ai'], at, bad);
         const names = isObj(spec.choices) ? Object.keys(spec.choices) : [];
         if (!names.length) { bad(`${at}.choices must name at least one choice`); continue; }
         for (const c of names) if (!isObj(spec.choices[c])) bad(`${at}.choices.${c} must be an object of overrides`);
         if (!names.includes(spec.default)) bad(`${at}.default "${spec.default}" is not one of its choices (${names.join(', ')})`);
         continue;
       }
-      unknownFields(spec, ['unit', 'default', 'min', 'max', 'series'], at, bad);
+      unknownFields(spec, ['unit', 'default', 'min', 'max', 'series', 'ai'], at, bad);
       if (spec.unit === undefined) bad(`${at}.unit is required`);
       else if (!UNITS.includes(spec.unit)) bad(`${at}.unit "${spec.unit}" must be one of ${UNITS.join(', ')}`);
       if (spec.series !== undefined && !SERIES[spec.series]) bad(`${at}.series "${spec.series}" must be E12 or E24`);
@@ -202,12 +204,17 @@
     for (const [key, c] of Object.entries(controls)) {
       const at = 'controls.' + key;
       if (!isObj(c)) { bad(`${at} must be a ControlSpec object`); continue; }
+      // Every type may add ai: false (kept out of set_control) and
+      // clickAnytime (its click gesture also works while editing).
+      const common = ['type', 'default', 'saved', 'ai', 'clickAnytime'];
+      if (c.ai !== undefined && c.ai !== false) bad(`${at}.ai may only be false`);
+      if (c.clickAnytime !== undefined && typeof c.clickAnytime !== 'boolean') bad(`${at}.clickAnytime must be true or false`);
       if (c.type === 'toggle' || c.type === 'momentary') {
-        unknownFields(c, ['type', 'default', 'saved'], at, bad);
+        unknownFields(c, common, at, bad);
         if (typeof c.default !== 'boolean' || typeof c.saved !== 'boolean') bad(`${at} needs default and saved, true or false`);
         else if (c.type === 'momentary' && (c.default || c.saved)) bad(`${at}: a momentary control must have default false and saved false`);
       } else if (c.type === 'slider') {
-        unknownFields(c, ['type', 'default', 'min', 'max', 'step', 'unit', 'saved'], at, bad);
+        unknownFields(c, [...common, 'min', 'max', 'step', 'unit'], at, bad);
         const missing = ['default', 'min', 'max', 'step'].filter(f => !Number.isFinite(c[f]));
         for (const f of missing) bad(`${at}.${f} is required (a number)`);
         if (typeof c.saved !== 'boolean') bad(`${at}.saved must be true or false`);
@@ -216,8 +223,15 @@
         if (c.step <= 0) bad(`${at}.step must be above 0`);
         if (c.min > c.max) bad(`${at}.min ${c.min} is above max ${c.max}`);
         else if (c.default < c.min || c.default > c.max) bad(`${at}.default ${c.default} must be within ${c.min}–${c.max}`);
+      } else if (c.type === 'choice') {
+        unknownFields(c, [...common, 'options'], at, bad);
+        const o = c.options;
+        if (!Array.isArray(o) || o.length < 2 || !o.every(x => typeof x === 'string' && x)) bad(`${at}.options must list 2 or more names`);
+        else if (new Set(o).size !== o.length) bad(`${at}.options names an option twice`);
+        else if (!o.includes(c.default)) bad(`${at}.default "${c.default}" is not one of its options (${o.join(', ')})`);
+        if (typeof c.saved !== 'boolean') bad(`${at}.saved must be true or false`);
       } else {
-        bad(`${at}.type "${c.type}" must be toggle, momentary or slider`);
+        bad(`${at}.type "${c.type}" must be toggle, momentary, slider or choice`);
       }
     }
   }
@@ -246,6 +260,7 @@
     }
     for (const f of spec.nums) if (!Number.isFinite(el[f])) bad(`${at} (${el.kind}) ${f} must be a number`);
     if (el.kind === 'R' && Number.isFinite(el.ohms) && el.ohms <= 0) bad(`${at} (R) ohms must be above 0; got ${el.ohms}`);
+    if (el.kind === 'V' && el.ref !== undefined && !(Array.isArray(el.pins) && el.pins.includes(el.ref))) bad(`${at} (V) ref "${el.ref}" must be one of its pins`);
     if (el.kind === 'SW' && typeof el.closed !== 'boolean') bad(`${at} (SW) closed must be true or false`);
     if (el.kind === 'D' && el.vz !== undefined && !Number.isFinite(el.vz)) bad(`${at} (D) vz must be a number`);
     if (el.kind === 'E') {
@@ -354,6 +369,9 @@
     for (const f of ['headline', 'line']) {
       if (def[f] !== undefined && typeof def[f] !== 'function') bad(`${f} must be a function (r, m) → { text, cls }`);
     }
+    // Optional Readings.part override: reading(r) → { V?, P?, channels? }.
+    const own = run('reading', def.reading);
+    if (typeof def.reading === 'function' && own !== undefined && !isObj(own)) bad('reading() must return an object { V?, P?, channels? }');
     const rep = run('report', def.report);
     if (typeof def.report === 'function' && rep !== undefined) {
       if (typeof rep !== 'string') bad('report() must return a string');

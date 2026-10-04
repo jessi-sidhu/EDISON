@@ -477,14 +477,23 @@
       });
     });
 
+    // A source's refs: its part ref, then any V element naming its own
+    // `ref` pin (a channel of its own, e.g. a bench supply's CH2). Each is
+    // the ground of its circuit when it comes first there.
     const grounds = new Set(), live = new Set();
     const firstOf = new Map();   // circuit root → its earliest source
-    graph.forEach(g => {
-      if (!isSource(g)) return;
-      const root = uf.find(refNode(g));
+    const groundAt = (g, node) => {
+      const root = uf.find(node);
       if (firstOf.has(root)) return;
       firstOf.set(root, g);
-      grounds.add(refNode(g));
+      grounds.add(node);
+    };
+    graph.forEach(g => {
+      if (!isSource(g)) return;
+      groundAt(g, refNode(g));
+      g.part.els.forEach(e => {
+        if (e.el.kind === 'V' && e.el.ref !== undefined) groundAt(g, e.nodes[e.el.pins.indexOf(e.el.ref)]);
+      });
     });
 
     const mark = n => { if (firstOf.has(uf.find(n))) live.add(n); };
@@ -1080,7 +1089,8 @@
     showResults(result.lines, clock);
     showParts(components, result.status === 'ok' && !result.shorted ? result.parts : {});
     const readings = window.Readings ? window.Readings.from(result, { components, wires }) : null;
-    document.dispatchEvent(new CustomEvent('plugged:sim', { detail: { result, readings } }));
+    // t: the sim time, only on time-run frames (the scope, #121, records it).
+    document.dispatchEvent(new CustomEvent('plugged:sim', { detail: { result, readings, t: run.t } }));
   }
 
   function startTimeRun() {

@@ -366,8 +366,10 @@
 
   // ── Gestures ─────────────────────────────────────────────────
   // A click (or a scroll) on a part's model while the simulation runs
-  // moves the control its `gestures` names. gestures.js throttles the
-  // re-simulation and makes one gesture one undo step. A control that
+  // (a click any time, for a clickAnytime control) moves the control its
+  // `gestures` names: a slider steps, a choice goes to its next option, a
+  // toggle flips. gestures.js throttles the re-simulation and makes one
+  // gesture one undo step. A control that
   // isn't saved (a button's press) leaves nothing to undo, so it records
   // no step: undo would only stop the simulation.
   let gestureSaved = false;
@@ -401,11 +403,14 @@
     const def = comp && Parts.get(comp.type);
     const key = def && def.gestures && def.gestures[kind];
     if (!key) return false;
-    controlTick(comp, key, kind, (now, spec) => (spec.type === 'slider'
-      ? Math.min(spec.max, Math.max(spec.min, now + (dir || 1) * scrollTick(spec)))
-      : !now));
+    controlTick(comp, key, kind, (now, spec) => {
+      if (spec.type === 'slider') return Math.min(spec.max, Math.max(spec.min, now + (dir || 1) * scrollTick(spec)));
+      if (spec.type === 'choice') return spec.options[(spec.options.indexOf(now) + 1) % spec.options.length];   // the next option
+      return !now;
+    });
     if (kind === 'click') gestures.release();
     if (def.controls[key].saved) scheduleAutoSave();
+    if (!App.simRunning) Inspector.sync();   // a run syncs it already
     return true;
   };
 

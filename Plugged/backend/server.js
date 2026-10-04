@@ -64,7 +64,7 @@ const guideLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(def 
 
 // How the user adjusts each slider control of the tools sent, from def.controls.
 const controlLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(Boolean)
-  .flatMap(def => Object.entries(def.controls || {}).filter(([, c]) => c.type === 'slider')
+  .flatMap(def => aiControls(def).filter(([, c]) => c.type === 'slider')
     .map(([key, c]) => `- ${toolName(def)}: the user adjusts ${key} (${c.unit}) with a slider or by scrolling over it`));
 
 // A part's ai.recipe (an Example) as numbered tool calls with exact holes:
@@ -277,8 +277,12 @@ const toolName = def => (def.ai && def.ai.tool) || `place_${def.type}`;
 // "resistor", "LED", "push button": a part's name inside a sentence.
 const partName = def => def.name.split(' ').map(w => (/^[A-Z0-9-]{2,}$/.test(w) ? w : w.toLowerCase())).join(' ');
 
-// The value keys the AI may set (its tool params): ai.values, or all of them.
-const aiValues = def => (def.ai.values || Object.keys(def.values || {})).filter(k => def.values && def.values[k]);
+// The value keys the AI may set (its tool params): ai.values, or all of them,
+// less any value marked ai: false.
+const aiValues = def => (def.ai.values || Object.keys(def.values || {}))
+  .filter(k => def.values && def.values[k] && def.values[k].ai !== false);
+// The controls the AI may set: all but those marked ai: false.
+const aiControls = def => Object.entries(def.controls || {}).filter(([, c]) => c.ai !== false);
 
 // A part's elements at its defaults. Only their kinds and pins are read here,
 // so the values don't matter.
@@ -401,7 +405,7 @@ function valueParamsOf(defs) {
 function controlParamsOf(defs) {
   const params = {};
   for (const def of defs) {
-    for (const [key, c] of Object.entries(def.controls || {})) {
+    for (const [key, c] of aiControls(def)) {
       if (params[key]) continue;
       params[key] = c.type === 'slider'
         ? { type: 'NUMBER', description: `${key}, ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}` }
