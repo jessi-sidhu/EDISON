@@ -39,6 +39,7 @@ Passed to `Parts.define()`. **Required** fields are marked ●. Anything not lis
 | ● `pins` | string[] | 2–16 names, unique, `/^[A-Za-z0-9]+$/`, e.g. `['cathode','anode']`. **Files save the pin *name* with every hole and wire end**, so reordering is safe; **renaming a pin is not** (treat names like `type`). Only files saved before names were added rely on order. `LED1.anode` and `LED1.1` both refer to a pin. |
 | `ref` | pin name | Only for sources: this pin can be ground (0 V). **Exactly one ground per connected circuit:** the `ref` pin of the *earliest-placed* source in that circuit (lowest index in `state.components`). Two separate circuits each get their own ground. A circuit with no `ref` pin is `'no-source'` and its voltages are `null`. |
 | ● `place` | `Placement` | See below. |
+| `wireColors` | `{ [pin]: 0..0xffffff }` | A new wire drawn from or to that pin takes this colour, whatever is picked; when both ends have one, the start end wins. Loads and undo keep each wire's saved colour (#133: the multimeter's probes, the bench supply's posts). |
 | `values` | `{ [key]: ValueSpec }` | Editable settings, saved. |
 | `controls` | `{ [key]: ControlSpec }` | Live settings (knob, switch). |
 | `gestures` | `{ click?: key, scroll?: key }` | Map 3D gestures onto a control key. The core (not the part) throttles: while a gesture continues, re-simulate **at most every 100 ms**, plus one final run when it stops. **One gesture = one undo step**; a scroll ends after 300 ms without a tick. |
@@ -396,6 +397,228 @@ The per-type wrappers (`App.placeResistor` and the rest) and `chat.js`'s `PLACE`
   It sends **at most 12 part tools**, plus the always-sent tools (#76). The prompt always carries a one-line catalogue of every part.
 - **Generated prompt sections:** label prefixes, sizing lines built from `span`/`legs` (e.g. `"resistor: 3–5 columns apart on one row (4 is typical)"`), pin names, and the guides of the tools being sent. Recipes stay hand-written.
 - **The server's circuit checks** read `elements`: `R` and `SW` conduct, and `D` conducts one way. Placement goes through `Parts.checkPlacement`.
+
+## Photo → circuit (#134)
+Maya photographs her real breadboard, confirms every lead, and the app rebuilds it so the simulator can find the fault. **The server only reads the photo; the browser builds.** Design, rationale and the task order: `docs/superpowers/specs/2026-10-01-photo-to-circuit-design.md` (here "the photo spec").
+
+```
+photo.js  pick / drop / sample, corner taps → PhotoGrid.homography → PhotoGrid.warp (flattened image)
+          → POST /api/photo → Reading → confirm screen (PhotoGrid.snap) → PhotoImport.build
+          → SparkyChat.applyBuild(actions) → App.runSimulation() → sparkyAsk(question, { context })
+```
+- **Loading:** `photo-grid.js` and `photo-import.js` are UMD modules (Node + browser, like `simulate.js`), after `ids.js` and before `app.js` in `circuit3d/index.html`; `samples/samples.js` and then `photo.js` (DOM) after `chat.js`. Node requires them from `circuit3d/js/`.
+- **Coordinates:** every point is a pixel `[x, y]` in the **flattened image** (see `PhotoGrid`), never in the original photo.
+
+### `POST /api/photo` (#138, #139)
+- **Owner:** `backend/photo-reader.js`, routed by `backend/server.js`. **Called by:** `photo.js`.
+- **Request:** `{ image, grid, sample? }`
+  - `image`: a JPEG, PNG or WebP data URL of the flattened image, at most 2,048 px wide.
+  - `grid`: `{ cols, pitch, x0, y0, width, height }`, the flattened image's frame (the `PhotoGrid` grid's fields of the same names).
+  - `sample`: a rehearsed photo's id (a `window.PhotoSamples` key, e.g. `'demo-board'`), when **Use sample photo** sent it.
+- **Response 200:** `{ reading, provider, model, ms }`. `reading` is a Reading v1 (below), with no actions. `provider` is `'gemini'`, `'deepseek'` or `'fixture'`; `model` the model that read it (a fixture gives the model it recorded); `ms` the server's time for the request.
+- **Errors:** body `{ reply, code }` (429 has no `code`). The page shows `reply` with the **Use sample photo** button.
+
+| Status | `code` | When | `reply` |
+|---|---|---|---|
+| 400 | `BAD_IMAGE` | `image` isn't a JPEG, PNG or WebP data URL | `"I can't read that file. Try a JPEG or PNG photo, or use the sample photo."` |
+| 400 | `BAD_GRID` | `grid` missing, `cols` not 30 or 63, or another field not a positive number | `"Something went wrong lining up the board. Tap the four corners again, or use the sample photo."` |
+| 413 | `TOO_LARGE` | the body is over 4 MB | `"That photo is too large. Try a smaller one, or use the sample photo."` |
+| 422 | `NO_BOARD` | the Reading says `board.visible: false` | `"I couldn't find a breadboard in that photo. Try one from straight above with the whole board in view, or use the sample photo."` |
+| 429 | | more than 6 photos a minute from one IP | `"Too many photos at once. Wait a minute and try again, or use the sample photo."` |
+| 502 | `AI_FAILED` | every provider failed and no fixture matched | `"I couldn't read the photo just now. Try again, or use the sample photo."` |
+| 504 | `AI_TIMEOUT` | past `PHOTO_TIMEOUT_MS` (default 45000) | `"Reading the photo took too long. Try again, or use the sample photo."` |
+
+- **Body cap:** the body read moves into `readBody(req, res, max)`. `/api/photo` allows 4 MB (`4 * 1024 * 1024`); **`/api/ask` stays at 256 KB**.
+- **Rate limit:** `askRateLimited` becomes `rateLimited(req, hits, max)`; photos get their own map, 6 a minute per IP (`TRUST_PROXY` as for `/api/ask`).
+- **Providers:** `PHOTO_PROVIDERS`, tried in order, default `gemini,deepseek`. The names are in `.env.example`.
+  - `gemini`: model `PHOTO_GEMINI_MODEL` (a pinned version, never a `-latest` alias), key `GEMINI_API_KEY` in the `x-goog-api-key` header, JSON output with a response schema, the highest media resolution, 25 s per attempt.
+  - `deepseek`: `deepseek-flash` only, `json_object`, whatever time is left of `PHOTO_TIMEOUT_MS`. **Never `deepseek-v4-pro`**: it has no vision, so the #130 fallback (`DEEPSEEK_FALLBACK_MODEL`) never applies to this route.
+  - **Falls back to the next provider** on a timeout, 5xx, 429, network error, empty reply, or invalid JSON or Reading. **Never** on a 4xx bad request or bad key.
+  - Each provider converts its own output to Reading v1 (Gemini answers `[y, x]` on 0–1000), then everything goes through `validateReading()`.
+- **Fixtures** (`Plugged/test/fixtures/photo/<key>.json`): the key is the `sample` id, else the hex SHA-256 of the image bytes decoded from the data URL.
+  - `PHOTO_PROVIDERS=fixture` replays only: no fixture for the key → 502 `AI_FAILED`.
+  - In live mode, when every provider fails and a fixture exists for the key, it is returned with `provider: 'fixture'`.
+  - `PHOTO_RECORD=1` saves each live Reading as `{ sample, sha256, reading, provider, model }` (`sample` null when none). Fixtures store the **Reading**, so `PhotoImport` changes never make them stale.
+- **Logging:** one line per request, e.g. `[photo] sample=demo-board provider=gemini model=… 8.2s parts=3 wires=3 fallback=no 612KB`. Never the image or an upstream body.
+- **Mock:** `{ reading: <the mock Reading below>, provider: 'fixture', model: 'deepseek-flash', ms: 12 }`.
+
+### Reading v1 (what `/api/photo` returns)
+The reader's first guess at the board. On the confirm screen Maya moves every wrong dot; the confirmed Reading (same shape) goes to `PhotoImport.build`.
+```js
+{
+  board: { visible: true, cols: 63,                 // 63 or 30
+           rails: { aOuter, aInner, jInner, jOuter }, // each strip's PRINTED sign: '+', '-' or '?'
+           split: false },                         // a break in the rail lines mid-board
+  parts: [ { id: 'R1', type: 'resistor',           // 'resistor' | 'led' | 'other' (Tier 1)
+             what: '470 Ω resistor',               // free text, e.g. 'red 5 mm LED'
+             value: 470,                           // Ω; 0 = unknown (LEDs: 0)
+             bands: ['yellow', 'violet', 'brown', 'gold'],   // [] when none read
+             color: '',                            // as seen: an LED's colour ('red'); '' when it doesn't matter
+             leads: [ { hole, pt: [x, y], role } ],          // role: 'anode' | 'cathode' | 'none' | 'unknown'
+             box: [x0, y0, x1, y1], confidence: 0.8, unsure: [] } ],
+  wires: [ { id: 'W1', color: 'black', ends: [ { hole, pt }, { hole, pt } ], confidence, unsure: [] } ],
+  power: [ { kind: 'battery_9v',                   // 'battery_9v' | 'bench_supply' | 'unknown'
+             volts: 9,                             // 0 = unknown
+             plus: { hole, pt }, minus: { hole, pt }, unsure: [] } ],
+}
+```
+- **Endpoint `hole`:** a body hole `c14`; a rail `rail:<rail>:<col>` (e.g. `rail:aOuter:14`); `gap` (the centre channel); `off` (off the board); or `?` (not seen).
+- **Rails are named by side:** `aOuter` and `aInner` are the strips next to row a, `jInner` and `jOuter` the strips next to row j. A rail's column is the nearest body column, cosmetic (each rail is one node).
+- `confidence` is 0–1. `unsure` lists what the reader wasn't sure of, as short words (e.g. `'value'`, `'polarity'`).
+- **`validateReading(raw)` → `{ reading, notes }`**, in `backend/photo-reader.js`, zero dependencies, run on every provider's output: it coerces each field to the shape above (an unknown enum becomes `other`, `unknown` or `?`, a missing number 0, a missing array `[]`), drops what it can't repair (a part with no leads, a wire without 2 ends), and records why in `notes` (strings).
+
+#### Mock Reading (the demo board)
+The prototype's demo board (`docs/superpowers/specs/photo-reference/prototype/check-demo.js`), in the **a-on-top** frame (row a at y = 190, rails a-side above it): a 9 V battery on the a-side rails, 470 Ω from the + rail to a14, and a red LED in **backwards** (cathode c14, anode c17), with a black wire from b17 to the − rail. Built and simulated, LED1 is dark with a `backwards` problem; flipped, about 14.9 mA. Every `pt` is that hole's `holeCentre` in this frame. R1's rail lead makes it import with a bridge and a `moved` flag; the real stage board (#144) follows the photo spec's stage-board rule instead (R1 fully in the main holes, a jumper from the + rail), so it imports with no bridge and no flags.
+```json
+{
+  "board": {
+    "visible": true,
+    "cols": 63,
+    "rails": { "aOuter": "+", "aInner": "-", "jInner": "+", "jOuter": "-" },
+    "split": false
+  },
+  "parts": [
+    {
+      "id": "R1", "type": "resistor", "what": "470 Ω resistor", "value": 470,
+      "bands": ["yellow", "violet", "brown", "gold"], "color": "",
+      "leads": [
+        { "hole": "rail:aOuter:10", "pt": [360, 73], "role": "none" },
+        { "hole": "a14", "pt": [480, 190], "role": "none" }
+      ],
+      "box": [345, 58, 495, 205], "confidence": 0.8, "unsure": []
+    },
+    {
+      "id": "LED1", "type": "led", "what": "red 5 mm LED", "value": 0,
+      "bands": [], "color": "red",
+      "leads": [
+        { "hole": "c14", "pt": [480, 250], "role": "cathode" },
+        { "hole": "c17", "pt": [570, 250], "role": "anode" }
+      ],
+      "box": [465, 225, 585, 275], "confidence": 0.7, "unsure": []
+    }
+  ],
+  "wires": [
+    {
+      "id": "W1", "color": "black",
+      "ends": [
+        { "hole": "b17", "pt": [570, 220] },
+        { "hole": "rail:aInner:19", "pt": [630, 103] }
+      ],
+      "confidence": 0.9, "unsure": []
+    }
+  ],
+  "power": [
+    {
+      "kind": "battery_9v", "volts": 9,
+      "plus": { "hole": "rail:aOuter:3", "pt": [150, 73] },
+      "minus": { "hole": "rail:aInner:3", "pt": [150, 103] },
+      "unsure": []
+    }
+  ]
+}
+```
+
+### `PhotoGrid` (`circuit3d/js/photo-grid.js`, `window.PhotoGrid`; #135)
+Photo pixels ↔ breadboard holes. Pure: no DOM, no THREE. Design: the photo spec → "The grid"; reference: `photo-reference/prototype/photo-grid.js`.
+
+**The flattened image** (pitch = 0.1", one hole to the next):
+
+| | |
+|---|---|
+| Scale | 30 px per pitch (`pitch: 30`) |
+| Top-left body hole | (`x0`, `y0`) = (90, 190): a1 when `aTop`, else j1 |
+| Columns | column 1 on the left, column c at x = 90 + 30·(c − 1) |
+| Rows, `aTop` | a–e at 0–4 pitches below `y0`, f–j at 7–11 (the centre gap is 3 pitches): a 190 … e 310, f 400 … j 520 |
+| Rows, j on top | j–f at 0–4, e–a at 7–11: j 190 … f 310, e 400 … a 520 |
+| Rail zones | 5 pitches beyond the top and bottom body rows (y 40–190 and 520–670) |
+| Rail lines | inner 2.9 and outer 3.9 pitches beyond the nearest body row (BB830, measured in the spike): y 103 and 73 at the top, 607 and 637 at the bottom |
+| Label bands | 40 px top and bottom (y 0–40 and 670–710): every column number (every 5th bold), row letters at both ends, column numbers also in the centre channel. No lines over holes. |
+| Size | `width` = 30·(cols − 1) + 180, `height` = 710: 2040 × 710 for 63 columns, 1050 × 710 for 30 |
+
+**Which of a or j is on top is chosen from the taps, so the flattened image is never a mirror image** (the frame whose map to the photo has a positive Jacobian determinant, `geom.py` `orientation()`). A board photographed upside down still flattens upright, because the taps name the holes. Rail names follow the side, not the position in the image (with j on top, `jOuter` is the topmost strip).
+
+- **`PhotoGrid.homography(taps, cols = 63)`** → a grid `{ cols, aTop, pitch, x0, y0, width, height, H, holeCentre, snap, toPhoto }`.
+  - `taps`: `{ a1: [px, py], a63: [...], j63: [...], j1: [...] }` in the photo's pixels: the four corner holes a1, aN, jN, j1 (N = `cols`), or any 4 or more labelled body holes (least squares past 4, on normalised coordinates).
+  - `H`: 3 × 3, row-major, maps a flattened-image pixel to a photo pixel.
+  - **Errors:** throws an `Error` when the taps are degenerate (fewer than 4, repeated, or near-collinear).
+- **`grid.holeCentre(hole)`** → `[x, y]` in the flattened image. A body hole `'c14'` gives its centre; `'rail:aOuter:14'` gives the point on that rail's line at column 14. Anything else (`gap`, `off`, `?`, a bad name) → `null`.
+- **`grid.snap([x, y])`** → where a flattened-image point lands, in the Reading's endpoint vocabulary (`dist`: pitches to the snapped centre):
+  - `{ hole: 'c14', zone: 'body', dist }`: the nearest body hole, within 0.45 pitch.
+  - `{ hole: 'e14', zone: 'gap', dist }`: a point in the centre channel snaps to the nearest e or f hole of the nearest column. Confirm it.
+  - `{ hole: 'rail:aOuter:14', zone: 'rail', rail: 'aOuter', col: 14, dist }`: a point in a rail zone. Inner when it's less than 3.4 pitches beyond the body row, else outer; `col` is the nearest body column (1…`cols`).
+  - `{ hole: 'off', zone: 'off', dist: null }`: anywhere else (more than 0.6 pitch outside columns 1…N, beyond a rail zone, or between body holes farther than 0.45 pitch from each).
+- **`grid.toPhoto([x, y])`** → the photo pixel under a flattened-image point (`H` applied), for drawing the live grid over the photo while tapping.
+- **`PhotoGrid.warp(src, H, out)`** → `out`. `src` and `out` are RGBA images `{ width, height, data }` (an `ImageData`-like `Uint8ClampedArray`, 4 bytes per pixel); `out` is pre-sized to the grid's `width` × `height`. Each `out` pixel samples `src` at `H · (x, y)` (bilinear); points outside `src` get (40, 40, 40, 255). No DOM, so it runs in Node tests.
+- **Mock:** none. Tests build grids from synthetic taps (identity and trapezoid round trips).
+
+### `PhotoImport` (`circuit3d/js/photo-import.js`, `window.PhotoImport`; #136, #137)
+A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `Ids` and the board geometry (`require('./parts')` etc. in Node; `window.Parts`, `window.App`, `App.BOARD_GEOMETRY` in the browser). Design: the photo spec → "From Reading to board"; reference: `photo-reference/prototype/photo-import.js`.
+
+- **`PhotoImport.build(reading, { components })`** → `{ actions, labels, flags, skipped }`. Never throws: anything it can't build lands in `flags` and `skipped`.
+  - `components`: the parts already on the board (`{ type, label }`), for numbering labels with `Ids.nextLabel`. The page passes `[]`: a photo always builds on an empty board (see `SparkyChat.applyBuild`).
+- **A lead's node** is its column plus half (a–e, f–j), a rail, or an off-board pin. Rows inside a half never change the circuit, so leads may move row; **every lead keeps its node**.
+- **`actions`**, in this order, for `Chat.acceptBuild` (one undo step):
+  1. the battery: `place_battery { voltage }` per power entry;
+  2. every part: `place_resistor { holeA, holeB, resistance }`, `place_led { holeA: cathode, holeB: anode, color }`;
+  3. every wire: the battery's leads `add_wire { from: 'BAT1.0', to: <+ rail hole>, color: 'red' }` and `{ from: 'BAT1.1', to: <− rail hole>, color: 'black' }`, the bridge jumpers, then the Reading's wires (`add_wire { from, to, color }`, colour mapped to red, yellow, green, blue, black or white).
+
+  Parts go before wires because wire ends take holes. **No `delete_all`**. Rail holes are `tp_10`-style.
+- **Rails by side and printed sign:**
+
+| Side | `+` strip | `−` strip |
+|---|---|---|
+| a-side (`aOuter`, `aInner`) | `tp` | `tn` |
+| j-side (`jInner`, `jOuter`) | `bp` | `bn` |
+
+- **Rail fallback:** when a side's two signs are `?` or the same, outer → + and inner → − (our model's position default), flagged `rails`.
+- **`labels`:** Reading id → app label. Each part → its `Ids.nextLabel` label (a skipped part shifts later numbers); each power entry, keyed `power:<i>`, → its battery label; each Reading wire → its wire id `W<n>`, counted over **every** `add_wire` in output order (battery leads and bridge jumpers take W1, W2… first), so it matches `nextWireId` on an empty board.
+- **`flags`:** `[{ kind, id, why }]`. `id` is the Reading id (`power:<i>` for power, `null` for the whole board); `why` is plain English for the confirm screen (e.g. `"drawn with a jumper: on your board it runs from the + rail to column 14"`).
+
+| `kind` | When |
+|---|---|
+| `polarity` | an LED lead's `role` is unknown: the first dot is taken as the anode |
+| `value` | a resistor value, LED colour or battery voltage unread or out of range: 470 Ω, red or 9 V used |
+| `moved` | a lead or wire end was put in another hole of its node, or the part was drawn shorter or with a jumper (the bridge) |
+| `shorted` | both leads of a part are in one node (built, so the simulator shows it) |
+| `source` | no power entry but rails in use (a 9 V battery is assumed on them), or a bench supply or unknown source built as a battery |
+| `position` | a lead or end still `?`, `gap` or `off`, or a 6th lead into a full column-half (not built) |
+| `mismatch` | no free helper for a bridge (not built) |
+| `type` | a part of type `other` (not built: IC, button, …) |
+| `rails` | a side's rail signs fell back to the position default |
+
+- **`skipped`:** `[{ id, type, why }]`, everything not built: `other` parts, unplaceable parts, and a wire with both ends in one node.
+- **Invariants, checked in tests:**
+  - **Zero refusals:** every `place_*` passes `Parts.checkPlacement` in order against the running hole map (wire ends included), and `Board.apply(Board.empty(), actions)` gives no errors.
+  - **Same nets:** the nets of the built board equal the nets of the confirmed Reading for every built part.
+  - **LED polarity is kept exactly as confirmed**, never chosen to make the circuit work.
+- **Mock:** the mock Reading above builds to:
+```js
+{ actions: [ { tool: 'place_battery', voltage: 9 },
+             { tool: 'place_resistor', holeA: 'a10', holeB: 'a14', resistance: 470 },   // bridged: its + lead is in a rail
+             { tool: 'place_led', holeA: 'c14', holeB: 'c17', color: 'red' },           // cathode c14: backwards, as photographed
+             { tool: 'add_wire', from: 'BAT1.0', to: 'tp_3',  color: 'red' },           // W1
+             { tool: 'add_wire', from: 'BAT1.1', to: 'tn_3',  color: 'black' },         // W2
+             { tool: 'add_wire', from: 'b10',    to: 'tp_10', color: 'white' },         // W3, the bridge jumper
+             { tool: 'add_wire', from: 'b17',    to: 'tn_19', color: 'black' } ],       // W4, the Reading's W1
+  labels:  { 'power:0': 'BAT1', R1: 'R1', LED1: 'LED1', W1: 'W4' },
+  flags:   [ { kind: 'moved', id: 'R1', why: '…drawn with a jumper…' } ],
+  skipped: [] }
+```
+
+### Page additions (photo; #140, #143)
+- **`SparkyChat.applyBuild(actions)`** (browser half of `chat.js`) → `{ applied, failed }` from `Chat.acceptBuild`. It:
+  1. clears any pending AI preview;
+  2. if the board isn't empty, calls `App.clearAll()` first: a new "Untitled" circuit, so her open saved circuit is never overwritten (never `delete_all`, which keeps the circuit);
+  3. `Chat.acceptBuild(actions, board)` with the page's board helper (one undo step), then `App.frameCircuit()`;
+  4. posts `"Built N parts from your photo. Undo (Ctrl+Z) brings back the empty board."` and adds one `model` entry to the chat history naming each built part and its holes (`"I built your board from the photo: R1 a10–a14, LED1 c14–c17, …"`).
+- **`sparkyAsk(msg, { context })`** (new optional second argument; `sparkyAsk()` and `sparkyAsk(msg)` are unchanged):
+  - the request's `message` is `msg + "\n\n" + context`. **No change to the server or to `POST /api/ask`.**
+  - The chat bubble shows only `msg`; the chat history stores the message as sent (with the context) as `user`, then the reply.
+  - The context must not change tool selection: **no part keywords** (e.g. "light", "lamp", "diode") **and no `NEW_BUILD` words**. A unit test asserts `selectTools(msg + "\n\n" + context)` equals `selectTools(msg)` and the `NEW_BUILD` match is unchanged.
+  - The photo's context line: `"Built from a photo of my real breadboard. Unsure readings: LED1 direction."` No question typed → `msg` is `"What's wrong with my circuit?"`.
+- **`window.PhotoFlags`:** a `Set` of app labels whose Reading entry has a flag (via `labels`). `photo.js` owns it: it fills it after a build and clears it on the next photo or a cleared board. `mistakes.js` `row(p)` gives a row whose labels include one a small "read from photo, unsure" badge, and treats a missing `PhotoFlags` as empty.
+- **`window.PhotoSamples`** (`circuit3d/samples/samples.js`, a plain script; a `.json` there wouldn't be served): `{ 'demo-board': { file: 'samples/demo-board.jpg', cols: 63, taps: { a1: [px, py], a63: [...], j63: [...], j1: [...] } } }`, taps in the file's own pixels. The key is the `sample` sent to `/api/photo`; a sample skips the corner taps.
+- **Page timeout:** `photo.js` gives up on `/api/photo` after `PHOTO_PAGE_TIMEOUT_MS` = 60000 (a page constant, not an env variable; above the server's 45 s) and shows the `AI_TIMEOUT` message with the sample offered.
 
 ## Testing contract (a part is done when all of these pass)
 1. **Registry check**, automatic for every part: every rule in `PartDefinition` and `Placement`.

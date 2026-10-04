@@ -157,6 +157,7 @@
     prefix:   'MM',
     pins:     ['red', 'black'],
     place:    { kind: 'offboard' },
+    wireColors: { red: 0xef4444, black: 0x000000 },   // the probe leads (#108, #133)
     values:   { mode: { choices: { V: {}, A: {}, 'Ω': {} }, default: 'V' } },
 
     elements,

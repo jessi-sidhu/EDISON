@@ -257,6 +257,18 @@ const BROKEN = [
   ['a dip pinout on an odd pin count (3)',
                                       pinout(p => { p.labels = ['A1', 'B2', 'C3']; }, testThree),     [/pinout/, /dip/, /even/], 'test_three'],
   ['a pinout with an unknown field',  pinout(p => { p.colour = 'red'; }),                             [/pinout\.colour/], 'test_chip'],
+  // wireColors (#133): { <one of the part's pins>: <24-bit colour, an integer 0..0xffffff> }
+  ['a wireColors that is not an object',
+                                      variant(testSpan, d => { d.wireColors = 0xef4444; }),           [/wireColors/, /object/]],
+  ['a wireColors on a pin the part does not have',
+                                      variant(testSpan, d => { d.wireColors = { a: 0xef4444, nope: 0x000000 }; }), [/wireColors\.nope/, /pin/]],
+  ['a wireColors colour that is not an integer',
+                                      variant(testSpan, d => { d.wireColors = { a: 0.5 }; }),         [/wireColors\.a/, /0xffffff|24-bit/i]],
+  ['a wireColors colour that is a "#rrggbb" string',
+                                      variant(testSpan, d => { d.wireColors = { a: '#ef4444' }; }),   [/wireColors\.a/, /0xffffff|24-bit/i]],
+  ['a negative wireColors colour',    variant(testSpan, d => { d.wireColors = { b: -1 }; }),          [/wireColors\.b/, /0xffffff|24-bit/i]],
+  ['a wireColors colour above 0xffffff',
+                                      variant(testSpan, d => { d.wireColors = { b: 0x1000000 }; }),   [/wireColors\.b/, /0xffffff|24-bit/i]],
 
   // Examples and keywords
   ['no examples',                     variant(testSpan, d => { d.examples = []; }),                   [/example/]],
@@ -315,6 +327,11 @@ const AT_LIMIT = [
                              pinout(p => { p.labels = ['OUT1', 'IN1\u2212', 'ABCDEF', 'V+']; })],
   ['a dip pinout of 8 labels on an 8-pin part',
                              pinout(p => { p.labels = ['OUT1', 'IN1\u2212', 'IN1+', 'V\u2212', 'IN2+', 'IN2\u2212', 'OUT2', 'V+']; }, () => nPins(8))],
+  // The valid twin of the #133 wireColors rejections: both ends of the range, one pin left uncoloured is fine too.
+  ['wireColors of 0 and 0xffffff on its two pins',
+                             variant(testSpan, d => { d.wireColors = { a: 0x000000, b: 0xffffff }; })],
+  ['wireColors on one of its pins only',
+                             variant(testSpan, d => { d.wireColors = { b: 0x2563eb }; })],
 ];
 
 for (const [what, def] of AT_LIMIT) {

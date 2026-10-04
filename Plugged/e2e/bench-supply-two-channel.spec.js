@@ -312,3 +312,75 @@ test('inspector: CH2\'s rows are greyed "tracks CH1" in series, editable after t
   await expect(input('voltage2'), 'the value set in independent still shows').toHaveValue('5');
   expect(errors).toEqual([]);
 });
+
+// ── Wire colours by post (issue #133) ─────────────────────────────────────
+// The page the builder matches (chosen here): a wire drawn from or to a pin
+// with a colour in its part's `wireColors` takes that colour, whatever is
+// picked in the wire-colour row; when both ends have one, the start end
+// wins. Every other wire takes the picked colour. The colour is read off the
+// wire's meshes, as app.js reads it to save (w.group.children[…].material).
+// The supply: CH1 + (pos) red, CH1 − (com) black, CH2 + (com2) white,
+// CH2 − (neg) blue. The multimeter's probes staying red / black whatever is
+// picked is e2e/multimeter.spec.js ('probe leads are red and black…').
+// Wires go through App.finishWire, the path a click and an AI build share.
+
+const HEX = { red: '#ef4444', black: '#000000', white: '#ffffff', blue: '#2563eb', green: '#22c55e' };
+
+// Each wire's colours, one entry per wire: the distinct colours of its meshes.
+const wireColours = page => page.evaluate(() => App.state.wires.map(w => {
+  const hexes = new Set();
+  w.group.traverse(o => { if (o.isMesh) hexes.add('#' + o.material.color.getHex().toString(16).padStart(6, '0')); });
+  return [...hexes].join(' ');
+}));
+
+test('wire colours: with green picked, wires from the supply\'s posts are CH1 + red, CH1 − black, CH2 + white, CH2 − blue (either end; the start end wins), and a wire from a resistor\'s hole stays green', async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors = watchErrors(page);
+  await openEditor(page);
+  await placeSupply(page);
+  await page.evaluate(() => {
+    const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
+    App.placePart('resistor', [hole('g20'), hole('g24')], { resistance: 1000 });
+  });
+  await page.keyboard.press('Escape');
+
+  // Pick green in the wire-colour row, as a user does.
+  await page.locator('#wire-tool-btn').click();
+  await page.locator('#wire-color-row .swatch[title="Green"]').click();
+  expect(await page.evaluate(() => App.state.wireColor), 'green is the picked wire colour').toBe(0x22c55e);
+
+  await wire(page, 'PS1.0', 'tp_60');   // pos,  CH1 +
+  await wire(page, 'PS1.1', 'tn_60');   // com,  CH1 −
+  await wire(page, 'PS1.3', 'bp_60');   // com2, CH2 +
+  await wire(page, 'PS1.2', 'bn_60');   // neg,  CH2 −
+  await wire(page, 'a40', 'PS1.2');     // hole → neg: the end on the post colours it
+  await wire(page, 'j24', 'j30');       // from the resistor's leg column: the picked colour
+  await wire(page, 'PS1.3', 'PS1.0');   // CH2 + → CH1 +: both ends coloured, the start end wins
+  expect(await page.evaluate(() => App.state.wires.length)).toBe(7);
+
+  expect(await wireColours(page), 'each wire\'s colour, in the order drawn').toEqual([
+    HEX.red, HEX.black, HEX.white, HEX.blue,   // the supply's four posts
+    HEX.blue,                                  // a hole to CH2 −
+    HEX.green,                                 // resistor to hole: the picked colour
+    HEX.white,                                 // white (start) over red (end)
+  ]);
+  expect(errors).toEqual([]);
+});
+
+// Pin (passes today): issue #133 step 4, a saved circuit loads with its saved
+// colours. A supply wire saved red on CH2 + before this issue reloads red,
+// not white; the builder must keep loading off the new colouring.
+test('wire colours: a saved circuit with a red wire on the supply\'s CH2 + post loads it red, as saved', async ({ page }) => {
+  test.setTimeout(90_000);
+  const errors = watchErrors(page);
+  await openEditor(page);
+  await page.evaluate(() => App.loadCircuitData({
+    name: 'Old supply',
+    components: [{ type: 'bench_supply', label: 'PS1', values: {}, holeRefs: null, position: { x: 15.8, z: 0 } }],
+    wires: [{ startHole: null, endHole: { col: 60, row: 'bp' }, startCompIdx: 0, startPin: 'com2', startPinIdx: 3,
+              endCompIdx: -1, endPinIdx: -1, color: 0xef4444 }],
+  }));
+  expect(await page.evaluate(() => App.state.wires.length), 'the saved wire is drawn').toBe(1);
+  expect(await wireColours(page), 'the saved colour, not CH2 +\'s white').toEqual([HEX.red]);
+  expect(errors).toEqual([]);
+});

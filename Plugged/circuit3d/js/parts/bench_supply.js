@@ -270,6 +270,8 @@
     pins:     ['pos', 'com', 'neg', 'com2'],
     ref:      'com',
     place:    { kind: 'offboard' },
+    // Wires from the posts (#133): CH1 + red, CH1 − black, CH2 + white, CH2 − blue
+    wireColors: { pos: 0xef4444, com: 0x000000, com2: 0xffffff, neg: 0x2563eb },
     values:   {
       voltage: { unit: 'V', default: 12,  min: 0,     max: 30 },
       limit:   { unit: 'A', default: 0.5, min: 0.001, max: 3 },

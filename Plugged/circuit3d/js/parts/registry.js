@@ -21,7 +21,7 @@
   const UNITS      = ['Ω', 'V', 'A', 'F', 'H', '%', '°C', 'lux', 'Hz'];
   const FIELDS     = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'ref', 'place', 'values',
                       'controls', 'gestures', 'elements', 'measure', 'warnings', 'report', 'headline', 'line',
-                      'reading', 'ai', 'view', 'examples', 'pinout'];
+                      'reading', 'ai', 'view', 'examples', 'pinout', 'wireColors'];
   const REQUIRED   = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'place',
                       'elements', 'report', 'ai', 'view', 'examples'];
   const TYPE_RE    = /^[a-z][a-z0-9_]*$/;
@@ -475,6 +475,13 @@
       bad(`ref "${def.ref}" is not one of the pins (${list(pins || [])})`);
     }
 
+    if (def.wireColors !== undefined) {
+      if (!isObj(def.wireColors)) bad('wireColors must be an object { <pin>: <24-bit colour> }');
+      else for (const [pin, c] of Object.entries(def.wireColors)) {
+        if (!(pins || []).includes(pin)) bad(`wireColors.${pin} is not one of the pins (${list(pins || [])})`);
+        if (!Number.isInteger(c) || c < 0 || c > 0xffffff) bad(`wireColors.${pin} must be a 24-bit colour, an integer 0..0xffffff`);
+      }
+    }
     if (def.place !== undefined) checkPlace(def.place, pins, bad);
     if (def.values !== undefined) checkValues(def.values, def.controls, bad);
     if (def.controls !== undefined) checkControls(def.controls, bad);

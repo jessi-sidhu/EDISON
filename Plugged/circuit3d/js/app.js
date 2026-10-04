@@ -482,8 +482,10 @@
     const ePm = endPin.pinMesh || null;
 
     // Build the wire visual (coloured arc with leg stubs into holes).
-    // A meter lead is red or black like a real probe (#108), whatever colour is picked.
-    const wireGroup = buildWireGroup(startWorld, endWorld, probeColor(sPm) ?? probeColor(ePm) ?? state.wireColor);
+    // A pin with a fixed wire colour (a meter probe, a supply post: #108, #133)
+    // colours a new wire, whatever is picked; a load or undo keeps the saved one.
+    const color     = restoringWires ? state.wireColor : probeColor(sPm) ?? probeColor(ePm) ?? state.wireColor;
+    const wireGroup = buildWireGroup(startWorld, endWorld, color);
     App.scene.add(wireGroup);
 
     // Reset start-pin highlight
@@ -507,13 +509,16 @@
     refreshCounts();
   };
 
-  // A multimeter probe socket's lead colour, or null for any other pin.
+  // The fixed wire colour of a part's pin (its def's wireColors), or null.
   function probeColor(pm) {
     const comp = pm?.userData.ownerComp;
-    if (comp?.type !== 'multimeter') return null;
-    const pin = Parts.get(comp.type)?.pins?.[pm.userData.pinIndex];
-    return pin === 'red' ? 0xef4444 : pin === 'black' ? 0x000000 : null;
+    const def  = comp && Parts.get(comp.type);
+    const pin  = def?.pins?.[pm.userData.pinIndex];
+    return def?.wireColors?.[pin] ?? null;
   }
+
+  // True while rebuildBoard redraws saved wires, so they keep their saved colour.
+  let restoringWires = false;
 
   App.cancelWire = function () {
     if (state.wireStart?.pinMesh) {
@@ -833,7 +838,9 @@
 
       if (startWorld && endWorld) {
         state.wireStart = { world: startWorld, holeRef: startHole, pinMesh: startPinMesh };
-        App.finishWire({ world: endWorld, holeRef: endHole, pinMesh: endPinMesh }, w.id);
+        restoringWires = true;   // keep the saved colour (#133)
+        try { App.finishWire({ world: endWorld, holeRef: endHole, pinMesh: endPinMesh }, w.id); }
+        finally { restoringWires = false; }
       }
     }
     state.wireColor = savedColor;
