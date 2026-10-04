@@ -9,6 +9,7 @@
  * POST /api/photo/leads    { key, items }                  →  { items, provider, model, ms }
  *                          (Accept application/x-ndjson: a line per item as it settles, then { done, … })
  * GET  /api/health
+ * POST /api/course/canvas/sync                             →  { ok, demo, syncedAt }  (Edison demo, no real Canvas)
  * GET  anything else       the app's static files
  */
 
@@ -1569,8 +1570,31 @@ const server = http.createServer(async (req, res) => {
   setCORS(res);
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+  // The TA view's live feed (dummy): sample events that rotate every 15 s,
+  // stamped relative to now, newest first.
+  if (req.method === 'GET' && req.url === '/api/course/ta-feed') {
+    const now = Date.now();
+    const SAMPLE = [
+      { lab: 'LAB-02', step: 2, label: 'U1',   text: 'V+ (pin 8) not wired' },
+      { lab: 'LAB-01', step: 2, label: 'LED1', text: 'LED backwards' },
+      { lab: 'LAB-02', step: 5, label: 'U1',   text: 'Output clipping at +10.5 V' },
+      { lab: 'LAB-01', step: 3, label: 'R2',   text: 'R2 is 220 Ω, expected 2.2 kΩ' },
+      { lab: 'LAB-02', step: 3, label: 'R1',   text: 'Rin wired to pin 3 instead of pin 2' },
+      { lab: 'LAB-01', step: 4, label: 'R3',   text: 'Measured across the wrong pair of holes' },
+    ];
+    const shift = Math.floor(now / 15000) % SAMPLE.length;
+    const events = SAMPLE.map((e, i) => ({ ...SAMPLE[(i + shift) % SAMPLE.length],
+      at: new Date(now - (i * 4 + 1) * 60000).toISOString() }));
+    return sendJSON(res, 200, { demo: true, events });
+  }
+
   if (req.method === 'GET' && req.url === '/api/health') {
     return sendJSON(res, 200, { status: 'ok', model: MODEL_NAME });
+  }
+
+  // The Edison course hub's Canvas dummy: a sync that worked, marked as a demo. No real Canvas.
+  if (req.method === 'POST' && req.url === '/api/course/canvas/sync') {
+    return sendJSON(res, 200, { ok: true, demo: true, syncedAt: new Date().toISOString() });
   }
 
   if (req.method === 'POST' && req.url === '/api/ask') {

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-ui="edison" data-ui-fixed>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ENSC 220 textbook: op-amp amplifiers</title>
+  <meta name="description" content="Two practice figures, the inverting and the non-inverting op-amp amplifier, to explore and then test in the simulator.">
+  <script src="ui-flag.js"></script>
+  <script src="textbook-figures.js" defer></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&amp;family=STIX+Two+Text:ital,wght@0,400;1,400&amp;display=swap">
+  <link rel="stylesheet" href="textbook.css">
+</head>
+<body>
+  <!-- Terms (data-term) light the matching part in the page's figure, and back.
+       Values with data-var can be dragged or stepped with the arrow keys;
+       data-show values follow them. textbook-figures.js draws the figures
+       and plots into [data-figure] and [data-plot] and wires it all. -->
+  <main class="tb-spread">
+    <h1 class="tb-sr">ENSC 220 textbook, pages 4 and 5: basic principles and applications</h1>
+
+    <!-- ── Page 4 ── -->
+    <article class="tb-page tb-verso" data-fig="inverting" aria-labelledby="tb-s14">
+      <header class="tb-run"><span class="tb-folio">4</span><span>BASIC PRINCIPLES AND APPLICATIONS</span></header>
+
+      <h2 id="tb-s14" class="tb-h"><span class="tb-h-n">1.4</span> Inverting Op-Amp with Negative Feedback</h2>
+      <p>In the inverting amplifier of Figure 1.1, the input drives the op-amp's <span class="tb-term" data-term="minus">− input</span> through <span class="tb-term" data-term="R1"><var>R</var><sub>1</sub></span>, and <span class="tb-term" data-term="R2"><var>R</var><sub>2</sub></span> feeds the output back to that same input. The + input is tied to ground.</p>
+      <p>Treat the op-amp as ideal: its inputs draw no current, and with negative feedback the output moves until both inputs sit at the same voltage. The − input is therefore held at 0 V, a <span class="tb-term" data-term="minus">virtual ground</span>. The current <span class="tb-term" data-term="Vin"><var>V</var><sub>in</sub></span>/<span class="tb-term" data-term="R1"><var>R</var><sub>1</sub></span> cannot enter the op-amp, so all of it flows on through <span class="tb-term" data-term="R2"><var>R</var><sub>2</sub></span>, and <span class="tb-term" data-term="Vout"><var>V</var><sub>out</sub></span> must sit below ground by <var>R</var><sub>2</sub> × <var>V</var><sub>in</sub>/<var>R</var><sub>1</sub>.</p>
+
+      <figure class="tb-figure">
+        <div class="tb-fig-art" data-figure="inverting"></div>
+        <figcaption id="tb-cap-11"><i>Figure 1.1</i><span>Basic inverting amplifier with negative feedback through <var>R</var><sub>2</sub>.</span></figcaption>
+      </figure>
+
+      <p>The gain, <var>A</var>, is set by the two resistors alone. Drag any dotted value to change it.</p>
+      <div class="tb-eqrow">
+        <div class="tb-eq">
+          <span class="tb-eq-body">
+            <var>A</var><i class="tb-op">=</i><span class="tb-frac"><span class="tb-term" data-term="Vout"><var>V</var><sub>out</sub></span><span class="tb-term" data-term="Vin"><var>V</var><sub>in</sub></span></span><i class="tb-op">=</i>−<span class="tb-frac"><span class="tb-term" data-term="R2"><var>R</var><sub>2</sub></span><span class="tb-term" data-term="R1"><var>R</var><sub>1</sub></span></span><i class="tb-op">=</i>−<span class="tb-frac"><span class="tb-scrub" data-var="r2" data-term="R2" tabindex="0" role="slider" aria-label="R2">100 kΩ</span><span class="tb-scrub" data-var="r1" data-term="R1" tabindex="0" role="slider" aria-label="R1">10 kΩ</span></span><i class="tb-op">=</i><span class="tb-val" data-show="gain">−10</span>
+          </span>
+        </div>
+        <span class="tb-eqno">(1.4)</span>
+        <div class="tb-plot-slot" data-plot="inverting"></div>
+      </div>
+
+      <div class="tb-try">
+        <p class="tb-worked"><span class="tb-scrub" data-var="vin" data-term="Vin" tabindex="0" role="slider" aria-label="Vin">0.5 V</span> in → <span class="tb-term tb-out" data-term="Vout" data-show="worked">−5.0 V out</span></p>
+        <a class="tb-lab" href="../circuit3d/index.html?ui=edison&amp;open=edison/figures/inverting.sparky&amp;run=1" aria-describedby="tb-cap-11">Test in lab <span aria-hidden="true">+</span></a>
+      </div>
+
+      <p class="tb-check"><label for="tb-check-inv">Check yourself: with <var>R</var><sub>2</sub> = 47 kΩ, what is <var>V</var><sub>out</sub> for 0.5 V in?</label>
+        <input id="tb-check-inv" data-check="inverting" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="? V"><span class="tb-tick" aria-live="polite"></span></p>
+
+      <footer class="tb-foot">ENSC 220 / CIRCUITS</footer>
+    </article>
+
+    <!-- ── Page 5 ── -->
+    <article class="tb-page tb-recto" data-fig="non-inverting" aria-labelledby="tb-s15">
+      <header class="tb-run"><span>BASIC PRINCIPLES AND APPLICATIONS</span><span class="tb-folio">5</span></header>
+
+      <h2 id="tb-s15" class="tb-h"><span class="tb-h-n">1.5</span> Non-Inverting Amplifier</h2>
+      <p>In Figure 1.2 the input and ground trade places: <span class="tb-term" data-term="Vin"><var>V</var><sub>in</sub></span> drives the + input, and <span class="tb-term" data-term="R1"><var>R</var><sub>1</sub></span> runs from the <span class="tb-term" data-term="minus">− input</span> to ground. Negative feedback holds the − input at <var>V</var><sub>in</sub>, so a current <var>V</var><sub>in</sub>/<var>R</var><sub>1</sub> flows down through <var>R</var><sub>1</sub>. None of it enters the op-amp, so it must come from the output through <span class="tb-term" data-term="R2"><var>R</var><sub>2</sub></span>, which lifts <span class="tb-term" data-term="Vout"><var>V</var><sub>out</sub></span> above <var>V</var><sub>in</sub>. The gain is positive and never below 1.</p>
+
+      <figure class="tb-figure">
+        <div class="tb-fig-art" data-figure="non-inverting"></div>
+        <figcaption id="tb-cap-12"><i>Figure 1.2</i><span>Basic non-inverting amplifier: <var>V</var><sub>in</sub> on the + input.</span></figcaption>
+      </figure>
+
+      <p>The gain again depends only on the resistor ratio:</p>
+      <div class="tb-eqrow">
+        <div class="tb-eq">
+          <span class="tb-eq-body">
+            <var>A</var><i class="tb-op">=</i>1<i class="tb-op">+</i><span class="tb-frac"><span class="tb-term" data-term="R2"><var>R</var><sub>2</sub></span><span class="tb-term" data-term="R1"><var>R</var><sub>1</sub></span></span><i class="tb-op">=</i>1<i class="tb-op">+</i><span class="tb-frac"><span class="tb-scrub" data-var="r2" data-term="R2" tabindex="0" role="slider" aria-label="R2">10 kΩ</span><span class="tb-scrub" data-var="r1" data-term="R1" tabindex="0" role="slider" aria-label="R1">10 kΩ</span></span><i class="tb-op">=</i><span class="tb-val" data-show="gain">2</span>
+          </span>
+        </div>
+        <span class="tb-eqno">(1.5)</span>
+        <div class="tb-plot-slot" data-plot="non-inverting"></div>
+      </div>
+
+      <div class="tb-try">
+        <p class="tb-worked"><span class="tb-scrub" data-var="vin" data-term="Vin" tabindex="0" role="slider" aria-label="Vin">0.5 V</span> in → <span class="tb-term tb-out" data-term="Vout" data-show="worked">1.0 V out</span></p>
+        <a class="tb-lab" href="../circuit3d/index.html?ui=edison&amp;open=edison/figures/non-inverting.sparky&amp;run=1" aria-describedby="tb-cap-12">Test in lab <span aria-hidden="true">+</span></a>
+      </div>
+
+      <p class="tb-check"><label for="tb-check-non">Check yourself: what <var>R</var><sub>2</sub> gives a gain of 3?</label>
+        <input id="tb-check-non" data-check="non-inverting" type="text" autocomplete="off" spellcheck="false" placeholder="? kΩ"><span class="tb-tick" aria-live="polite"></span></p>
+
+      <aside class="tb-takeaway" aria-label="Key takeaway">
+        <p class="tb-takeaway-h"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 11.5V4.8M5.4 7.2 8 4.6l2.6 2.6"/></svg>KEY TAKEAWAY</p>
+        <p>Negative feedback sets the gain with two resistors: −<var>R</var><sub>2</sub>/<var>R</var><sub>1</sub> inverting, 1 + <var>R</var><sub>2</sub>/<var>R</var><sub>1</sub> non-inverting.</p>
+      </aside>
+
+      <footer class="tb-foot" aria-hidden="true"></footer>
+    </article>
+  </main>
+</body>
+</html>

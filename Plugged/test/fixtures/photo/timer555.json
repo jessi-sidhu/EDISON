@@ -1,0 +1,504 @@
+{
+  "sample": "timer555",
+  "sha256": "a595b5329c76f5e24ef956a334b626fb4c4b31ad6e515aa589b1b74a5695b7b7",
+  "reading": {
+    "board": {
+      "visible": true,
+      "cols": 30,
+      "rails": {
+        "aOuter": "?",
+        "aInner": "?",
+        "jInner": "+",
+        "jOuter": "-"
+      },
+      "split": false
+    },
+    "parts": [
+      {
+        "id": "X1",
+        "type": "other",
+        "what": "NE555N ic",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              269.9,
+              371.7
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              393.8,
+              371.7
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          269.9,
+          317.4,
+          393.8,
+          426
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R1",
+        "type": "resistor",
+        "what": "10k resistor",
+        "value": 10000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              319.8,
+              221.5
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              319.8,
+              286.8
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          297.2,
+          221.5,
+          342.3,
+          286.8
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "X2",
+        "type": "other",
+        "what": "100nF capacitor",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              378,
+              306
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              444.2,
+              306
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          378,
+          276.2,
+          444.2,
+          335.8
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R2",
+        "type": "resistor",
+        "what": "1k resistor",
+        "value": 1000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              351.8,
+              476.4
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              516.6,
+              476.4
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          351.8,
+          456.5,
+          516.6,
+          496.3
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "X3",
+        "type": "other",
+        "what": "47 uF capacitor",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              297.2,
+              485.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              297.2,
+              685.9
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          252,
+          485.6,
+          342.3,
+          685.9
+        ],
+        "confidence": 0.98,
+        "unsure": [
+          "leads"
+        ]
+      }
+    ],
+    "wires": [
+      {
+        "id": "W1",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              287.7,
+              95.1
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              287.7,
+              196
+            ]
+          }
+        ],
+        "box": [
+          273,
+          95.1,
+          302.4,
+          196
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W2",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              409,
+              94.4
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              409,
+              199.5
+            ]
+          }
+        ],
+        "box": [
+          394.8,
+          94.4,
+          423.2,
+          199.5
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W3",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              282,
+              215.1
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              282,
+              293.9
+            ]
+          }
+        ],
+        "box": [
+          253.1,
+          215.1,
+          310.8,
+          293.9
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W4",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              265.7,
+              289
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              364.3,
+              289
+            ]
+          }
+        ],
+        "box": [
+          265.7,
+          274.1,
+          364.3,
+          303.9
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W5",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              325.5,
+              265.2
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              939.8,
+              265.2
+            ]
+          }
+        ],
+        "box": [
+          325.5,
+          249.2,
+          939.8,
+          281.2
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W6",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              262,
+              308.9
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              262,
+              416.1
+            ]
+          }
+        ],
+        "box": [
+          252,
+          308.9,
+          272,
+          416.1
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W7",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              414.3,
+              328.7
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              414.3,
+              416.1
+            ]
+          }
+        ],
+        "box": [
+          405.3,
+          328.7,
+          423.2,
+          416.1
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W8",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              446.8,
+              306
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              446.8,
+              419.6
+            ]
+          }
+        ],
+        "box": [
+          437.9,
+          306,
+          455.7,
+          419.6
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W9",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              260.4,
+              444.2
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              333.9,
+              444.2
+            ]
+          }
+        ],
+        "box": [
+          260.4,
+          429.6,
+          333.9,
+          458.7
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W10",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              333.9,
+              536.4
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              452.6,
+              536.4
+            ]
+          }
+        ],
+        "box": [
+          333.9,
+          520.4,
+          452.6,
+          552.4
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      }
+    ],
+    "power": []
+  },
+  "provider": "gemini",
+  "model": "gemini-robotics-er-2-preview"
+}

@@ -1,0 +1,92 @@
+{
+  "key": "multimeter",
+  "model": "gemini-robotics-er-2-preview",
+  "items": [
+    {
+      "id": "LED1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "anode",
+          "pt": [
+            831.4,
+            181.3
+          ],
+          "role": "anode"
+        },
+        {
+          "pin": "cathode",
+          "pt": [
+            798.5,
+            184.2
+          ],
+          "role": "cathode"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            831.2,
+            307.6
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            832,
+            401.1
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": null,
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            837.5,
+            312.2
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W2",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": null,
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            849.1,
+            514.6
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    }
+  ]
+}

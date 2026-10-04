@@ -1,0 +1,636 @@
+{
+  "sample": "piranha",
+  "sha256": "48dd5dc16f025ee20fcc4ea450fce607d017214a329a6559fab29f8328cf23d0",
+  "reading": {
+    "board": {
+      "visible": true,
+      "cols": 30,
+      "rails": {
+        "aOuter": "-",
+        "aInner": "+",
+        "jInner": "-",
+        "jOuter": "+"
+      },
+      "split": false
+    },
+    "parts": [
+      {
+        "id": "R1",
+        "type": "resistor",
+        "what": "10k resistor",
+        "value": 10000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              78.8,
+              27
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              78.8,
+              168.3
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          45.2,
+          27,
+          112.4,
+          168.3
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R2",
+        "type": "resistor",
+        "what": "10k resistor",
+        "value": 10000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              264.1,
+              59.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              264.1,
+              192.4
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          241.5,
+          59.6,
+          286.7,
+          192.4
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R3",
+        "type": "resistor",
+        "what": "10k resistor",
+        "value": 10000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              534,
+              58.9
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              534,
+              186
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          512.4,
+          58.9,
+          555.5,
+          186
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "LED1",
+        "type": "led",
+        "what": "led",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              72.5,
+              263.8
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              186.9,
+              263.8
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          72.5,
+          207.3,
+          186.9,
+          320.2
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "LED2",
+        "type": "led",
+        "what": "led",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              343.9,
+              211.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              343.9,
+              324.5
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          287.7,
+          211.6,
+          400.1,
+          324.5
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "LED3",
+        "type": "led",
+        "what": "led",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              497.7,
+              265.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              611.1,
+              265.6
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          497.7,
+          209.5,
+          611.1,
+          321.6
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "LED4",
+        "type": "led",
+        "what": "led",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              73.5,
+              449.1
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              188,
+              449.1
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          73.5,
+          392.6,
+          188,
+          505.5
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "LED5",
+        "type": "led",
+        "what": "led",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              345,
+              393.3
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              345,
+              506.9
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          288.8,
+          393.3,
+          401.1,
+          506.9
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "LED6",
+        "type": "led",
+        "what": "led",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              560.2,
+              391.9
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              560.2,
+              505.5
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          508.2,
+          391.9,
+          612.2,
+          505.5
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R4",
+        "type": "resistor",
+        "what": "330 resistor",
+        "value": 330,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              77.8,
+              521.9
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              77.8,
+              630.5
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          57.8,
+          521.9,
+          97.7,
+          630.5
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R5",
+        "type": "resistor",
+        "what": "330 resistor",
+        "value": 330,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              272,
+              521.9
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              272,
+              647.5
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          248.9,
+          521.9,
+          295.1,
+          647.5
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R6",
+        "type": "resistor",
+        "what": "330 resistor",
+        "value": 330,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              522.4,
+              500.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              522.4,
+              646.1
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          497.7,
+          500.6,
+          547.1,
+          646.1
+        ],
+        "confidence": 0.95,
+        "unsure": [
+          "leads"
+        ]
+      }
+    ],
+    "wires": [
+      {
+        "id": "W1",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              171.2,
+              131
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              383.3,
+              131
+            ]
+          }
+        ],
+        "box": [
+          171.2,
+          74.6,
+          383.3,
+          187.4
+        ],
+        "confidence": 0.92,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W2",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              384.3,
+              123.2
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              598.5,
+              123.2
+            ]
+          }
+        ],
+        "box": [
+          384.3,
+          58.2,
+          598.5,
+          188.2
+        ],
+        "confidence": 0.92,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W3",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              597.4,
+              137.1
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              773.9,
+              137.1
+            ]
+          }
+        ],
+        "box": [
+          597.4,
+          84.5,
+          773.9,
+          189.6
+        ],
+        "confidence": 0.92,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W4",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              175.4,
+              584
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              304.5,
+              584
+            ]
+          }
+        ],
+        "box": [
+          175.4,
+          521.9,
+          304.5,
+          646.1
+        ],
+        "confidence": 0.92,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W5",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              383.3,
+              584
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              512.4,
+              584
+            ]
+          }
+        ],
+        "box": [
+          383.3,
+          521.1,
+          512.4,
+          646.8
+        ],
+        "confidence": 0.92,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W6",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              602.7,
+              583.3
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              765.4,
+              583.3
+            ]
+          }
+        ],
+        "box": [
+          602.7,
+          519.7,
+          765.4,
+          646.8
+        ],
+        "confidence": 0.92,
+        "unsure": [
+          "leads"
+        ]
+      }
+    ],
+    "power": []
+  },
+  "provider": "gemini",
+  "model": "gemini-robotics-er-2-preview"
+}

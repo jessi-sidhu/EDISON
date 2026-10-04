@@ -10,10 +10,14 @@
 //  ────
 //    📷 → Choose photo / drop on the chat → corner step (a1, aN, jN, j1,
 //         a live labelled grid) → Looks right
-//    📷 → Use sample photo → its stored taps (window.PhotoSamples)
+//    📷 → Use sample photo (or the error card's) → the sample picker
+//         (#photo-samples, #182): a tile per window.PhotoSamples entry,
+//         its photo, title and credit → its stored taps, sent as
+//         `sample: <id>`; Escape or Cancel closes it, nothing sent
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
 //    → the Reading opens the confirm screen (PhotoConfirm.open) at once, on
-//      the same flattened image, with the box round's placeholders (#173)
+//      the same flattened image, with the box round's placeholders (#173),
+//      and a sample's credit under the photo (#photo-credit)
 //    → the crop round (#160, #173): parts and wires still 'leads' unsure
 //      and a `key` → PhotoConfirm.startPlacing(ids) ("Placing legs 0/M…"),
 //      a labelled crop of each (PhotoCrops.render, from the same resized
@@ -45,7 +49,6 @@
   const PHOTO_PAGE_TIMEOUT_MS = 60000;   // above the server's 45 s PHOTO_TIMEOUT_MS
   const PHOTO_LEADS_PAGE_TIMEOUT_MS = 45000;   // the server's 40 s PHOTO_LEADS_TIMEOUT_MS plus the upload
   const MAX_SIDE  = 3000;                // the original is resized to this before flattening
-  const SAMPLE    = 'demo-board';
   const READING   = 'Reading your board…';
   const DEFAULT_Q = "What's wrong with my circuit?";       // Build it with nothing typed
   // docs/API-CONTRACT.md → "POST /api/photo" → Errors
@@ -62,6 +65,7 @@
   const corners = $('photo-corners'), prompt = $('photo-prompt'), canvas = $('photo-canvas');
   const colsEl  = $('photo-cols'),    okBtn  = $('photo-ok'),     status = $('photo-status');
   const errBtn  = $('photo-error-sample'), confirm = $('photo-confirm');
+  const picker  = $('photo-samples'),      credit  = $('photo-credit');
 
   let img  = null;   // the photo being tapped
   let taps = [];     // its tapped corners, photo pixels, in corner order
@@ -77,6 +81,7 @@
   function open() {
     clearFlags();                                          // a new photo: the last one's flags are done
     menu.hidden = true;
+    picker.hidden = true;
     corners.hidden = true;
     confirm.hidden = true;
     showStatus('', false);
@@ -85,6 +90,7 @@
 
   function close() {
     nextJob();
+    picker.hidden = true;
     modal.style.display = 'none';
   }
 
@@ -300,6 +306,8 @@
 
     Capture.lastReading = data.reading;
     showStatus('', false);
+    const s = sample && window.PhotoSamples[sample];
+    credit.textContent = (s && s.credit) || '';
     PhotoConfirm.open(data.reading, flat, grid, built);   // at once: the legs snap in as their crops answer
     await placeLegs(my, data, src, grid);
   }
@@ -353,16 +361,40 @@
   const _clearAll  = App.clearAll;
   App.clearAll = function (opts) { clearFlags(); return _clearAll.call(this, opts); };
 
-  async function useSample() {
+  // The sample picker (#182): a tile per sample, built the first time it opens.
+  function showSamples() {
+    nextJob();
+    open();
+    if (!picker.childElementCount) {
+      for (const [id, s] of Object.entries(window.PhotoSamples)) {
+        const tile = document.createElement('button');
+        tile.className = 'photo-tile';
+        tile.dataset.sample = id;
+        const pic = document.createElement('img');
+        pic.src = s.file;
+        pic.alt = s.title;
+        const title = document.createElement('b');
+        title.textContent = s.title;
+        const by = document.createElement('small');
+        by.textContent = s.credit;
+        tile.append(pic, title, by);
+        tile.addEventListener('click', () => useSample(id));
+        picker.appendChild(tile);
+      }
+    }
+    picker.hidden = false;
+  }
+
+  async function useSample(id) {
     const my = nextJob();
     open();
     showStatus(READING, false);
-    const s  = window.PhotoSamples[SAMPLE];
+    const s  = window.PhotoSamples[id];
     const im = await loadImage(s.file).catch(() => null);
     if (my !== job) return;
     if (!im) return showStatus(AI_FAILED, true);
     Capture.grid = PhotoGrid.homography(s.taps, s.cols);
-    send(im, Capture.grid, SAMPLE);
+    send(im, Capture.grid, id);
   }
 
   // ── Wiring ─────────────────────────────────────────────────
@@ -377,8 +409,8 @@
     fileIn.click();
   });
   fileIn.addEventListener('change', () => { if (fileIn.files[0]) startPhoto(fileIn.files[0]); });
-  $('photo-sample').addEventListener('click', useSample);
-  errBtn.addEventListener('click', useSample);
+  $('photo-sample').addEventListener('click', showSamples);
+  errBtn.addEventListener('click', showSamples);
   $('photo-redo').addEventListener('click', () => { taps = []; update(); });
   okBtn.addEventListener('click', () => { if (Capture.grid) send(img, Capture.grid, null); });
   colsEl.addEventListener('change', () => { if (img) update(); });

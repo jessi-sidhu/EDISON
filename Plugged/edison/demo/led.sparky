@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "name": "LED with a current-limiting resistor",
+  "components": [
+    {
+      "type": "battery",
+      "id": "BAT1",
+      "label": "BAT1",
+      "values": { "voltage": 9 },
+      "holeRefs": null,
+      "position": { "x": -0.6, "z": -5.2 }
+    },
+    {
+      "type": "resistor",
+      "id": "R1",
+      "label": "R1",
+      "values": { "resistance": 470 },
+      "holeRefs": [
+        { "pin": "lead1", "col": 27, "row": "b" },
+        { "pin": "lead2", "col": 31, "row": "b" }
+      ],
+      "position": { "x": 0, "z": 0 }
+    },
+    {
+      "type": "led",
+      "id": "LED1",
+      "label": "LED1",
+      "values": { "color": "red" },
+      "holeRefs": [
+        { "pin": "cathode", "col": 33, "row": "c" },
+        { "pin": "anode", "col": 31, "row": "c" }
+      ],
+      "position": { "x": 0, "z": 0 }
+    }
+  ],
+  "wires": [
+    {
+      "id": "W1",
+      "startHole": null,
+      "endHole": { "col": 26, "row": "tp" },
+      "startCompIdx": 0,
+      "startPinIdx": 0,
+      "endCompIdx": -1,
+      "endPinIdx": -1,
+      "startPin": "0",
+      "color": 15680580
+    },
+    {
+      "id": "W2",
+      "startHole": null,
+      "endHole": { "col": 35, "row": "tn" },
+      "startCompIdx": 0,
+      "startPinIdx": 1,
+      "endCompIdx": -1,
+      "endPinIdx": -1,
+      "startPin": "1",
+      "color": 1118481
+    },
+    {
+      "id": "W3",
+      "startHole": { "col": 27, "row": "tp" },
+      "endHole": { "col": 27, "row": "a" },
+      "startCompIdx": -1,
+      "startPinIdx": -1,
+      "endCompIdx": -1,
+      "endPinIdx": -1,
+      "color": 15680580
+    },
+    {
+      "id": "W4",
+      "startHole": { "col": 33, "row": "a" },
+      "endHole": { "col": 33, "row": "tn" },
+      "startCompIdx": -1,
+      "startPinIdx": -1,
+      "endCompIdx": -1,
+      "endPinIdx": -1,
+      "color": 1118481
+    }
+  ]
+}

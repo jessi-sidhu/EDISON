@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "Textbook figure 2.1: a voltage divider, 10 V to 6 V",
+  "thumbnail": "",
+  "components": [
+    {"type":"bench_supply","id":"PS1","label":"PS1","values":{"voltage":10,"limit":0.5},"holeRefs":null,"position":{"x":16.4,"z":-1}},
+    {"type":"resistor","id":"R1","label":"R1","values":{"resistance":1000},"holeRefs":[{"pin":"lead1","col":27,"row":"a"},{"pin":"lead2","col":31,"row":"a"}],"position":{"x":0,"z":0}},
+    {"type":"resistor","id":"R2","label":"R2","values":{"resistance":1500},"holeRefs":[{"pin":"lead1","col":31,"row":"b"},{"pin":"lead2","col":35,"row":"b"}],"position":{"x":0,"z":0}}
+  ],
+  "wires": [
+    {"id":"W1","startHole":null,"endHole":{"col":44,"row":"tp"},"startCompIdx":0,"startPinIdx":0,"endCompIdx":-1,"endPinIdx":-1,"startPin":"pos","color":15680580},
+    {"id":"W2","startHole":null,"endHole":{"col":44,"row":"tn"},"startCompIdx":0,"startPinIdx":1,"endCompIdx":-1,"endPinIdx":-1,"startPin":"com","color":0},
+    {"id":"W3","startHole":{"col":27,"row":"tp"},"endHole":{"col":27,"row":"b"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":15680580},
+    {"id":"W4","startHole":{"col":35,"row":"c"},"endHole":{"col":35,"row":"tn"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":0}
+  ]
+}

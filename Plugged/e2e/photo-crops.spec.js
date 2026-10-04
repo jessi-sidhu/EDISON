@@ -174,9 +174,13 @@ function answers(c) {
 // Where each answered leg should land.
 const LANDS = { R1: ['h10', 'h14'], LED1: ['b40', 'b42'], W1: ['g15', 'rail:jOuter:20'] };
 
+// 📷 → Use sample photo → the picker's demo-board tile (#182).
 const openSample = async page => {
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
+  const tile = page.locator('#photo-samples [data-sample="demo-board"]');
+  await expect(tile, 'Use sample photo opens the sample picker (#182)').toBeVisible();
+  await tile.click();
 };
 
 const confirmState = page => page.evaluate(() => {

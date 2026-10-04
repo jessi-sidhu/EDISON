@@ -1,0 +1,244 @@
+/* edison/textbook.css — the textbook spread (issue #181), after Aarmen's mock
+   docs/design/textbook/mock-spread.png: two book pages in thin frames on a
+   near-black ground, running heads, DM Mono for headings and body, STIX Two
+   Text italic for the variables, schematics in pale blue lines. Like the
+   landing it is always dark, its palette lives here, and its caps labels are
+   written in capitals in the HTML (the design guard bans text-transform).
+   Square corners, no shadows, no gradients.
+
+   The explorable parts stay quiet: dotted underlines on the values you can
+   drag, a faint wash while dragging, and a white glow on a part whose term
+   is hovered. Laptop sizes first; under 1100 px the pages stack. */
+
+html[data-ui="edison"] {
+  --tb-ground: #08090C;
+  --tb-page:   #0E1116;
+  --tb-frame:  #3A414B;   /* page frames and the takeaway box */
+  --tb-rule:   #30363F;   /* the rules under the running heads and over the footers */
+  --tb-ink:    #F2F4F8;   /* headings, labels, the numbers you drag */
+  --tb-text:   #D2D7E0;   /* body text */
+  --tb-grey:   #8F98A6;   /* captions, values, ticks: 6.5:1 on the page */
+  --tb-dim:    #8796AC;   /* running heads and the footer */
+  --tb-line:   #A9C9F2;   /* the schematic's lines */
+  --tb-wash:   rgba(169, 201, 242, 0.14);
+  --tb-red:    #FF6B6B;   /* a clipped output */
+  --tb-mono:   'DM Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --tb-serif:  'STIX Two Text', 'Times New Roman', serif;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--tb-ground);
+  color: var(--tb-text);
+  font: 400 14px/1.7 var(--tb-mono);
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--tb-ink); color: var(--tb-page); }
+:focus-visible { outline: 1px solid var(--tb-line); outline-offset: 2px; }
+.tb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Variables: italic serif, a touch larger so they sit level with the mono. */
+var { font-family: var(--tb-serif); font-style: italic; font-size: 1.16em; line-height: 1; }
+sub { font-family: var(--tb-serif); font-size: 0.74em; line-height: 1; }
+var + sub { margin-left: 0.04em; }
+
+/* ── The spread: one frame, a rule down the gutter ── */
+.tb-spread {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  max-width: 1480px;
+  margin: 18px auto;
+  border: 1px solid var(--tb-frame);
+  background: var(--tb-page);
+}
+.tb-page {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 26px 44px 18px;
+}
+.tb-recto { border-left: 1px solid var(--tb-frame); }
+.tb-page > p { max-width: 68ch; margin: 0 0 12px; }
+
+/* Running heads: the folio in the ink, the title in tracked grey caps. */
+.tb-run {
+  display: flex;
+  align-items: baseline;
+  gap: 2.6em;
+  margin-bottom: 26px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--tb-rule);
+  color: var(--tb-dim);
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+}
+.tb-recto .tb-run { justify-content: flex-end; }
+.tb-folio { color: var(--tb-ink); font-size: 13px; letter-spacing: 0; }
+
+.tb-h {
+  margin: 0 0 14px;
+  color: var(--tb-ink);
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.tb-h-n { margin-right: 0.9ch; }
+
+/* ── Figures and captions (mock: "Figure 1.3a  Basic inverting …") ── */
+.tb-figure { margin: 16px 0 14px; }
+.tb-fig-art { display: flex; justify-content: center; }
+.tb-fig-svg { display: block; width: min(100%, 360px); height: auto; overflow: visible; color: var(--tb-line); }
+.tb-figure figcaption {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 20px;
+  width: min(100%, 360px);
+  margin: 4px auto 0;
+  color: var(--tb-grey);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.tb-figure figcaption i { color: var(--tb-ink); font-style: italic; }
+
+.tb-fig-label { color: var(--tb-ink); }
+.tb-fig-value { color: var(--tb-grey); }
+.tb-fig-part { color: #6F7886; }
+.tb-hit { fill: none; stroke: transparent; stroke-width: 12; }
+path.tb-hit { pointer-events: stroke; }
+circle.tb-hit { pointer-events: all; }
+.tb-fig-tag { visibility: hidden; pointer-events: none; color: var(--tb-ink); }
+.tb-fig-tag rect { fill: var(--tb-page); }
+
+/* ── The equation, set as real fractions, with its plot beside it ── */
+.tb-eqrow {
+  display: grid;
+  grid-template-columns: minmax(min-content, 1fr) auto auto;
+  align-items: center;
+  column-gap: 14px;
+  margin: 2px 0 4px;
+}
+.tb-eq {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--tb-ink);
+  font-family: var(--tb-serif);
+  font-size: 20px;
+  white-space: nowrap;
+}
+.tb-eq var { font-size: 1em; }
+.tb-op { margin: 0 0.3em; font-style: normal; }
+.tb-frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 0.12em;
+  vertical-align: middle;
+  line-height: 1.25;
+}
+.tb-frac > :first-child { padding: 0 0.25em 0.1em; border-bottom: 1px solid currentColor; }
+.tb-frac > :last-child { padding: 0.1em 0.25em 0; }
+.tb-eq .tb-scrub { font-family: var(--tb-mono); font-size: 14px; }
+.tb-eqno { color: var(--tb-grey); font: 13px var(--tb-mono); }
+
+.tb-plot-slot svg { display: block; width: 226px; height: auto; color: var(--tb-line); cursor: ew-resize; touch-action: none; user-select: none; -webkit-user-select: none; }
+.tb-plot-axes { color: var(--tb-frame); }
+.tb-plot-rail { stroke-dasharray: 2 3; }
+.tb-plot-tick, .tb-plot-axis, .tb-plot-clip { color: var(--tb-grey); }
+.tb-plot-dot { color: var(--tb-ink); }
+
+/* ── The worked line and its "Test in lab +" ── */
+.tb-try {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 2px 0 14px;
+}
+.tb-worked { margin: 0; color: var(--tb-ink); font-size: 15px; }
+.tb-lab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.6em;
+  height: 38px;
+  padding: 0 18px;
+  border: 1px solid #5A626E;
+  color: var(--tb-ink);
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.tb-lab:hover { background: var(--tb-ink); border-color: var(--tb-ink); color: var(--tb-page); }
+
+/* A clipped output: the worked line, the figure's Vout and the plot's dot go red. */
+.is-clipped .tb-out, .is-clipped .tb-fig-vout, .is-clipped .tb-plot-dot { color: var(--tb-red); }
+
+/* ── Check yourself: one typed answer; a tick when it's right ── */
+.tb-page > p.tb-check { max-width: none; }
+.tb-check { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; margin: 0 0 18px; color: var(--tb-grey); font-size: 13px; }
+.tb-check input {
+  width: 10ch;
+  padding: 1px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--tb-frame);
+  border-radius: 0;
+  background: transparent;
+  color: var(--tb-ink);
+  font: 14px var(--tb-mono);
+}
+.tb-check input::placeholder { color: #5F6875; opacity: 1; }
+.tb-check input:focus { outline: none; border-bottom-color: var(--tb-line); }
+.tb-tick { min-width: 1em; color: var(--tb-ink); font-size: 15px; }
+
+/* ── Key takeaway: a thin frame, square ── */
+.tb-takeaway { margin: 4px 0 20px; padding: 14px 20px 6px; border: 1px solid var(--tb-frame); }
+.tb-takeaway p { margin: 0 0 10px; font-size: 13px; }
+.tb-takeaway-h { display: flex; align-items: center; gap: 12px; color: var(--tb-line); font-size: 11.5px; letter-spacing: 0.14em; }
+
+/* ── Footer: a rule, and the course on the left page ── */
+.tb-foot {
+  min-height: 40px;
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--tb-rule);
+  color: var(--tb-dim);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+/* ── Explorable: terms, scrubbable values, the hot part ── */
+.tb-term { cursor: default; }
+.tb-term.is-hot, .tb-scrub.is-hot { background: var(--tb-wash); color: var(--tb-ink); }
+.tb-scrub {
+  color: var(--tb-ink);
+  cursor: ew-resize;
+  text-decoration: underline dotted;
+  text-decoration-color: rgba(169, 201, 242, 0.75);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tb-scrub.is-dragging { background: var(--tb-wash); }
+.tb-fig-svg .tb-scrub.is-dragging { background: none; color: var(--tb-ink); }
+.is-scrubbing, .is-scrubbing * { cursor: ew-resize; user-select: none; -webkit-user-select: none; }
+.tb-part.is-hot { color: #FFFFFF; filter: drop-shadow(0 0 2.5px rgba(214, 232, 255, 0.7)); }
+.tb-part.is-hot .tb-fig-tag { visibility: visible; }
+
+/* ── Narrower than a spread: the pages stack ── */
+@media (max-width: 1099px) {
+  .tb-spread { grid-template-columns: 1fr; max-width: 760px; }
+  .tb-recto { border-left: 0; border-top: 1px solid var(--tb-frame); }
+}
+@media (max-width: 640px) {
+  .tb-spread { margin: 0; border-width: 0; }
+  .tb-page { padding: 24px 18px 18px; }
+  .tb-eqrow { grid-template-columns: 1fr; row-gap: 8px; justify-items: center; }
+  .tb-eq { font-size: 18px; }
+  .tb-eqno { display: none; }
+  .tb-try { flex-wrap: wrap; }
+}

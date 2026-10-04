@@ -1,0 +1,494 @@
+{
+  "key": "piranha",
+  "model": "gemini-robotics-er-2-preview",
+  "items": [
+    {
+      "id": "R1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            107.8,
+            71.9
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            88.4,
+            194.4
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R2",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            290.7,
+            72.3
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            298.2,
+            193.7
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R3",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            503,
+            69.6
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            517.1,
+            188.8
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "LED1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "?",
+          "pt": [
+            119.3,
+            220.1
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            116.8,
+            279.2
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            145.2,
+            307.5
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            176.2,
+            249.7
+          ],
+          "role": "unknown"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "LED2",
+      "found": true,
+      "leads": [
+        {
+          "pin": "?",
+          "pt": [
+            329.8,
+            219.3
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            391.3,
+            250.1
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            298.2,
+            279.7
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            360.5,
+            309.2
+          ],
+          "role": "unknown"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "LED3",
+      "found": true,
+      "leads": [
+        {
+          "pin": "?",
+          "pt": [
+            538.9,
+            219.4
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            594.3,
+            243.7
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            569.8,
+            303.9
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            515.3,
+            280.9
+          ],
+          "role": "unknown"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "LED4",
+      "found": true,
+      "leads": [
+        {
+          "pin": "?",
+          "pt": [
+            89.4,
+            401.6
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            89.4,
+            490.2
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            151.5,
+            401.6
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            151.5,
+            490.2
+          ],
+          "role": "unknown"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "LED5",
+      "found": true,
+      "leads": [
+        {
+          "pin": "?",
+          "pt": [
+            300.9,
+            490.1
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            390.6,
+            519.2
+          ],
+          "role": "unknown"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "LED6",
+      "found": true,
+      "leads": [
+        {
+          "pin": "?",
+          "pt": [
+            548,
+            404.4
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            597.4,
+            433.3
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            572.6,
+            486.1
+          ],
+          "role": "unknown"
+        },
+        {
+          "pin": "?",
+          "pt": [
+            518,
+            462.9
+          ],
+          "role": "unknown"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R4",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            89.8,
+            489.1
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            106.1,
+            613.6
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.95
+    },
+    {
+      "id": "R5",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            300.6,
+            490.4
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            275.9,
+            640
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R6",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            513.7,
+            490.6
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            542.7,
+            641.5
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.95
+    },
+    {
+      "id": "W1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            178.2,
+            189.5
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            378.7,
+            100.1
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W2",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            390.4,
+            193.1
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            590,
+            102.7
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W3",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            601.1,
+            190.5
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            770.1,
+            100.9
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W4",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            180.7,
+            518.6
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": null,
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W5",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            394,
+            519.8
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": null,
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W6",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            601.2,
+            519
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            765.3,
+            638.8
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    }
+  ]
+}

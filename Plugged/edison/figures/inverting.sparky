@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "name": "Textbook figure 1.1: an inverting amplifier, gain −10",
+  "thumbnail": "",
+  "components": [
+    {"type":"bench_supply","id":"PS1","label":"PS1","values":{"voltage":12,"limit":0.5},"holeRefs":null,"position":{"x":16.4,"z":-1}},
+    {"type":"bench_supply","id":"PS2","label":"PS2","values":{"voltage":0.5,"limit":0.5},"holeRefs":null,"position":{"x":-16.4,"z":1}},
+    {"type":"tl072","id":"U1","label":"U1","values":{},"holeRefs":[{"pin":"out1","col":29,"row":"f"},{"pin":"in1n","col":30,"row":"f"},{"pin":"in1p","col":31,"row":"f"},{"pin":"vneg","col":32,"row":"f"},{"pin":"in2p","col":32,"row":"e"},{"pin":"in2n","col":31,"row":"e"},{"pin":"out2","col":30,"row":"e"},{"pin":"vpos","col":29,"row":"e"}],"position":{"x":0,"z":0}},
+    {"type":"resistor","id":"R1","label":"R1","values":{"resistance":10000},"holeRefs":[{"pin":"lead1","col":26,"row":"h"},{"pin":"lead2","col":30,"row":"h"}],"position":{"x":0,"z":0}},
+    {"type":"resistor","id":"R2","label":"R2","values":{"resistance":100000},"holeRefs":[{"pin":"lead1","col":30,"row":"i"},{"pin":"lead2","col":34,"row":"i"}],"position":{"x":0,"z":0}}
+  ],
+  "wires": [
+    {"id":"W1","startHole":null,"endHole":{"col":59,"row":"tp"},"startCompIdx":0,"startPinIdx":0,"endCompIdx":-1,"endPinIdx":-1,"startPin":"pos","color":15680580},
+    {"id":"W2","startHole":null,"endHole":{"col":59,"row":"tn"},"startCompIdx":0,"startPinIdx":1,"endCompIdx":-1,"endPinIdx":-1,"startPin":"com","color":0},
+    {"id":"W3","startHole":null,"endHole":{"col":59,"row":"bn"},"startCompIdx":0,"startPinIdx":2,"endCompIdx":-1,"endPinIdx":-1,"startPin":"neg","color":2450411},
+    {"id":"W4","startHole":{"col":29,"row":"tp"},"endHole":{"col":29,"row":"a"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":15680580},
+    {"id":"W5","startHole":{"col":32,"row":"j"},"endHole":{"col":32,"row":"bn"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":3900150},
+    {"id":"W6","startHole":{"col":31,"row":"j"},"endHole":{"col":31,"row":"tn"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":0},
+    {"id":"W7","startHole":null,"endHole":{"col":26,"row":"g"},"startCompIdx":1,"startPinIdx":0,"endCompIdx":-1,"endPinIdx":-1,"startPin":"pos","color":16498468},
+    {"id":"W8","startHole":null,"endHole":{"col":4,"row":"tn"},"startCompIdx":1,"startPinIdx":1,"endCompIdx":-1,"endPinIdx":-1,"startPin":"com","color":0},
+    {"id":"W9","startHole":{"col":34,"row":"j"},"endHole":{"col":29,"row":"j"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":2278750},
+    {"id":"W10","startHole":{"col":32,"row":"a"},"endHole":{"col":32,"row":"tn"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":0},
+    {"id":"W11","startHole":{"col":31,"row":"d"},"endHole":{"col":30,"row":"d"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":2278750}
+  ]
+}

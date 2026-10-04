@@ -1,0 +1,20 @@
+/* edison/sections/grades.css — the Grades section (spec §5.2): the push row and
+   one plain table, marks right-aligned in B612 Mono. Tokens only; borders, no shadows. */
+
+[data-route="grades"] .sync { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 28px; }
+[data-route="grades"] .push { font: 600 var(--t-16)/1.5 var(--font-ui); cursor: pointer; }
+[data-route="grades"] .push:disabled { cursor: progress; }
+[data-route="grades"] .push:focus-visible { outline: 2px solid var(--mask); outline-offset: 2px; }
+[data-route="grades"] .sync-status { margin: 0; color: var(--graphite); }
+
+.grade-table {
+  width: 100%; border-collapse: collapse; background: var(--pad); border: 1px solid var(--pad-grid);
+  font: 500 var(--t-16)/1.4 var(--font-dense);
+}
+.grade-table caption { caption-side: top; padding: 0 0 8px; text-align: left; color: var(--graphite-2); }
+.grade-table th, .grade-table td { padding: 10px 16px; text-align: left; border-bottom: 1px solid var(--pad-grid); }
+.grade-table thead th { font-size: var(--t-13); font-weight: 500; color: var(--graphite-2); }
+.grade-table tbody th { font-weight: 500; }
+.grade-table .num { width: 18%; text-align: right; }
+.grade-table td.num { font: 400 var(--t-16)/1.4 var(--font-num); font-variant-numeric: tabular-nums; }
+.grade-table td.missing { font: 500 var(--t-13)/1.4 var(--font-dense); color: var(--graphite-2); }

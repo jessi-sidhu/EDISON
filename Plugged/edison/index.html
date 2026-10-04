@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en" data-ui="edison" data-ui-fixed>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plugged with Edison</title>
+  <meta name="description" content="Ask Edison to build a circuit on a live breadboard, then run it and measure it.">
+  <script src="ui-flag.js"></script>
+  <script src="hero-schematic.js" defer></script>
+  <script src="hero-callouts.js" defer></script>
+  <script src="landing.js" defer></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&amp;display=swap">
+  <link rel="stylesheet" href="landing.css">
+</head>
+<body>
+  <header class="ed-head">
+    <a class="ed-mark" href="index.html" aria-label="Plugged with Edison">PLUGGED WITH EDISON</a>
+  </header>
+
+  <main>
+    <div class="ed-hero">
+      <h1>Breadboard circuits, built and simulated with AI</h1>
+      <!-- An empty box sends the placeholder, Landing.EXAMPLES[0]. -->
+      <form class="ed-ask" aria-label="Ask Edison">
+        <label class="ed-sr" for="ed-ask-input">Ask Edison</label>
+        <input id="ed-ask-input" name="ask" type="text" autocomplete="off" spellcheck="false" enterkeyhint="send"
+               placeholder="Build me a light bulb">
+        <button type="submit">Ask Edison</button>
+      </form>
+    </div>
+
+    <!-- The HUD stage (ref 04). landing.js mounts the hero frame in #hero-stage and
+         runs the sequence (#164): data-hero on the stage, the schematic drawn in
+         #hero-stage then moved into the inset, the current [data-step] marked,
+         and .ed-open shown at the end. -->
+    <section class="ed-stage" aria-label="Edison builds a light bulb">
+      <div id="hero-stage"></div>
+      <span class="ed-bracket ed-tl" aria-hidden="true"></span>
+      <span class="ed-bracket ed-tr" aria-hidden="true"></span>
+      <span class="ed-bracket ed-bl" aria-hidden="true"></span>
+      <span class="ed-bracket ed-br" aria-hidden="true"></span>
+      <div class="ed-hud-title">
+        <p class="ed-hud-name">BREADBOARD</p>
+        <p class="ed-steps"><span data-step>SCHEMATIC</span> <span class="ed-slash" aria-hidden="true">/</span> <span data-step>SKETCH</span> <span class="ed-slash" aria-hidden="true">/</span> <span data-step>SIMULATE</span></p>
+      </div>
+      <a class="ed-hud-link" href="course.html">ENSC 220 COURSE <span aria-hidden="true">+</span></a>
+      <figure class="ed-inset" hidden>
+        <figcaption>SCHEMATIC VIEW</figcaption>
+      </figure>
+      <a class="ed-open" href="../circuit3d/index.html?ui=edison&amp;open=edison/demo/led.sparky">Open in the simulator <span aria-hidden="true">+</span></a>
+    </section>
+  </main>
+
+  <footer class="ed-foot">
+    <p>Plugged, built for Edison. Not an official SFU site.</p>
+    <a href="../landing.html?ui=classic">Switch to classic UI</a>
+  </footer>
+</body>
+</html>

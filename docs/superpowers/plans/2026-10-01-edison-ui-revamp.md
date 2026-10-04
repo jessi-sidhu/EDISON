@@ -10,7 +10,7 @@
 - **The classic UI gets only additive hooks:** two tags in `index.html`, a CSS-variable read in `scene.js`, `?circuit=` in `viewer.html`, `?lab=` in `labs.js`, two links, and two dummy routes.
 - **Data comes from JS modules** (UMD, testable in Node), because the static server never serves `.json`.
 
-**Tech stack:** vanilla JS (UMD modules), CSS custom properties, three.js r128 (existing), Google Fonts (Barlow, Barlow Condensed, Barlow Semi Condensed, B612 Mono, STIX Two Text), Node `http` server (existing), Vitest, Playwright.
+**Tech stack:** vanilla JS (UMD modules), CSS custom properties, three.js r128 (existing), Google Fonts (Barlow, Barlow Condensed, Barlow Semi Condensed, B612, STIX Two Text), Node `http` server (existing), Vitest, Playwright.
 
 **Spec:** `docs/superpowers/specs/2026-10-01-edison-ui-revamp-design.md`. Read §3 (the tells), §4 (tokens) and §4a (the steal map) before any visual work.
 
@@ -34,7 +34,7 @@
   | `--ch2` | `#38B2D4` |
   | `--sfu` | `#A6192E` |
 
-- **Fonts:** Barlow 400/500/600, Barlow Semi Condensed, Barlow Condensed 600, B612 Mono (measured values only), STIX Two Text (textbook only).
+- **Fonts:** Barlow 400/500/600, Barlow Semi Condensed, Barlow Condensed 600, B612 (measured values only), STIX Two Text (textbook only).
 - **Banned** (enforced by the design guard):
   - Inter, Space Grotesk, Geist, Instrument Serif, Fraunces;
   - `text-transform: uppercase`, `backdrop-filter`, `background-clip: text`;
@@ -322,7 +322,7 @@ html[data-ui="edison"] {
   --font-ui: 'Barlow', system-ui, sans-serif;
   --font-dense: 'Barlow Semi Condensed', 'Barlow', sans-serif;
   --font-display: 'Barlow Condensed', 'Barlow', sans-serif;
-  --font-num: 'B612 Mono', ui-monospace, monospace;
+  --font-num: 'B612', ui-monospace, monospace;
   --font-text: 'STIX Two Text', Georgia, serif;
   --t-13: 13px; --t-16: 16px; --t-20: 20px; --t-25: 25px; --t-31: 31px; --t-39: 39px; --t-49: 49px;
   --r-control: 2px; --r-panel: 4px;
@@ -642,7 +642,7 @@ Sample student names are "Student A" to "Student L": invented and plainly sample
 - [ ] **Step 3: Build the shell** (spec §5.2 wireframe):
   - **Left nav:** Barlow 16 px, the current item marked with a 2 px `--mask` left bar plus `aria-current="page"`. That's a state indicator, not decoration, so it isn't the "coloured left border on cards" tell.
   - **The banner (Astranis):** a full-bleed `<img>`, a still render of our breadboard, saved as `edison/img/course-banner.jpg`. Grab it with Playwright from `circuit3d/viewer.html?circuit=circuit3d/labs/lab1.sparky` at 1600×500 with the camera at `[18, 6, 22]`, via a one-off script in the scratchpad (not committed). The title sits over it in Barlow Condensed 49 px with a 6 px `--sfu` rule on the left.
-  - **Home:** the procedure card (Epsilon3). A header row holds `LAB-02` (B612 Mono 13 px), the title (Barlow 600 20 px) and a week tag (13 px, outlined). Step rows each hold a number, the text and a status pill (*Passed* in `--mask`, *Not yet* outlined graphite-2, *Check failed* in `--bus-red`), separated by 1 px `--pad-grid` rules. The footer reads "Status: building", with the stepper (Pre-lab, Build, Measure, Analyze, Submit) as 5 dots joined by a 1 px line, the current one filled. Announcements are a `<ul>` of date and text.
+  - **Home:** the procedure card (Epsilon3). A header row holds `LAB-02` (B612 13 px), the title (Barlow 600 20 px) and a week tag (13 px, outlined). Step rows each hold a number, the text and a status pill (*Passed* in `--mask`, *Not yet* outlined graphite-2, *Check failed* in `--bus-red`), separated by 1 px `--pad-grid` rules. The footer reads "Status: building", with the stepper (Pre-lab, Build, Measure, Analyze, Submit) as 5 dots joined by a 1 px line, the current one filled. Announcements are a `<ul>` of date and text.
   - **Labs:** a `<table>`: Lab, Title, Due, Status, plus the action.
   - **Footer:** the demo line.
   - **Stubs:** each `sections/x.js` registers `{ title, render(el){ el.innerHTML = '<h2>Title</h2><p>This section is being built.</p>' } }`. The stubs are replaced in E7–E9.
@@ -813,7 +813,7 @@ If Step 1 shows that V(R2) or I(R3) differ on the real board (a different topolo
 - [ ] **Step 1: Failing tests**
   - **Unit** (the real server module, as `test/ai-timeout.test.js` does): `POST /api/course/canvas/sync` returns 200 with `{ ok: true, demo: true }` and `syncedAt` as a parseable ISO date within 5 s of now. A `GET` on the same path returns 404 or 405, not 200.
   - **Browser:**
-    - `#grades` shows a `<table>` with a caption containing "Sample data", 12 student rows, and lab and pre-lab columns, with numbers in B612 Mono.
+    - `#grades` shows a `<table>` with a caption containing "Sample data", 12 student rows, and lab and pre-lab columns, with numbers in B612.
     - Clicking "Push grades to Canvas" sets the status to "Synced with Canvas just now (demo)".
     - With `page.route('**/api/course/canvas/sync', r => r.fulfill({ status: 404 }))`, the same click still shows "(demo)" and no error.
     - No console errors (allow the routed 404).
@@ -825,7 +825,7 @@ If Step 1 shows that V(R2) or I(R3) differ on the real board (a different topolo
   }
 ```
 
-- [ ] **Step 3: The section.** A Barlow Semi Condensed table with numeric cells right-aligned in B612 Mono and the caption "Sample data. Names are invented." The button is solid `--mask`. On a failure (`!res.ok` or a network error), fall back to a local `{ syncedAt: new Date().toISOString(), demo: true }`.
+- [ ] **Step 3: The section.** A Barlow Semi Condensed table with numeric cells right-aligned in B612 and the caption "Sample data. Names are invented." The button is solid `--mask`. On a failure (`!res.ok` or a network error), fall back to a local `{ syncedAt: new Date().toISOString(), demo: true }`.
 - [ ] **Step 4:** tests pass, then `/ship` (full e2e: `server.js` changed).
 
 ---

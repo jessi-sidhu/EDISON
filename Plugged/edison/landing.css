@@ -1,0 +1,290 @@
+/* edison/landing.css — the Edison landing page (issue #166, landing v3): the
+   top of the page (wordmark, headline, Ask box) and under it a HUD stage for
+   the hero (ref docs/design/landing-v3/04). Only this page goes monochrome, so
+   its palette lives here rather than in tokens.css. Always black: no light
+   mode. DM Mono everywhere, 1 px lines, square corners, no shadows, no
+   gradients. The only motion is the hero sequence's (#164, at the end):
+   the schematic drawing, the frame dimming, the FLIP into the inset and the
+   end button fading in. */
+
+html[data-ui="edison"] {
+  --ed-paper: #101010;
+  --ed-ink: #F4F4F4;
+  --ed-grey: #676767;   /* LINES only: as text on black it is 3.6:1, under AA */
+  --ed-hint: #8A8A8A;   /* grey TEXT on black: 5.6:1 */
+  --ed-mono: 'DM Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --ed-head: 64px;
+  --ed-edge: 32px;      /* the corner brackets' inset from the stage's edges */
+  --ed-arm: 24px;       /* a corner bracket's arms */
+  --ed-hud-x: calc(var(--ed-edge) + var(--ed-arm) + 16px);   /* where the HUD's text starts, clear of a bracket */
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ed-paper);
+  color: var(--ed-ink);
+  font: 400 16px/1.6 var(--ed-mono);
+  -webkit-font-smoothing: antialiased;
+}
+input, button { font: inherit; color: inherit; }
+::selection { background: var(--ed-ink); color: var(--ed-paper); }
+:focus-visible { outline: 1px solid var(--ed-ink); outline-offset: 3px; }
+.ed-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ── The wordmark, small and centred (Diode) ── */
+.ed-head { height: var(--ed-head); padding-top: 36px; text-align: center; line-height: 24px; }
+.ed-mark { font-size: 15px; font-weight: 500; letter-spacing: 0.06em; color: inherit; text-decoration: none; }
+.ed-mark:hover { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+
+/* ── The first screen: the headline and the prompt, then the stage fills the
+   rest of it (420 to 680 px), so its bottom row stays on a laptop's screen ── */
+main {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--ed-head));
+  min-height: calc(100svh - var(--ed-head));
+}
+.ed-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: clamp(40px, 8vh, 88px);
+}
+.ed-hero h1 {
+  max-width: 32ch;
+  margin: 0;
+  padding: 0 20px;
+  font-size: clamp(28px, 3.1vw, 44px);
+  font-weight: 300;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-align: center;
+}
+
+.ed-ask {
+  display: flex;
+  width: min(560px, calc(100% - 40px));
+  height: 48px;
+  margin-top: clamp(28px, 5vh, 48px);
+  border: 1px solid var(--ed-grey);
+}
+.ed-ask:focus-within { border-color: var(--ed-ink); }
+.ed-ask input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  font-size: 15px;
+}
+.ed-ask input:focus { outline: none; }
+.ed-ask input::placeholder { color: var(--ed-hint); opacity: 1; }
+.ed-ask button {
+  padding: 0 20px;
+  border: 0;
+  border-left: 1px solid var(--ed-grey);
+  border-radius: 0;
+  background: transparent;
+  font-size: 15px;
+  cursor: pointer;
+}
+.ed-ask:focus-within button { border-left-color: var(--ed-ink); }
+.ed-ask button:hover { background: var(--ed-ink); color: var(--ed-paper); }
+.ed-ask button:focus-visible { outline-offset: -5px; }
+
+/* ── The stage (ref 04): edge to edge, black, no border. Four corner brackets
+   frame it; the caps HUD text sits inside them. The hero frame fills
+   #hero-stage underneath. ── */
+.ed-stage {
+  position: relative;
+  flex: 1 0 auto;
+  min-height: 420px;
+  max-height: 680px;
+  margin-top: 40px;
+  background: var(--ed-paper);
+}
+#hero-stage { position: absolute; inset: 0; }
+
+.ed-bracket {
+  position: absolute;
+  z-index: 1;
+  width: var(--ed-arm);
+  height: var(--ed-arm);
+  border: 0 solid var(--ed-grey);
+}
+.ed-tl { top: var(--ed-edge); left: var(--ed-edge); border-top-width: 1px; border-left-width: 1px; }
+.ed-tr { top: var(--ed-edge); right: var(--ed-edge); border-top-width: 1px; border-right-width: 1px; }
+.ed-bl { bottom: var(--ed-edge); left: var(--ed-edge); border-bottom-width: 1px; border-left-width: 1px; }
+.ed-br { bottom: var(--ed-edge); right: var(--ed-edge); border-bottom-width: 1px; border-right-width: 1px; }
+
+/* Caps labels are written in capitals in the HTML (the design guard bans
+   text-transform). Labels in the ink, sublines in the grey. */
+.ed-hud-title, .ed-hud-link, .ed-inset { position: absolute; z-index: 1; }
+.ed-hud-title { top: calc(var(--ed-edge) - 4px); left: var(--ed-hud-x); }
+.ed-hud-title p { margin: 0; white-space: nowrap; }
+.ed-hud-name { font-size: 20px; line-height: 24px; letter-spacing: 0.1em; }
+.ed-steps { margin-top: 8px; font-size: 12px; line-height: 16px; letter-spacing: 0.12em; color: var(--ed-hint); }
+.ed-steps [data-current] { color: var(--ed-ink); }   /* L4 marks the step as it starts; no transition */
+.ed-slash { margin: 0 0.3em; }
+
+.ed-hud-link {
+  bottom: calc(var(--ed-edge) - 3px);
+  left: var(--ed-hud-x);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.12em;
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ed-hud-link:hover { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+
+/* The inset: a 1 px frame bottom right with its caption above it. It keeps
+   the UA's [hidden] (no display here); L3 unhides it and fills it. */
+.ed-inset {
+  right: var(--ed-hud-x);
+  bottom: var(--ed-edge);
+  width: 288px;
+  height: 162px;
+  margin: 0;
+  border: 1px solid var(--ed-grey);
+  background: var(--ed-paper);   /* opaque, so the schematic reads over the board */
+}
+.ed-inset figcaption {
+  position: absolute;
+  right: -1px;
+  bottom: 100%;
+  margin-bottom: 10px;
+  padding-left: 8px;
+  background: var(--ed-paper);
+  font-size: 11px;
+  line-height: 16px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+/* ── The hero sequence (#164). landing.js sets data-hero on the stage, one
+   TIMELINE stage at a time; everything here keys off it. ── */
+#hero-stage iframe {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  pointer-events: none;
+  color-scheme: normal;
+  transition: opacity 700ms cubic-bezier(0.65, 0, 0.35, 1);   /* back up with the FLIP */
+}
+.ed-stage[data-hero="schematic"] #hero-stage iframe { opacity: 0.15; transition-duration: 900ms; }
+
+/* The schematic (edison/hero-schematic.js): full size over the frame while it
+   draws, then in the inset. Its strokes scale with it. */
+.ed-schematic { display: block; overflow: visible; }
+#hero-stage > .ed-schematic { position: absolute; inset: 0; width: 100%; height: 100%; transform-origin: 0 0; }
+.ed-inset > .ed-schematic { width: 100%; height: 100%; stroke-width: 3.4; }   /* about 1 px at 288 × 162 */
+
+/* The pen: each stroke draws from its --d over its --t; then the dots and
+   labels fade in on their --d. Only while data-hero is schematic, so it is
+   drawn in every other stage. */
+@media (prefers-reduced-motion: no-preference) {
+  .ed-stage[data-hero="schematic"]:not([data-hero-instant]) .ed-schematic path {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: ed-draw var(--t) linear var(--d) forwards;
+  }
+  .ed-stage[data-hero="schematic"]:not([data-hero-instant]) .ed-schematic :is(circle, text) {
+    opacity: 0;
+    animation: ed-fade 250ms ease-out var(--d) forwards;
+  }
+}
+@keyframes ed-draw { to { stroke-dashoffset: 0; } }
+@keyframes ed-fade { to { opacity: 1; } }
+
+/* The callouts (#168, ref 04): one SVG over the frame, drawn by
+   edison/hero-callouts.js. A dot on the part, a thin line, a caps title in
+   the ink over a grey subline; each fades in and out with its stage. */
+.ed-callouts { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.ed-callout { opacity: 0; transition: opacity 300ms ease; }
+.ed-callout.is-on { opacity: 1; }
+.ed-callout-line { fill: none; stroke: rgb(244 244 244 / 0.7); stroke-width: 1px; }
+.ed-callout-under { fill: none; stroke: var(--ed-paper); stroke-width: 3px; }   /* beneath the line: it reads on the white board too */
+.ed-callout-dot { fill: var(--ed-ink); stroke: var(--ed-paper); stroke-width: 3px; paint-order: stroke; }
+.ed-callout-label, .ed-callout-sub {
+  font-family: var(--ed-mono);
+  paint-order: stroke;                 /* a halo of the page's black, so they read over the board */
+  stroke: var(--ed-paper);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.ed-callout-label { font-size: 12px; letter-spacing: 0.12em; fill: var(--ed-ink); }
+.ed-callout-sub { font-size: 11px; letter-spacing: 0.04em; fill: var(--ed-hint); }
+
+/* The end button: a square Diode button at the stage's bottom centre. Hidden
+   until done, then it fades in; it goes at once on a replay. */
+.ed-open {
+  position: absolute;
+  z-index: 2;
+  bottom: var(--ed-edge);
+  left: 50%;
+  translate: -50% 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6em;
+  height: 40px;
+  padding: 0 20px;
+  border: 1px solid var(--ed-grey);
+  background: var(--ed-paper);
+  color: var(--ed-ink);
+  font-size: 14px;
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+}
+.ed-stage[data-hero="done"] .ed-open { opacity: 1; visibility: visible; transition: opacity 600ms ease-out; }
+.ed-open:hover { background: var(--ed-ink); color: var(--ed-paper); border-color: var(--ed-ink); }
+.ed-open:focus-visible { outline-offset: 3px; }
+/* Too narrow for it to sit centred beside the inset: it moves to the HUD's
+   column, just above the course link. (A phone has no inset; see below.) */
+@media (min-width: 721px) and (max-width: 1000px) {
+  .ed-open { left: var(--ed-hud-x); translate: none; bottom: calc(var(--ed-edge) + 32px); }
+}
+
+/* Landing.seek(): straight to a stage's end state. */
+.ed-stage[data-hero-instant], .ed-stage[data-hero-instant] * { transition: none !important; animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .ed-stage, .ed-stage * { transition: none !important; animation: none !important; }
+}
+
+/* ── The footer: one quiet line ── */
+.ed-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  column-gap: 1ch;
+  padding: 32px 16px 40px;
+  color: var(--ed-hint);
+  font-size: 12px;
+  text-align: center;
+}
+.ed-foot p { margin: 0; }
+.ed-foot a { color: inherit; text-underline-offset: 4px; }
+.ed-foot a:hover { color: var(--ed-ink); }
+
+/* ── A phone: a 16 px gutter for the HUD, and no inset ── */
+@media (max-width: 720px) {
+  html[data-ui="edison"] { --ed-head: 56px; --ed-edge: 16px; --ed-arm: 16px; --ed-hud-x: calc(var(--ed-edge) + var(--ed-arm) + 12px); }
+  .ed-head { padding-top: 28px; }
+  .ed-mark { font-size: 13px; }
+  .ed-ask button { padding: 0 14px; }
+  .ed-stage { margin-top: 24px; }
+  .ed-hud-name { font-size: 16px; line-height: 20px; }
+  .ed-steps { font-size: 11px; }
+  .ed-hud-link { font-size: 11px; }
+  .ed-inset { display: none; }
+  .ed-open { bottom: calc(var(--ed-edge) + 32px); }   /* clear of the course link */
+}

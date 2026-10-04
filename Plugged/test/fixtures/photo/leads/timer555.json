@@ -1,0 +1,279 @@
+{
+  "key": "timer555",
+  "model": "gemini-robotics-er-2-preview",
+  "items": [
+    {
+      "id": "R1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            329.2,
+            219
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            298,
+            220.7
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.95
+    },
+    {
+      "id": "R2",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            358.5,
+            463.5
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            510.4,
+            463.8
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.95
+    },
+    {
+      "id": "W1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            283.9,
+            100.8
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            296.5,
+            193.4
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W2",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            403.8,
+            99.6
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            414.1,
+            195.5
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W3",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            295.6,
+            191
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": null,
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W4",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            270.1,
+            286.3
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            357.5,
+            286.3
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W5",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            330,
+            258.2
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            929.4,
+            252
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W6",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            266.6,
+            311.3
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            266.9,
+            402.8
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W7",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            386,
+            430.2
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            418.4,
+            430.2
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W8",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            451.6,
+            311.3
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            451.6,
+            401.5
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "W9",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            265.7,
+            437.2
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            328.1,
+            435.5
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.95
+    },
+    {
+      "id": "W10",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            335.4,
+            532.9
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            449.7,
+            526.7
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    }
+  ]
+}

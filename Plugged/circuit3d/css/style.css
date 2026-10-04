@@ -268,10 +268,40 @@ html, body {
 #photo-cols { margin-right: auto; font-family: inherit; font-size: 12px; }
 #photo-ok:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
 
+/* Sample picker (js/photo.js, #182): a tile per sample, its photo, title and credit. */
+#photo-samples {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  width: min(960px, calc(100vw - 96px));
+  min-height: 0;
+  overflow-y: auto;
+}
+.photo-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.photo-tile:hover { border-color: var(--accent); }
+.photo-tile img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 4px; }
+.photo-tile b     { font-size: 13px; }
+.photo-tile small { font-size: 11px; color: var(--text-sub); }
+
 /* Confirm screen (js/photo-confirm.js): the flattened photo, the list beside it.
    min-height: 0 passes the card's height cap down, so a long #photo-parts scrolls (#158). */
 #photo-confirm { display: flex; gap: 12px; align-items: stretch; min-height: 0; }
 #photo-confirm-canvas { display: block; position: static; border: 0; padding: 0; border-radius: 0; cursor: pointer; }
+.photo-shot { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+#photo-credit { font-size: 11px; color: var(--text-sub); }
+#photo-credit:empty { display: none; }
 .photo-side { display: flex; flex-direction: column; gap: 8px; width: 252px; min-height: 0; }
 .photo-side .photo-btns { flex-wrap: wrap; justify-content: stretch; }
 .photo-side .btn-secondary { flex: 1; font-size: 11px; padding: 5px 6px; }

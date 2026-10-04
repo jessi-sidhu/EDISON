@@ -4,17 +4,29 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sparky — Circuit Preview</title>
+  <link rel="stylesheet" href="../edison/tokens.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #dcdad4; }
     #canvas-wrap { width: 100%; height: 100%; position: relative; }
     #canvas { display: block; width: 100%; height: 100%; }
+    /* ?mode=hero (the Edison landing): opaque on the landing's black, and the
+       board fades out into it towards the frame's edge */
+    html[data-mode="hero"], html[data-mode="hero"] body { background: #101010; }
+    html[data-mode="hero"] #canvas {
+      -webkit-mask-image: radial-gradient(closest-side, #000 74%, transparent);
+              mask-image: radial-gradient(closest-side, #000 74%, transparent);
+    }
   </style>
+  <script>if (new URLSearchParams(location.search).get('mode') === 'hero') document.documentElement.dataset.mode = 'hero';</script>
 </head>
 <body>
   <div id="canvas-wrap">
     <canvas id="canvas"></canvas>
   </div>
+
+  <!-- Edison UI flag; also gates ?circuit= below -->
+  <script src="../edison/ui-flag.js"></script>
 
   <!-- Three.js r128 (same as main editor) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -50,14 +62,41 @@
   <script src="js/board-geometry.js"></script>
   <script src="js/breadboard.js"></script>
   <script src="js/components.js"></script>
+  <script src="js/hero-model.js"></script>
 
   <script>
   (function () {
     const App = window.App;
 
+    // ?mode=hero (the Edison landing, issues #163, #167, #171 and #174): the glass
+    // board, the circuit drawn in as line art that solidifies and lights,
+    // driven through window.Hero (js/hero-model.js); &stage=empty starts bare.
+    const query = new URLSearchParams(location.search);
+    const hero  = query.get('mode') === 'hero'
+      ? HeroModel.create(App, { ink: query.get('ink'), reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, stage: HeroModel.startStage(location.search) })
+      : null;
+
+    // The hero's bloom (#174): Three r128's post-processing, only in hero
+    // mode, run in this order; resolves true once all are in, false if one
+    // fails or they take over 4 s (a slow CDN costs the bloom, not the hero).
+    const FX = 'https://unpkg.com/three@0.128.0/examples/js/';
+    const fx = !hero ? null : Promise.race([
+      Promise.all(['shaders/CopyShader', 'shaders/LuminosityHighPassShader', 'postprocessing/EffectComposer',
+        'postprocessing/ShaderPass', 'postprocessing/RenderPass', 'postprocessing/UnrealBloomPass'].map(name => new Promise(resolve => {
+        const s = document.createElement('script');
+        s.src = FX + name + '.js';
+        s.async = false;   // in order
+        s.onload = () => resolve(true);
+        s.onerror = () => resolve(false);
+        document.head.appendChild(s);
+      }))).then(all => all.every(Boolean)),
+      new Promise(resolve => setTimeout(() => resolve(false), 4000)),
+    ]);
+
     // ── Create breadboard and add to scene ──
     const bb = App.createBreadboard();
     App.scene.add(bb.group);
+    if (hero) hero.board(bb);
 
     // ── Wire arc builder (replicated from app.js) ──
     function buildWireGroup(start, end, hexColor) {
@@ -91,11 +130,14 @@
       return g;
     }
 
-    // ── Load demo.sparky and render the circuit ──
-    fetch('../demo.sparky')
+    // ── Load ?circuit= (allow-listed) or demo.sparky, and render it ──
+    const want = new URLSearchParams(location.search).get('circuit');
+    const src  = want && UiFlag.allowedCircuit(want) ? `../${want}` : '../demo.sparky';
+    const loading = fetch(src)
       .then(r => r.json())
       .then(data => {
         const components = [];
+        if (hero) hero.circuit(data);   // its circuit paths, for the build-up (#171)
 
         // Place components
         for (const c of (data.components || [])) {
@@ -116,6 +158,7 @@
           }
           if (result) {
             App.scene.add(result.group);
+            if (hero) hero.part(def, result.group, c.label);
             components.push({ type: c.type, pins: result.pins });
           } else {
             components.push(null);
@@ -144,23 +187,30 @@
           }
 
           if (startWorld && endWorld) {
-            App.scene.add(buildWireGroup(startWorld, endWorld, color));
+            const wire = buildWireGroup(startWorld, endWorld, color);
+            App.scene.add(wire);
+            if (hero) hero.wire(wire, !!(w.startHole && w.endHole));
           }
         }
-      })
-      .catch(err => console.warn('Could not load demo.sparky:', err));
+      });
+    loading.catch(err => console.warn('Could not load ' + src + ':', err));
+    if (hero) window.Hero = hero.start(loading, fx);
 
     // ── Render loop ──
     function animate() {
       requestAnimationFrame(animate);
       App.controls.update();
-      App.renderer.render(App.scene, App.camera);
+      if (hero) hero.render();   // through its bloom
+      else App.renderer.render(App.scene, App.camera);
     }
     animate();
 
     // ── Slow auto-rotate for a showcase feel ──
     App.controls.autoRotate = true;
     App.controls.autoRotateSpeed = 0.8;
+
+    // ?nozoom=1 (the textbook's figures): the wheel scrolls the page around the frame.
+    if (new URLSearchParams(location.search).get('nozoom') === '1') App.controls.enableZoom = false;
   })();
   </script>
 </body>

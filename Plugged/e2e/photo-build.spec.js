@@ -78,10 +78,13 @@ async function stub(page, reading) {
 
 const editorReady = page => page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
 
-// 📷 → Use sample photo → the confirm screen.
+// 📷 → Use sample photo → the picker's demo-board tile (#182) → the confirm screen.
 async function openConfirm(page) {
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
+  const tile = page.locator('#photo-samples [data-sample="demo-board"]');
+  await expect(tile, 'Use sample photo opens the sample picker (#182)').toBeVisible();
+  await tile.click();
   await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen').toBeVisible();
 }
 

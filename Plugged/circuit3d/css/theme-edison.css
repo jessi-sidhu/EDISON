@@ -1,0 +1,189 @@
+/* ─────────────────────────────────────────────
+   theme-edison.css — the editor's Edison skin (spec §5.4, edison/DESIGN.md).
+   Every rule is scoped to html[data-ui="edison"], so classic is untouched.
+   Pad surfaces with 1 px --pad-grid rules, bezel instruments, no shadows.
+   Colours come from edison/tokens.css; the few shades below are derived
+   from them and named once here.
+───────────────────────────────────────────── */
+
+html[data-ui="edison"] {
+  --bg-canvas: var(--bezel); --bg-sidebar: var(--pad); --bg-topbar: var(--pad);
+  --border: var(--pad-grid); --border-dark: #B7C7A9; --text-primary: var(--graphite);
+  --text-muted: var(--graphite-2); --text-sub: var(--graphite-2); --text-secondary: var(--graphite);
+  --accent: var(--mask); --accent-hover: #155234; --danger: var(--bus-red);
+  --selected-bg: #D7E6CC; --selected-border: var(--mask);
+  --ed-sheet: #F4F7F0;          /* inputs and cards on the pad (lighter sheet) */
+  --ed-bezel-rule: #3A4248;     /* a bezel's edge when it sits on the bezel scene */
+  --ed-on-bezel: var(--pad);  --ed-on-bezel-2: #AEB8B0;
+  --ed-ok-bezel: #7CCB9F;  --ed-bad-bezel: #F2868C;
+}
+
+/* ── Type ───────────────────────────────────── */
+html[data-ui="edison"] body, html[data-ui="edison"] button, html[data-ui="edison"] input,
+html[data-ui="edison"] textarea, html[data-ui="edison"] #sparky-panel { font-family: var(--font-ui); }
+html[data-ui="edison"] body { font-size: var(--t-13); }
+html[data-ui="edison"] .topbar-brand, html[data-ui="edison"] .lpm-name, html[data-ui="edison"] .sparky-welcome-title,
+html[data-ui="edison"] #inspector-label { font-family: var(--font-display); font-weight: 600; letter-spacing: 0; }
+html[data-ui="edison"] .sidebar-section-label, html[data-ui="edison"] .comp-group-label,
+html[data-ui="edison"] .inspector-title {
+  font-family: var(--font-ui); font-size: var(--t-13); font-weight: 600; letter-spacing: 0;
+  text-transform: none; color: var(--graphite);
+}
+
+/* ── Top bar ────────────────────────────────── */
+html[data-ui="edison"] #topbar { box-shadow: none; border-bottom-color: var(--pad-grid); }
+html[data-ui="edison"] .topbar-brand { font-size: var(--t-20); }
+html[data-ui="edison"] .topbar-brand svg { display: none; }
+html[data-ui="edison"] .topbar-name-sep { color: var(--graphite-2); }
+html[data-ui="edison"] #circuit-name-field { font-size: var(--t-16); border-radius: var(--r-control); }
+html[data-ui="edison"] #circuit-name-field:focus { background: var(--ed-sheet); box-shadow: none; }
+html[data-ui="edison"] .btn-simulate, html[data-ui="edison"] .btn-stop, html[data-ui="edison"] .pending-accept {
+  font-family: var(--font-ui); font-size: var(--t-13); font-weight: 600; border-radius: var(--r-control);
+  background: var(--mask); color: #FFFFFF; box-shadow: none;
+}
+html[data-ui="edison"] .btn-simulate:hover, html[data-ui="edison"] .pending-accept:hover { background: var(--accent-hover); box-shadow: none; }
+html[data-ui="edison"] .btn-simulate:active { transform: none; }
+html[data-ui="edison"] .btn-stop { background: var(--bus-red); }
+html[data-ui="edison"] .btn-stop:hover { background: #A8322F; }
+/* The outlined half of the solid + outlined pair */
+html[data-ui="edison"] .btn-secondary, html[data-ui="edison"] .btn-colouring, html[data-ui="edison"] .pending-decline {
+  font-size: var(--t-13); font-weight: 500; color: var(--mask); background: transparent;
+  border: 1px solid var(--mask); border-radius: var(--r-control);
+}
+html[data-ui="edison"] .btn-secondary:hover, html[data-ui="edison"] .btn-colouring:hover,
+html[data-ui="edison"] .pending-decline:hover { background: var(--selected-bg); border-color: var(--mask); color: var(--accent-hover); }
+html[data-ui="edison"] .btn-colouring[aria-pressed="true"] { background: var(--selected-bg); color: var(--accent-hover); }
+html[data-ui="edison"] #csv-export-btn, html[data-ui="edison"] #thevenin-btn { color: var(--mask); }
+
+/* ── Parts sidebar ──────────────────────────── */
+html[data-ui="edison"] #part-search { font-size: var(--t-13); background: var(--ed-sheet); border-color: var(--border-dark); border-radius: var(--r-control); }
+html[data-ui="edison"] .comp-item { border-radius: var(--r-control); }
+html[data-ui="edison"] .comp-item:not(.active):hover { background: var(--selected-bg); border-color: var(--border-dark); }
+html[data-ui="edison"] .comp-item-icon { background: var(--ed-sheet); border-color: var(--pad-grid); border-radius: var(--r-control); }
+html[data-ui="edison"] .comp-item.active .comp-item-icon { background: transparent; border-color: #FFFFFF; }
+html[data-ui="edison"] .comp-item-name { font-size: var(--t-13); }
+html[data-ui="edison"] .comp-item-sub { font-size: var(--t-13); color: var(--graphite-2); }
+html[data-ui="edison"] .comp-item.active .comp-item-sub { color: #FFFFFF; }
+html[data-ui="edison"] .sidebar-help p { font-size: var(--t-13); color: var(--graphite-2); }
+html[data-ui="edison"] kbd { font-size: var(--t-13); background: var(--ed-sheet); border-radius: var(--r-control); }
+
+/* ── Viewport (a bezel) and what floats on it ── */
+html[data-ui="edison"] #canvas-wrap { border: 1px solid rgba(0, 0, 0, 0.4); border-radius: 0; }
+html[data-ui="edison"] #hint-box, html[data-ui="edison"] #hole-label, html[data-ui="edison"] #rotate-badge,
+html[data-ui="edison"] #clear-all-btn, html[data-ui="edison"] #reset-cam-btn {
+  font-size: var(--t-13); background: var(--pad); border: 1px solid var(--border-dark);
+  border-radius: var(--r-control); color: var(--graphite); box-shadow: none;
+}
+html[data-ui="edison"] #clear-all-btn { color: var(--bus-red); }
+html[data-ui="edison"] #clear-all-btn:hover { background: var(--ed-sheet); border-color: var(--bus-red); color: #A8322F; }
+html[data-ui="edison"] #reset-cam-btn:hover { background: var(--ed-sheet); border-color: var(--mask); }
+
+/* Instruments: results, mistakes, scope and meter sit on the bezel. */
+html[data-ui="edison"] #sim-results, html[data-ui="edison"] #mistakes-panel, html[data-ui="edison"] #scope,
+html[data-ui="edison"] #meter-display {
+  background: var(--bezel); border: 1px solid var(--ed-bezel-rule); border-radius: 0;
+  box-shadow: none; color: var(--ed-on-bezel); font-size: var(--t-13);
+}
+html[data-ui="edison"] .sim-info, html[data-ui="edison"] .mistake-labels { color: var(--ed-on-bezel); }
+html[data-ui="edison"] .sim-path, html[data-ui="edison"] .sim-clock, html[data-ui="edison"] .mistake-info .mistake-why { color: var(--ed-on-bezel-2); }
+html[data-ui="edison"] .sim-clock { font-family: var(--font-num); font-variant-numeric: tabular-nums; border-bottom-color: var(--ed-bezel-rule); }
+html[data-ui="edison"] .sim-on, html[data-ui="edison"] .mistake-none { color: var(--ed-ok-bezel); }
+html[data-ui="edison"] .sim-warn, html[data-ui="edison"] .mistake-why { color: var(--ch1); }
+html[data-ui="edison"] .sim-err, html[data-ui="edison"] .mistake-icon { color: var(--ed-bad-bezel); }
+html[data-ui="edison"] .mistake-info .mistake-icon { color: var(--ch2); }
+html[data-ui="edison"] .mistake-row { border-radius: 0; }
+html[data-ui="edison"] .mistake-row + .mistake-row { border-top-color: var(--ed-bezel-rule); }
+html[data-ui="edison"] .mistake-row:hover { background: #2A3034; }
+html[data-ui="edison"] #scope { font: 400 var(--t-13)/1.5 var(--font-num); font-variant-numeric: tabular-nums; }
+html[data-ui="edison"] #scope-canvas { border-radius: 0; }
+html[data-ui="edison"] #scope-ch1 { color: var(--ch1); }
+html[data-ui="edison"] #scope-ch2 { color: var(--ch2); }
+html[data-ui="edison"] #scope-probe-btn { color: var(--ed-on-bezel); border-color: var(--ed-on-bezel-2); }
+html[data-ui="edison"] #scope-probe-btn:hover { background: #2A3034; }
+html[data-ui="edison"] #scope-probe-btn[aria-pressed="true"] { color: var(--ch2); border-color: var(--ch2); background: transparent; }
+html[data-ui="edison"] #meter-mode { color: var(--ed-on-bezel); font-weight: 600; }
+html[data-ui="edison"] #meter-reading { font: 700 var(--t-25)/1.2 var(--font-num); font-variant-numeric: tabular-nums; background: var(--pad-grid); color: var(--graphite); border-radius: 0; }
+html[data-ui="edison"] #meter-reading.meter-fuse { color: var(--bus-red); }
+html[data-ui="edison"] #meter-note { color: var(--ed-on-bezel-2); }
+
+/* Cards that float over the board: pad sheets with a rule, no shadow. */
+html[data-ui="edison"] #hover-card, html[data-ui="edison"] #equation-card, html[data-ui="edison"] #thevenin-card,
+html[data-ui="edison"] #labs-menu, html[data-ui="edison"] .lpm-card {
+  background: var(--pad); border: 1px solid var(--border-dark); border-radius: var(--r-panel);
+  box-shadow: none; color: var(--graphite); font-family: var(--font-ui); font-size: var(--t-13);
+}
+html[data-ui="edison"] #hover-card .hc-warn { color: var(--bus-red); }
+html[data-ui="edison"] #thevenin-card .th-why { color: var(--graphite-2); }
+html[data-ui="edison"] .labs-menu-item { font-size: var(--t-13); border-radius: var(--r-control); }
+html[data-ui="edison"] .labs-menu-item:hover, html[data-ui="edison"] .labs-menu-item:focus-visible { background: var(--selected-bg); }
+html[data-ui="edison"] .lpm-thumb { background: var(--bezel); }
+html[data-ui="edison"] #lpm-placeholder { color: var(--ed-on-bezel-2); }
+
+/* ── Inspector ──────────────────────────────── */
+html[data-ui="edison"] #inspector { background: var(--pad); border-bottom-color: var(--border-dark); }
+html[data-ui="edison"] #inspector-label { font-size: var(--t-20); }
+html[data-ui="edison"] .inspector-key, html[data-ui="edison"] .inspector-unit, html[data-ui="edison"] .inspector-empty,
+html[data-ui="edison"] .pinout-title { font-size: var(--t-13); color: var(--graphite-2); }
+html[data-ui="edison"] .inspector-input { font-size: var(--t-13); background: var(--ed-sheet); border-color: var(--border-dark); border-radius: var(--r-control); }
+html[data-ui="edison"] .inspector-hint, html[data-ui="edison"] .inspector-error { font-size: var(--t-13); }
+html[data-ui="edison"] .inspector-hint { color: var(--mask); }
+html[data-ui="edison"] .inspector-off { font-size: var(--t-13); }
+html[data-ui="edison"] .inspector-row-disabled .inspector-input { background: var(--pad-grid); }
+html[data-ui="edison"] .pinout-chip { font-family: var(--font-dense); font-size: var(--t-13); }
+html[data-ui="edison"] .pinout-body { background: var(--bezel); border-radius: 0; }
+html[data-ui="edison"] .pinout-notch { background: var(--pad); }
+html[data-ui="edison"] .pinout-leg { background: var(--graphite-2); }
+html[data-ui="edison"] .pinout-num { color: var(--pad); }
+
+/* ── Chat: Edison's notes on the pad ────────── */
+html[data-ui="edison"] #sparky-panel { width: 300px; font-size: var(--t-13); }
+html[data-ui="edison"] #sparky-messages {
+  background-color: var(--pad); background-image: var(--pad-grid-image); background-size: 20px 20px;
+  gap: 10px; padding: 12px;
+}
+html[data-ui="edison"] #sparky-welcome { align-items: stretch; justify-content: flex-end; text-align: left; padding: 0 0 4px; }
+html[data-ui="edison"] .sparky-welcome-icon { display: none; }
+html[data-ui="edison"] .sparky-welcome-title { font-size: var(--t-25); }
+html[data-ui="edison"] .sparky-welcome-sub { font-size: var(--t-16); color: var(--graphite-2); margin-bottom: 8px; }
+html[data-ui="edison"] .sparky-suggest-btn {
+  font-size: var(--t-13); background: var(--pad); border: 1px solid var(--border-dark); border-radius: var(--r-control);
+  color: var(--graphite); padding: 8px 10px;
+}
+html[data-ui="edison"] .sparky-suggest-btn:hover { background: var(--selected-bg); border-color: var(--mask); }
+html[data-ui="edison"] .chat-msg { font-size: var(--t-16); line-height: 1.5; border-radius: var(--r-panel); padding: 8px 10px; }
+html[data-ui="edison"] .chat-msg.user { background: var(--selected-bg); border: 1px solid var(--border-dark); color: var(--graphite); }
+html[data-ui="edison"] .chat-msg.ai, html[data-ui="edison"] .chat-msg.typing { background: var(--ed-sheet); border: 1px solid var(--border-dark); color: var(--graphite); }
+/* Proportional B612 with tabular figures (.ed-num). Its Google subset is Latin
+   only, so Ω comes from the next face in --font-num (Menlo/Consolas: Chrome's own
+   monospace is Courier, whose Ω is tiny). */
+html[data-ui="edison"] .chat-msg.ai .ed-val {
+  font-family: var(--font-num);
+  color: var(--mask); font-weight: 700; font-size: var(--t-13); white-space: nowrap;
+}
+html[data-ui="edison"] .chat-msg.system { font-size: var(--t-13); color: var(--graphite-2); }
+html[data-ui="edison"] .typing-dots span { background: var(--mask); animation-name: ed-dot; }
+html[data-ui="edison"] #sparky-pending-bar { background: var(--pad); border-top: 1px solid var(--border-dark); }
+html[data-ui="edison"] .pending-accept, html[data-ui="edison"] .pending-decline { padding: 6px 0; }
+html[data-ui="edison"] #sparky-input-row { background: var(--pad); border-top-color: var(--border-dark); }
+html[data-ui="edison"] #sparky-input {
+  font-size: var(--t-16); background: var(--ed-sheet); border-color: var(--border-dark); border-radius: var(--r-control);
+}
+html[data-ui="edison"] #sparky-input:focus { background: var(--ed-sheet); border-color: var(--mask); box-shadow: none; }
+@keyframes ed-dot { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
+
+/* The leader (spec §4): a dashed line from Edison's note to the part, ending
+   in a dot on the part. Graphite over a pad keyline, so it reads on the pad,
+   the bezel and the white breadboard alike. Placed by edison/skin.js. */
+html[data-ui="edison"] .ed-leader {
+  position: fixed; z-index: 45; height: 0; pointer-events: none; transform-origin: 0 0;
+  border-top: 1px dashed var(--graphite); border-bottom: 1px dashed var(--pad);
+}
+html[data-ui="edison"] .ed-leader::after {
+  content: ''; position: absolute; right: -5px; top: -5px; width: 10px; height: 10px;
+  border-radius: 50%; background: var(--graphite); border: 2px solid var(--pad);
+}
+
+/* ── Stacked layout (style.css → RESPONSIVE) ── */
+@media (max-width: 1024px) and (min-height: 600px) {
+  html[data-ui="edison"] #sparky-panel { width: 100%; }
+}

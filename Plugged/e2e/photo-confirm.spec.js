@@ -1,6 +1,6 @@
 // 📷 the confirm screen, part 1 (issue #141): after /api/photo answers, the
 // flattened photo with a dot on every lead and wire end at its hole,
-// labelled with the label PhotoImport gives it; tap a dot then a hole to move
+// labelled with its name (bug #178: the Reading's id); tap a dot then a hole to move
 // it; ⇄ swaps an LED's legs (the + mark follows); × deletes a part or wire;
 // a swap + / − toggle per rail side; Build it runs PhotoImport.build on the
 // confirmed Reading. /api/photo and /api/ask are stubbed in the browser; no
@@ -31,9 +31,9 @@
 //                           selected cancels the move only (the overlay stays
 //                           open).
 //       #photo-parts        the parts list: one row per Reading part and wire,
-//                           `[data-id="<Reading id>"]`, its text including the
-//                           app label it will get (PhotoImport's `labels`) and
-//                           its holes (redrawn after every edit).
+//                           `[data-id="<Reading id>"]`, its name (its `<b>`,
+//                           bug #178: see below) and its holes (redrawn after
+//                           every edit).
 //                           Each row has a `.photo-del` button (×); an LED row
 //                           also has a `.photo-swap` button (⇄). (The battery
 //                           row, dropdowns and + Add a part are #142.)
@@ -54,7 +54,8 @@
 //       .dots()             what is drawn: [{ id, end, hole, x, y, label, plus }]
 //                           one per part lead and wire end (end: the index in
 //                           `leads` / `ends`); x, y in flattened pixels; label
-//                           result.labels[id]; plus (a boolean) true only on an LED's anode
+//                           the name drawn beside it (its row's name, #178;
+//                           a battery's: result.labels['power:<i>']); plus (a boolean) true only on an LED's anode
 //                           lead. (Power dots, #142, may be listed too, with
 //                           id 'power:<i>'.)
 //       .built              null until Build it, then the PhotoImport.build
@@ -105,6 +106,18 @@
 //                           in tap order) with an unused id is appended to the
 //                           Reading, with its own row. Her added part is not
 //                           flagged (a resistor gets a real default value).
+//
+// Bug #178 (two rows named W1), in photo-confirm.js:
+//   - Every part and wire row's name (`#photo-parts li[data-id] > b`) and its
+//     label on the canvas is the Reading's own id, the one its why-text
+//     (`.photo-why`) uses: never PhotoImport's build label (`labels` counts
+//     only the wires it builds, so Reading W3 builds as W1 when W1 and W2
+//     have an `off` end). A missing or repeated id takes PhotoImport's key
+//     instead (`part<n>` / `wire<n>`, `<id>#2`), so every name is unique.
+//     A battery row keeps its app label (BAT1), as in #142.
+//   - The canvas labels are read from the confirm canvas's fillText calls in
+//     its last draw (a spy that still draws; draw() starts with drawImage),
+//     leaving out the one-character + / − / ? sign glyphs.
 //
 // Bug #158 (a long parts list), CSS only:
 //   - However many rows #photo-parts has, the card stays inside the window:
@@ -169,11 +182,15 @@ async function openEditor(page) {
   await page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
 }
 
-// 📷 → Use sample photo, /api/photo answering `reading` → the confirm screen.
+// 📷 → Use sample photo → the picker's demo-board tile (#182), /api/photo
+// answering `reading` → the confirm screen.
 async function openConfirm(page, reading) {
   await page.route('**/api/photo', route => route.fulfill({ json: { reading, provider: 'fixture', model: 'deepseek-flash', ms: 12 } }));
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
+  const tile = page.locator('#photo-samples [data-sample="demo-board"]');
+  await expect(tile, 'Use sample photo opens the sample picker (#182)').toBeVisible();
+  await tile.click();
   await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen').toBeVisible();
 }
 
@@ -244,7 +261,7 @@ const refusals = (page, actions) => page.evaluate(actions => {
 
 // ── Dots, labels, ⇄ and × ─────────────────────────────────────────────────
 
-test('the mock Reading opens the confirm screen: a dot on every lead and wire end at its hole with PhotoImport\'s label, + on LED1\'s anode; ⇄ moves the +, × removes W1 and R1; keys never reach the board', async ({ page }) => {
+test('the mock Reading opens the confirm screen: a dot on every lead and wire end at its hole, named by its Reading id (#178), + on LED1\'s anode; ⇄ moves the +, × removes W1 and R1; keys never reach the board', async ({ page }) => {
   const errors = watchErrors(page);
   await openEditor(page);
   await page.evaluate(() => {
@@ -269,7 +286,7 @@ test('the mock Reading opens the confirm screen: a dot on every lead and wire en
   const want = await expectedBuild(page, MOCK_READING);
   expect(s.result).toEqual(want);
 
-  // A dot per lead / end, at its hole's centre, labelled as PhotoImport labels it.
+  // A dot per lead / end, at its hole's centre, labelled with its Reading id (#178).
   const ends = [
     ...MOCK_READING.parts.flatMap(p => p.leads.map((l, i) => ({ id: p.id, end: i, hole: l.hole, plus: p.type === 'led' && l.role === 'anode' }))),
     ...MOCK_READING.wires.flatMap(w => w.ends.map((e, i) => ({ id: w.id, end: i, hole: e.hole, plus: false }))),
@@ -284,17 +301,17 @@ test('the mock Reading opens the confirm screen: a dot on every lead and wire en
     expect(Math.hypot(d.x - centres[e.hole][0], d.y - centres[e.hole][1]), `${e.id} end ${e.end} drawn at ${e.hole}'s centre ${centres[e.hole]}, got ${[d.x, d.y]}`).toBeLessThan(1);
     expect(d.plus, `${e.id} end ${e.end} ${e.plus ? 'is' : 'is not'} marked +`).toBe(e.plus);
     expect(want.labels[e.id], `PhotoImport labels ${e.id} (the bridge builds R1)`).toBeTruthy();
-    expect(d.label, `${e.id}'s dots are labelled ${want.labels[e.id]}`).toBe(want.labels[e.id]);
+    expect(d.label, `${e.id}'s dots are labelled ${e.id}, its Reading id, not its build label ${want.labels[e.id]} (#178)`).toBe(e.id);
   }
   expect(dotOf(s, 'LED1', 1).hole, 'the + sits on c17, the anode').toBe('c17');
 
-  // The list: a row per part and wire with its app label; ⇄ only on the LED.
+  // The list: a row per part and wire named by its Reading id (#178); ⇄ only on the LED.
   const row = id => page.locator(`#photo-parts [data-id="${id}"]`);
   for (const id of ids) {
     await expect(row(id), `a row for ${id}`).toHaveCount(1);
     await expect(row(id).locator('.photo-del'), `${id} has ×`).toHaveCount(1);
     await expect(row(id).locator('.photo-swap'), `⇄ only on the LED row (${id})`).toHaveCount(id === 'LED1' ? 1 : 0);
-    await expect(row(id), `${id}'s row shows its label ${want.labels[id]}`).toContainText(want.labels[id]);
+    await expect(row(id).locator('b'), `${id}'s row is named ${id}, not its build label ${want.labels[id]} (#178)`).toHaveText(id);
   }
 
   // Keys stay in the overlay (pin): Ctrl+Z and Backspace leave the board's R1 alone.
@@ -753,5 +770,99 @@ test('#158 a 20-item Reading at 1440×900 and 1280×720: the photo and its dots,
   await page.locator('#photo-build').click();
   await expect(page.locator('#photo-modal'), 'Build it closes the overlay').toBeHidden();
   expect((await confirmState(page)).built, 'Build it hands on PhotoImport\'s result').toEqual(await expectedBuild(page, reading));
+  expect(errors).toEqual([]);
+});
+
+// ── One name per row (bug #178) ─────────────────────────────────────────────
+
+// The confirm canvas's text as last drawn: every fillText on
+// #photo-confirm-canvas since its last drawImage (draw() starts with the
+// photo). The spy still draws. Installed before the page loads.
+const spyCanvasText = page => page.addInitScript(() => {
+  const P = CanvasRenderingContext2D.prototype, fill = P.fillText, img = P.drawImage;
+  const ours = ctx => ctx.canvas && ctx.canvas.id === 'photo-confirm-canvas';
+  window.__confirmText = [];
+  P.drawImage = function (...a) { if (ours(this)) window.__confirmText = []; return img.apply(this, a); };
+  P.fillText  = function (s, ...a) { if (ours(this)) window.__confirmText.push(String(s)); return fill.call(this, s, ...a); };
+});
+// Its part and wire labels: the text drawn, less the one-character signs (+, −, ?).
+const canvasLabels = page => page.evaluate(() => window.__confirmText.filter(s => !/^[+\-−?]$/.test(s)));
+
+// Every part and wire row, in list order: its name and its why-text.
+const confirmRows = page => page.locator('#photo-parts li[data-id]').evaluateAll(lis => lis.map(li => ({
+  name: li.querySelector(':scope > b').textContent, why: li.querySelector('.photo-why').textContent,
+})));
+
+// e02_rectifier's trap: no battery read, R1 (a10 → a14) and four wires, the
+// first two with an `off` end. PhotoImport builds only W3 and W4 and numbers
+// them W1 and W2 (no battery leads before them); W3's end in R1's hole a14
+// moves to b14, flagged "W3: an end moved…".
+function offEndsReading() {
+  const off  = pt => ({ hole: 'off', pt });
+  const wire = (id, ends) => ({ id, color: 'yellow', ends, confidence: 0.6, unsure: [] });
+  return {
+    board: { visible: true, cols: 63, rails: Object.assign({}, BB830), split: false },
+    parts: [stageReading().parts[0]],
+    wires: [wire('W1', [end('c5'), off([6, 40])]), wire('W2', [end('c8'), off([6, 80])]),
+            wire('W3', [end('a14'), end('b20')]), wire('W4', [end('c22'), end('c26')])],
+    power: [],
+  };
+}
+
+test('#178 W1 and W2 with an off end, no battery: the rows and canvas labels read W1, W2, W3, W4 (not W1, W2, W1, W2), each why-text names its own row, and Build it still hands on PhotoImport\'s result', async ({ page }) => {
+  const errors = watchErrors(page);
+  await spyCanvasText(page);
+  await openEditor(page);
+  const reading = offEndsReading();
+  await openConfirm(page, reading);
+
+  // The trap, as PhotoImport builds it (unchanged by #178).
+  const s = await confirmState(page);
+  const want = await expectedBuild(page, reading);
+  expect(s.result, 'the confirm screen\'s result is PhotoImport\'s, labels included').toEqual(want);
+  expect(want.skipped.map(x => x.id), 'W1 and W2 are not built').toEqual(['W1', 'W2']);
+  expect(want.labels.W3, 'PhotoImport numbers the built wires from W1, so Reading W3 builds under another name').not.toBe('W3');
+  const flagged = reading.wires.map(w => w.id).filter(id => want.flags.some(f => f.id === id));
+  expect(flagged, 'W1, W2 (off) and W3 (moved) have why-texts').toEqual(['W1', 'W2', 'W3']);
+
+  // Every row named by its Reading id, in Reading order, no two alike.
+  const ids  = [...reading.parts, ...reading.wires].map(x => x.id);
+  const rows = await confirmRows(page);
+  expect.soft(rows.map(r => r.name), 'the rows are named R1, W1, W2, W3, W4: the Reading\'s ids').toEqual(ids);
+
+  // Each why-text names its own row, and no other.
+  const named = why => ids.filter(id => new RegExp(`\\b${id}\\b`).test(why));
+  expect.soft(rows.filter(r => r.why).map(r => [r.name, named(r.why)]), 'each flagged row\'s why-text names that row').toEqual(flagged.map(id => [id, [id]]));
+
+  // The canvas: one label per part and wire, its Reading id.
+  expect.soft((await canvasLabels(page)).sort(), 'the canvas labels are the Reading\'s ids, no two alike').toEqual(ids.slice().sort());
+
+  // Build it: the built board keeps PhotoImport's labels (#178 renames nothing there).
+  if (test.info().errors.length) return;
+  await page.locator('#photo-build').click();
+  await expect(page.locator('#photo-modal')).toBeHidden();
+  expect((await confirmState(page)).built, 'Build it hands on PhotoImport\'s result').toEqual(want);
+  expect(errors).toEqual([]);
+});
+
+test('#178 a repeated or missing wire id: the rows and canvas labels take PhotoImport\'s keys (W1, W1#2, wire3), so no two read the same', async ({ page }) => {
+  const errors = watchErrors(page);
+  await spyCanvasText(page);
+  await openEditor(page);
+  const reading = offEndsReading();
+  const wire = (id, ends) => Object.assign(id == null ? {} : { id }, { color: 'yellow', ends, confidence: 0.6, unsure: [] });
+  reading.wires = [wire('W1', [end('b14'), end('b20')]), wire('W1', [end('c22'), end('c26')]), wire(null, [end('d26'), end('d30')])];
+  await openConfirm(page, reading);
+
+  // PhotoImport's keys (docs/API-CONTRACT.md → PhotoImport → Keys): the
+  // second W1 → W1#2, the third wire, with no id → wire3. All three built.
+  const keys = ['R1', 'W1', 'W1#2', 'wire3'];
+  const s = await confirmState(page);
+  expect(s.result).toEqual(await expectedBuild(page, reading));
+  expect(Object.keys(s.result.labels), 'PhotoImport keys the entries R1, W1, W1#2, wire3').toEqual(keys);
+
+  const rows = await confirmRows(page);
+  expect.soft(rows.map(r => r.name), 'the rows read R1, W1, W1#2, wire3: a repeated or missing id takes PhotoImport\'s key').toEqual(keys);
+  expect.soft((await canvasLabels(page)).sort(), 'one canvas label per part and wire, by the same names').toEqual(keys.slice().sort());
   expect(errors).toEqual([]);
 });

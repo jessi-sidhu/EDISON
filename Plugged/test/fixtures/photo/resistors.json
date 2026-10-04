@@ -1,0 +1,275 @@
+{
+  "sample": "resistors",
+  "sha256": "759caf5deead4915db19340506f3037c9f0e77bb3d5de36ba6eae9c3d5fec89c",
+  "reading": {
+    "board": {
+      "visible": true,
+      "cols": 63,
+      "rails": {
+        "aOuter": "+",
+        "aInner": "-",
+        "jInner": "+",
+        "jOuter": "-"
+      },
+      "split": false
+    },
+    "parts": [
+      {
+        "id": "R1",
+        "type": "resistor",
+        "what": "1k resistor",
+        "value": 1000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              573.2,
+              505.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              818,
+              505.6
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          573.2,
+          475,
+          818,
+          536.1
+        ],
+        "confidence": 0.99,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R2",
+        "type": "resistor",
+        "what": "1k resistor",
+        "value": 1000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              1046.5,
+              512.3
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              1344.4,
+              512.3
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          1046.5,
+          483.5,
+          1344.4,
+          541
+        ],
+        "confidence": 0.99,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R3",
+        "type": "resistor",
+        "what": "1k resistor",
+        "value": 1000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              806.8,
+              91.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              806.8,
+              453
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          754.8,
+          91.6,
+          858.8,
+          453
+        ],
+        "confidence": 0.98,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R4",
+        "type": "resistor",
+        "what": "1k resistor",
+        "value": 1000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              807.8,
+              173.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              1120,
+              173.6
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          807.8,
+          144.8,
+          1120,
+          202.4
+        ],
+        "confidence": 0.98,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R5",
+        "type": "resistor",
+        "what": "1k resistor",
+        "value": 1000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              822.1,
+              326.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              1120,
+              326.6
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          822.1,
+          297.5,
+          1120,
+          355.7
+        ],
+        "confidence": 0.98,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R6",
+        "type": "resistor",
+        "what": "1k resistor",
+        "value": 1000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              809.9,
+              402.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              1113.8,
+              402.6
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          809.9,
+          373.5,
+          1113.8,
+          431.7
+        ],
+        "confidence": 0.98,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R7",
+        "type": "resistor",
+        "what": "1k resistor",
+        "value": 1000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              1129.2,
+              183.9
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              1129.2,
+              480
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          1046.5,
+          183.9,
+          1211.8,
+          480
+        ],
+        "confidence": 0.98,
+        "unsure": [
+          "leads"
+        ]
+      }
+    ],
+    "wires": [],
+    "power": []
+  },
+  "provider": "gemini",
+  "model": "gemini-robotics-er-2-preview"
+}

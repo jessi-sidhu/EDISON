@@ -59,7 +59,7 @@ Points are pixels `[x, y]` in the flattened image. Each provider adapter convert
 
 ## The confirm screen
 - **Overlay** reusing the `#load-preview-modal` pattern (`index.html:207-220`): the flattened photo with a faint grid on the left, a parts list on the right.
-- **Every lead and wire end is a dot** at its snapped hole, joined by a line, labelled with the label it will get from `PhotoImport`'s `labels` map. Parts: `Ids.nextLabel` order, the same as `Chat.predictLabels` (`chat.js:226-238`; a skipped part shifts later numbers). **Wires:** `predictLabels` returns null for `add_wire` (`chat.js:231`); wire ids come from `nextWireId` in `add_wire` order (`app.js:460-467`), so `PhotoImport` counts its `add_wire` actions in output order (the battery's two leads and any bridge jumpers take W1, W2… first). The build starts from an empty board, so the numbers match.
+- **Every lead and wire end is a dot** at its snapped hole, joined by a line, labelled with its Reading id (#178): the same name its amber why-text uses, with `PhotoImport`'s key when an id is missing or repeated (`part<n>`/`wire<n>`, `<id>#2`); a battery keeps its app label (BAT1). The built board's labels come from `PhotoImport`'s `labels` map, which the confirm screen no longer shows for parts and wires. On the built board, parts: `Ids.nextLabel` order, the same as `Chat.predictLabels` (`chat.js:226-238`; a skipped part shifts later numbers). **Wires:** `predictLabels` returns null for `add_wire` (`chat.js:231`); wire ids come from `nextWireId` in `add_wire` order (`app.js:460-467`), so `PhotoImport` counts its `add_wire` actions in output order (the battery's two leads and any bridge jumpers take W1, W2… first). The build starts from an empty board, so the numbers match.
 - **Move:** tap a dot, then tap the right hole; it snaps exactly.
 - **LED polarity:** the anode dot is marked **+**. She compares it with the long leg on her real LED. **⇄** swaps the two legs here, before the build, so no new flip function is needed.
 - **List actions:** value dropdown for resistors (the reading's value, the decoded bands, nearby E12 values); LED colour (red, yellow, green, blue, white only: `led.js:27-33`); wire colour (red, yellow, green, blue, black, white: `chat.js:50-53`); **×** deletes a made-up part; **+ Add a part** = pick resistor, LED or wire, then tap its legs; the battery row with its voltage (1–24 V; unread → 9 V, flagged) and + / − dots on the rails.
@@ -132,7 +132,7 @@ A throwaway `photo-grid.js` + `photo-import.js` (in `photo-reference/prototype/`
 - **The grid** matches the spike's `geom.py` to 1e-7 px with 4 taps; 484/484 snap probes right.
 
 Rules this added (already folded into the sections above or below):
-- **Labels can't be chosen** (`place_*` takes none; `Ids.nextLabel` numbers in order), so a skipped part shifts later labels. The confirm screen shows `PhotoImport`'s `labels` map.
+- **Labels can't be chosen** (`place_*` takes none; `Ids.nextLabel` numbers in order), so a skipped part shifts later labels. That's why the confirm screen names parts and wires by their Reading ids (#178), not by `labels`, which only names the built board.
 - **Emit all parts first, then all wires**, since wire ends take holes.
 - **The confirm screen draws rails by their printed sign**, not by our model's position (our model draws + outer on both sides; on a BB830 the bottom + is inner).
 - **Unknown LED polarity:** the importer takes the first dot as the anode and flags it; the confirm screen makes her choose before Build is enabled.

@@ -1,0 +1,117 @@
+/* edison/course.css — the ENSC 220 course hub (spec §5.2). Colours, type and
+   radii come only from tokens.css. Borders, never shadows. */
+
+*, *::before, *::after { box-sizing: border-box; }
+body {
+  margin: 0; display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh;
+  background: var(--pad); color: var(--graphite); font: 400 var(--t-16)/1.5 var(--font-ui);
+}
+a:focus-visible { outline: 2px solid var(--mask); outline-offset: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ── Left nav: the current item is a 2 px mask bar (a state, not decoration) ── */
+.side {
+  position: sticky; top: 0; align-self: start; height: 100vh; display: flex; flex-direction: column;
+  padding: 32px 0 24px; border-right: 1px solid var(--pad-grid);
+}
+.side-code { margin: 0 24px; font-size: var(--t-20); font-weight: 600; line-height: 1.2; }
+.side-term { margin: 2px 24px 32px; color: var(--graphite-2); }
+nav { display: flex; flex-direction: column; }
+nav a { padding: 8px 22px; border-left: 2px solid transparent; color: var(--graphite); text-decoration: none; }
+nav a:hover { text-decoration: underline; text-underline-offset: 3px; }
+nav a[aria-current="page"] { border-left-color: var(--mask); font-weight: 600; }
+.side-about { margin: auto 24px 0; font-size: var(--t-13); color: var(--graphite-2); }
+
+/* ── Banner: a still of our own board, the title over it on the SFU rule ── */
+.page { display: flex; flex-direction: column; min-height: 100vh; }
+.banner { position: relative; background: var(--bezel); }
+.banner img { display: block; width: 100%; height: 300px; object-fit: cover; object-position: 50% 60%; }
+.banner h1 {
+  position: absolute; left: 40px; bottom: 32px; margin: 0; padding: 2px 0 2px 16px;
+  border-left: 6px solid var(--sfu); color: var(--pad); font: 600 var(--t-49)/1.05 var(--font-display);
+}
+
+main { flex: 1; padding: 40px 40px 64px; }
+main > section { max-width: 760px; }
+main h2 { margin: 0 0 16px; font-size: var(--t-25); font-weight: 600; line-height: 1.2; }
+main h2:not(:first-child) { margin-top: 48px; }
+main p { max-width: 65ch; }
+
+/* ── Home: the procedure card ── */
+.procedure-card { background: var(--pad); border: 1px solid var(--pad-grid); border-radius: var(--r-panel); }
+.card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 16px 20px; border-bottom: 1px solid var(--pad-grid); }
+.card-code { font: 400 var(--t-13) var(--font-num); color: var(--graphite-2); white-space: nowrap; }
+.card-head h3 { margin: 0; font-size: var(--t-20); font-weight: 600; line-height: 1.3; }
+.card-week {
+  margin-left: auto; padding: 0 8px; border: 1px solid var(--graphite-2); border-radius: var(--r-control);
+  font-size: var(--t-13); line-height: 22px; color: var(--graphite-2); white-space: nowrap;
+}
+.card-sample { flex-basis: 100%; margin: 0; font-size: var(--t-13); line-height: 1.4; color: var(--graphite-2); }
+.steps { list-style: none; margin: 0; padding: 0; }
+.steps li {
+  display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 12px;
+  padding: 12px 20px; border-bottom: 1px solid var(--pad-grid);
+}
+.step-n { color: var(--graphite-2); font-variant-numeric: tabular-nums; }
+.pill {
+  padding: 0 10px; border: 1px solid transparent; border-radius: 999px;
+  font-size: var(--t-13); font-weight: 600; line-height: 22px; white-space: nowrap;
+}
+.pill.passed  { background: var(--mask); color: var(--pad); }
+.pill.pending { border-color: var(--graphite-2); color: var(--graphite-2); }
+.pill.failed  { background: var(--bus-red); color: var(--pad); }
+
+.card-foot { padding: 16px 20px 20px; }
+.card-status { margin: 0 0 12px; font-weight: 500; }
+.stepper { list-style: none; display: flex; margin: 0 0 24px; padding: 0; }
+.stepper li { position: relative; flex: 1; padding-top: 18px; font-size: var(--t-13); color: var(--graphite-2); }
+.stepper li::before {
+  content: ''; position: absolute; top: 0; left: 0; width: 11px; height: 11px;
+  border: 1px solid var(--graphite-2); border-radius: 50%; background: var(--pad);
+}
+.stepper li::after { content: ''; position: absolute; top: 5px; left: 11px; right: 0; height: 1px; background: var(--graphite-2); }
+.stepper li:last-child { flex: 0 0 auto; }
+.stepper li:last-child::after { display: none; }
+.stepper li[aria-current="step"] { color: var(--graphite); font-weight: 600; }
+.stepper li[aria-current="step"]::before { background: var(--mask); border-color: var(--mask); }
+
+.card-actions { display: flex; gap: 12px; margin: 0; }
+.btn {
+  display: inline-block; padding: 8px 16px; border: 1px solid var(--mask); border-radius: var(--r-control);
+  background: var(--mask); color: var(--pad); font-weight: 600; text-decoration: none;
+}
+.btn:hover { text-decoration: underline; text-underline-offset: 3px; }
+.btn-outline { background: transparent; color: var(--mask); }
+
+/* ── Home: announcements, a plain list of date and text ── */
+.announcements { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--pad-grid); }
+.announcements li { display: grid; grid-template-columns: 64px 1fr; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--pad-grid); }
+.announcements p { margin: 0; }
+.ann-date { color: var(--graphite-2); font-variant-numeric: tabular-nums; }
+
+/* ── Labs: one table; locked rows are greyed and have no link ── */
+.lede { margin: 0 0 20px; }
+.table-wrap { position: relative; overflow-x: auto; }   /* narrow screens: the table scrolls, the page doesn't; relative holds the sr-only header in */
+.labs { width: 100%; border-collapse: collapse; background: var(--pad); border: 1px solid var(--pad-grid); }
+.labs th, .labs td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--pad-grid); }
+.labs th { font-size: var(--t-13); font-weight: 600; color: var(--graphite-2); }
+.labs td:last-child { text-align: right; }
+.lab-code { font: 400 var(--t-13) var(--font-num); white-space: nowrap; }
+.labs tr[aria-disabled="true"] td { color: var(--graphite-2); }
+.labs a { color: var(--mask); font-weight: 600; text-underline-offset: 3px; }
+
+footer { padding: 20px 40px 32px; border-top: 1px solid var(--pad-grid); font-size: var(--t-13); color: var(--graphite-2); }
+
+/* Narrow screens: the nav goes on top. */
+@media (max-width: 760px) {
+  body { grid-template-columns: minmax(0, 1fr); }
+  .side { position: static; height: auto; padding: 20px 0 0; border-right: 0; border-bottom: 1px solid var(--pad-grid); }
+  .side-term { margin-bottom: 12px; }
+  nav { flex-direction: row; flex-wrap: wrap; padding: 0 12px; }
+  nav a { padding: 8px 12px; border-left: 0; border-bottom: 2px solid transparent; }
+  nav a[aria-current="page"] { border-bottom-color: var(--mask); }
+  .side-about { display: none; }
+  .banner img { height: 200px; }
+  .banner h1 { left: 20px; bottom: 20px; font-size: var(--t-39); }
+  main { padding: 24px 20px 48px; }
+}

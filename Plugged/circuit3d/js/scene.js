@@ -9,7 +9,9 @@
 
   // ── Scene ──────────────────────────────────────────────────
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xdcdad4);
+  // Edison (spec §5.4) sets --scene-bg on <html>; classic leaves it unset.
+  const sceneBg = getComputedStyle(document.documentElement).getPropertyValue('--scene-bg').trim();
+  scene.background = new THREE.Color(/^#[0-9a-f]{6}$/i.test(sceneBg) ? sceneBg : 0xdcdad4);
 
   // ── Camera ─────────────────────────────────────────────────
   // The only copy of each view: home (start + reset button) and the
@@ -24,7 +26,9 @@
   camera.lookAt(...App.CAMERA.home.target);
 
   // ── Renderer ───────────────────────────────────────────────
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !navigator.webdriver });
+  // viewer.html?mode=hero (issue #163) marks <html data-mode="hero"> and draws over the landing page: a canvas with alpha.
+  const alpha    = document.documentElement.dataset.mode === 'hero';
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !navigator.webdriver, alpha });
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -66,9 +70,11 @@
   scene.add(fill);
 
   // ── Ground / Workbench ─────────────────────────────────────
+  // Edison sets --scene-ground on <html> so the bench reads as the bezel; classic leaves it unset.
+  const sceneGround = getComputedStyle(document.documentElement).getPropertyValue('--scene-ground').trim();
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(200, 200),
-    new THREE.MeshLambertMaterial({ color: 0x706b65 })
+    new THREE.MeshLambertMaterial({ color: /^#[0-9a-f]{6}$/i.test(sceneGround) ? sceneGround : 0x706b65 })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.21;

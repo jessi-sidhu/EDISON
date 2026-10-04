@@ -1,0 +1,167 @@
+{
+  "key": "resistors",
+  "model": "gemini-robotics-er-2-preview",
+  "items": [
+    {
+      "id": "R1",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            575.8,
+            520.1
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            820.7,
+            518.2
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.95
+    },
+    {
+      "id": "R2",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            1058.5,
+            516.4
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            1352.4,
+            516.8
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R3",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            821.7,
+            164.9
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            819.2,
+            452.9
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R4",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            844.4,
+            187.8
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            1113.5,
+            205.9
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R5",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            842.9,
+            307.4
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            1119.2,
+            305.4
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R6",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            820.4,
+            401.7
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            1058.4,
+            456.3
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    },
+    {
+      "id": "R7",
+      "found": true,
+      "leads": [
+        {
+          "pin": "1",
+          "pt": [
+            1113.7,
+            248.3
+          ],
+          "role": "none"
+        },
+        {
+          "pin": "2",
+          "pt": [
+            1054.9,
+            457.3
+          ],
+          "role": "none"
+        }
+      ],
+      "conf": 0.9
+    }
+  ]
+}

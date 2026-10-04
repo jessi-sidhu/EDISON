@@ -44,7 +44,7 @@ Researched 2026-10-01. Sources: Developers Digest's 16 vibe-coded patterns, the 
 
 | Tell | Edison instead |
 |---|---|
-| Inter, Space Grotesk, Geist, Instrument Serif, Fraunces | Barlow (interface), B612 Mono (measured numbers only), STIX Two (textbook) |
+| Inter, Space Grotesk, Geist, Instrument Serif, Fraunces | Barlow (interface), B612 (measured numbers only), STIX Two (textbook) |
 | Purple/indigo, gradient washes, gradient text, coloured glows, glass/backdrop blur | Flat colour from the bench (§4); borders instead of shadows |
 | Permanent dark mode; grey body text below WCAG AA | Light pad surfaces with dark instrument bezels; every text pair meets AA (body text at least 7:1) |
 | Cream + terracotta; near-black + one acid green | Engineering-pad green paper + solder-mask green + bus red/blue |
@@ -62,7 +62,7 @@ Researched 2026-10-01. Sources: Developers Digest's 16 vibe-coded patterns, the 
 - a `linear-gradient`/`radial-gradient` outside an allow-list (the pad grid is the only allowed one);
 - `→` inside button or link text;
 - emoji in the nav;
-- any hex in the purple range (hue 250–290°, saturation above 40%).
+- any hex in the purple range (hue 230–290°, which also catches Tailwind's indigo, saturation above 40%).
 
 ## 4. The design system ("engineering pad and bench instrument")
 
@@ -85,7 +85,7 @@ Locked here and copied to `Plugged/edison/DESIGN.md`. Every Edison page reads it
 ### Type
 
 - **Barlow** at 400/500/600, with Barlow Semi Condensed for dense tables. The interface voice, close to DIN technical lettering.
-- **B612 Mono** for measured values only (`14.9 mA`, `1.99 Vpp`). A face drawn for cockpit displays.
+- **B612** for measured values only (`14.9 mA`, `1.99 Vpp`). A face drawn for cockpit displays.
 - **STIX Two Text** for textbook body and maths.
 - **Scale** (1.25 ratio): 13 / 16 / 20 / 25 / 31 / 39 / 49 px. Body is 16 px with 1.5 line-height (1.6 for STIX). Lines are 75 characters or fewer.
 - All from Google Fonts, loaded only by Edison pages and only when the flag is on.
@@ -98,7 +98,7 @@ Locked here and copied to `Plugged/edison/DESIGN.md`. Every Edison page reads it
 
 ### The signature element: Edison's annotations (the thread through the loud moments in §4a)
 
-Edison's remarks about the board appear as **leader lines to real parts**: a thin `--graphite` line ending in a small dot on the part, with the note in Barlow and its values in B612 Mono on `--mask`. Think of a TA's notes on a lab report, or Quindar's callouts.
+Edison's remarks about the board appear as **leader lines to real parts**: a thin `--graphite` line ending in a small dot on the part, with the note in Barlow and its values in B612 on `--mask`. Think of a TA's notes on a lab report, or Quindar's callouts.
 
 They appear:
 - in the landing demo;

@@ -16,7 +16,11 @@ module.exports = defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // A one-off Safari check (#164): E2E_WEBKIT=1 npx playwright test --project=webkit <spec>.
+    ...(process.env.E2E_WEBKIT ? [{ name: 'webkit', use: { ...devices['Desktop Safari'] } }] : []),
+  ],
   webServer: {
     command: 'node backend/server.js',
     url: `http://localhost:${PORT}/api/health`,

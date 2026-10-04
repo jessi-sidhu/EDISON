@@ -35,8 +35,8 @@
 //   - #photo-status       inside #photo-modal: "Reading your board…" while
 //                         /api/photo runs; on an error the reply's text, or the
 //                         AI_TIMEOUT reply when the page timeout fires.
-//   - #photo-error-sample "Use sample photo", shown with an error; sends the
-//                         sample.
+//   - #photo-error-sample "Use sample photo", shown with an error; opens the
+//                         sample picker (#182, below).
 //   - #photo-cancel       closes the overlay.
 //   - window.PhotoCapture
 //       .timeoutMs        PHOTO_PAGE_TIMEOUT_MS, default 60000, read when each
@@ -52,6 +52,26 @@
 //                         as returned, as for MOCK_READING here.
 //   - window.PhotoSamples['demo-board'] from samples/samples.js:
 //                         { file: 'samples/demo-board.jpg', cols: 63, taps }.
+//   - #182, the sample picker. window.PhotoSamples also holds 'piranha',
+//     'resistors', 'multimeter' and 'timer555'; every entry, demo-board
+//     included, has a title and a credit (test/photo-samples.test.js checks
+//     their shape).
+//       #photo-sample       still "Use sample photo" in #photo-menu, but it
+//                           sends nothing itself: it opens the picker.
+//       #photo-samples      the picker, inside #photo-modal (#photo-corners
+//                           and #photo-confirm hidden): one tile per
+//                           PhotoSamples key, demo-board included (titled
+//                           like "Demo: LED in backwards").
+//       [data-sample="<id>"] a tile inside #photo-samples: an <img> of the
+//                           sample's file (its src is that file), its title
+//                           and its credit as text. A click hides the picker
+//                           and does what Use sample photo did before, for
+//                           that sample: no corner step, POST /api/photo with
+//                           sample '<id>' and that sample's cols.
+//       Escape or #photo-cancel closes the picker; nothing is sent.
+//       #photo-error-sample opens the same picker (demo-board among it).
+//     A sample's confirm screen shows its credit (PhotoSamples[id].credit) as
+//     visible text inside #photo-confirm, and no other sample's credit.
 //   - While #photo-modal is open, keydown is swallowed in the capture phase:
 //     Backspace and Ctrl+Z never reach the board.
 const fs   = require('node:fs');
@@ -106,6 +126,15 @@ const imageSize = (page, src) => page.evaluate(src => new Promise((resolve, reje
   img.onerror = () => reject(new Error('the image did not decode'));
   img.src = src;
 }), src);
+
+// The sample picker (#182): Use sample photo or the error card opens it; a tile sends its sample.
+const NEW_SAMPLES = ['piranha', 'resistors', 'multimeter', 'timer555'];
+const samplesOf   = page => page.evaluate(() => JSON.parse(JSON.stringify(window.PhotoSamples || {})));
+const tile        = (page, id) => page.locator(`#photo-samples [data-sample="${id}"]`);
+async function pickSample(page, id) {
+  await expect(tile(page, id), `the sample picker (#182) shows the ${id} tile`).toBeVisible();
+  await tile(page, id).click();
+}
 
 // ── Choose a photo, tap the corners, send ──────────────────────────────────
 
@@ -241,7 +270,7 @@ test('Choose photo → tap a1, a63, j63, j1 → the grid appears; Redo; Looks ri
 
 // ── The sample ─────────────────────────────────────────────────────────────
 
-test('Use sample photo → /api/photo gets sample "demo-board" with its flattened image, and the corner step never shows', async ({ page }) => {
+test('Use sample photo → the picker\'s demo-board tile → /api/photo gets sample "demo-board" with its flattened image, the corner step never shows, and its credit is on the confirm screen', async ({ page }) => {
   const errors = watchErrors(page);
   const sent = [];
   await page.route('**/api/photo', route => {
@@ -256,10 +285,12 @@ test('Use sample photo → /api/photo gets sample "demo-board" with its flattene
 
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
+  await pickSample(page, 'demo-board');
   await expect.poll(() => sent.length, { message: 'the sample is sent with no taps and no Looks right' }).toBe(1);
   await expect(page.locator('#photo-corners'), 'the sample skips the corner step').toBeHidden();
   await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen (#141)').toBeVisible();
   expect(await page.evaluate(() => window.PhotoCapture.lastReading)).toEqual(MOCK_READING);
+  await expect(page.locator('#photo-confirm'), 'the sample\'s credit shows on its confirm screen').toContainText(sample.credit, { useInnerText: true });
 
   const body = sent[0];
   expect(body.sample).toBe('demo-board');
@@ -268,6 +299,166 @@ test('Use sample photo → /api/photo gets sample "demo-board" with its flattene
   expect(await imageSize(page, body.image)).toEqual({ width: body.grid.width, height: body.grid.height });
   expect(body.grid.width).toBeLessThanOrEqual(2048);
   expect(errors).toEqual([]);
+});
+
+// ── The sample picker (#182) ───────────────────────────────────────────────
+
+test('Use sample photo opens a picker with a tile per sample (its photo, title and credit), sending nothing; Escape and Cancel close it; a tile sends its own sample and board size, and its confirm screen shows its credit and no other', async ({ page }) => {
+  const errors = watchErrors(page);
+  const sent = [];
+  await page.route('**/api/photo', route => {
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ json: MOCK_RESPONSE });
+  });
+  await openEditor(page);
+  const samples = await samplesOf(page);
+  const ids = Object.keys(samples);
+  expect(ids, 'PhotoSamples holds demo-board and the 4 new samples').toEqual(expect.arrayContaining(['demo-board', ...NEW_SAMPLES]));
+
+  const openPicker = async () => {
+    await page.locator('#photo-btn').click();
+    await expect(page.locator('#photo-menu')).toBeVisible();
+    await expect(page.locator('#photo-sample'), 'the menu keeps Use sample photo').toHaveText(/Use sample photo/);
+    await page.locator('#photo-sample').click();
+    await expect(page.locator('#photo-samples'), 'Use sample photo opens the sample picker').toBeVisible();
+  };
+
+  await openPicker();
+  await expect(page.locator('#photo-modal'), 'the picker is in the 📷 overlay').toBeVisible();
+  await expect(page.locator('#photo-corners')).toBeHidden();
+  await expect(page.locator('#photo-confirm')).toBeHidden();
+  const listed = await page.locator('#photo-samples [data-sample]').evaluateAll(ts => ts.map(t => t.dataset.sample));
+  expect(listed.sort(), 'one tile per sample, demo-board included').toEqual([...ids].sort());
+  for (const id of ids) {
+    await expect(tile(page, id), `the ${id} tile`).toBeVisible();
+    await expect(tile(page, id), `the ${id} tile shows its title`).toContainText(samples[id].title);
+    await expect(tile(page, id), `the ${id} tile shows its credit`).toContainText(samples[id].credit);
+    const img = tile(page, id).locator('img').first();
+    await expect(img, `the ${id} tile shows its photo`).toBeVisible();
+    await expect.poll(() => img.evaluate(el => ({ path: new URL(el.src).pathname, loaded: el.complete && el.naturalWidth > 0 })),
+      { message: `the ${id} tile's photo is its file, loaded` }).toEqual({ path: `/circuit3d/${samples[id].file}`, loaded: true });
+  }
+  expect(sent, 'opening the picker sends nothing').toEqual([]);
+
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#photo-samples'), 'Escape closes the picker').toBeHidden();
+  await openPicker();
+  await page.locator('#photo-cancel').click();
+  await expect(page.locator('#photo-samples'), 'Cancel closes the picker').toBeHidden();
+  expect(sent, 'closing the picker sends nothing').toEqual([]);
+
+  // One tile through to its confirm screen (63 columns, its own credit). The
+  // unstubbed Piranha test below does another; photo-samples.test.js checks
+  // every sample's taps and credit.
+  const id = 'resistors';
+  await openPicker();
+  await pickSample(page, id);
+  await expect.poll(() => sent.length, { message: `${id}: one request, with no taps and no Looks right` }).toBe(1);
+  await expect(page.locator('#photo-samples'), `${id}: the picker closes`).toBeHidden();
+  await expect(page.locator('#photo-corners'), `${id}: a sample skips the corner step`).toBeHidden();
+  await expect(page.locator('#photo-confirm'), `${id}: the Reading opens the confirm screen`).toBeVisible();
+  const body = sent[0];
+  expect(body.sample, `${id}: the request names the chosen sample`).toBe(id);
+  expect(body.grid.cols, `${id}: its own board size`).toBe(samples[id].cols);
+  expect(body.image.startsWith('data:image/jpeg;base64,')).toBe(true);
+  expect(await imageSize(page, body.image), `${id}: the flattened image is the grid's size`).toEqual({ width: body.grid.width, height: body.grid.height });
+  await expect(page.locator('#photo-confirm'), `${id}: its credit shows on the confirm screen`).toContainText(samples[id].credit, { useInnerText: true });
+  for (const other of ids) {
+    if (samples[other].credit === samples[id].credit) continue;
+    await expect(page.locator('#photo-confirm'), `${id}: not ${other}'s credit`).not.toContainText(samples[other].credit, { useInnerText: true });
+  }
+  expect(errors).toEqual([]);
+});
+
+// Unstubbed: the e2e server runs PHOTO_PROVIDERS=fixture, so /api/photo and
+// /api/photo/leads replay test/fixtures/photo/piranha.json and
+// leads/piranha.json (recorded live, step 3) and never reach an AI.
+test('"Piranha LEDs", unstubbed: /api/photo replays its recording (provider fixture, key piranha), the confirm screen lists its recorded parts and wires with its credit, and the crop round lands the recorded legs', async ({ page }) => {
+  const errors = watchErrors(page);
+  const recorded = name => JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'photo', name), 'utf8'));
+  const reading  = recorded('piranha.json').reading;
+  const legs     = recorded(path.join('leads', 'piranha.json')).items;
+  const isPath   = p => r => new URL(r.url()).pathname === p && r.request().method() === 'POST';
+  await openEditor(page);                              // stubs /api/ask only
+  const credit = await page.evaluate(() => window.PhotoSamples.piranha.credit);
+
+  await page.locator('#photo-btn').click();
+  await page.locator('#photo-sample').click();
+  const photoReply = page.waitForResponse(isPath('/api/photo'));
+  const leadsReply = page.waitForResponse(isPath('/api/photo/leads'));
+  await page.locator('#photo-samples [data-sample]').filter({ hasText: /Piranha LEDs/ }).click();
+
+  const res = await photoReply;
+  expect(res.status()).toBe(200);
+  const answer = await res.json();
+  expect({ provider: answer.provider, key: answer.key }, 'answered from the recording, no AI').toEqual({ provider: 'fixture', key: 'piranha' });
+  await expect(page.locator('#photo-confirm')).toBeVisible();
+  await expect(page.locator('#photo-confirm'), 'its credit under the photo').toContainText(credit, { useInnerText: true });
+  const ids = [...reading.parts, ...reading.wires].map(e => e.id);
+  await expect(page.locator('#photo-parts li[data-id]'), 'a row per recorded part and wire').toHaveCount(ids.length + reading.power.length);
+  const rows = await page.locator('#photo-parts li[data-id]').evaluateAll(lis => lis.map(li => li.dataset.id));
+  expect(rows.filter(r => !r.startsWith('power:')).sort()).toEqual([...ids].sort());
+
+  // The crop round: replayed from leads/piranha.json, then done.
+  const lr = await leadsReply;
+  expect(lr.status()).toBe(200);
+  const sentIds = lr.request().postDataJSON().items.map(it => it.id);
+  const lines = (await lr.text()).split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+  expect(lines.find(l => l.done), 'the crop round ends with its done line').toMatchObject({ done: true, provider: 'fixture' });
+  await expect.poll(() => page.evaluate(() => window.PhotoConfirm.placing.size), { message: 'every crop answered' }).toBe(0);
+
+  // Each crop sent with a recorded 2-leg answer (what PhotoCrops.merge places;
+  // most piranha LEDs came back with 4 legs and keep their placeholders): each
+  // end at its recorded point, in the hole under it; an end recorded with no
+  // point is 'off'.
+  const now = await page.evaluate(() => {
+    const r = window.PhotoConfirm.reading, g = window.PhotoCapture.grid;
+    return Object.fromEntries([...r.parts.map(p => [p.id, p.leads]), ...r.wires.map(w => [w.id, w.ends])]
+      .map(([id, ends]) => [id, ends.map(e => ({ pt: e.pt, hole: e.hole, under: g.snap(e.pt).hole }))]));
+  });
+  const landed = legs.filter(e => e.found === true && Array.isArray(e.leads) && e.leads.length === 2 && sentIds.includes(e.id));
+  expect(landed.length, 'the round placed recorded legs').toBeGreaterThan(0);
+  for (const e of landed) {
+    expect(now[e.id], `${e.id} is on the confirm screen`).toBeTruthy();
+    e.leads.forEach((l, i) => {
+      const end = now[e.id][i];
+      if (!Array.isArray(l.pt)) return expect(end.hole, `${e.id} end ${i + 1}: recorded with no point`).toBe('off');
+      expect(end.pt, `${e.id} end ${i + 1}: at the recorded point`).toEqual(l.pt);
+      expect(end.hole, `${e.id} end ${i + 1}: in the hole under it`).toBe(end.under);
+    });
+  }
+  expect(errors).toEqual([]);
+});
+
+test('a sample that fails shows the error card; its Use sample photo opens the same picker, and the demo-board tile sends the default sample', async ({ page }) => {
+  const errors = watchErrors(page);
+  const sent = [];
+  await page.route('**/api/photo', route => {
+    sent.push(route.request().postDataJSON());
+    if (sent.length === 1) return route.fulfill({ status: 504, json: { reply: TIMEOUT_REPLY, code: 'AI_TIMEOUT' } });
+    return route.fulfill({ json: MOCK_RESPONSE });
+  });
+  await openEditor(page);
+  const ids = Object.keys(await samplesOf(page));
+
+  await page.locator('#photo-btn').click();
+  await page.locator('#photo-sample').click();
+  await pickSample(page, 'piranha');
+  await expect(page.locator('#photo-status')).toContainText(TIMEOUT_REPLY);
+  expect(sent[0].sample).toBe('piranha');
+  await expect(page.locator('#photo-error-sample')).toBeVisible();
+  await expect(page.locator('#photo-error-sample')).toHaveText(/Use sample photo/);
+
+  await page.locator('#photo-error-sample').click();
+  await expect(page.locator('#photo-samples'), 'the error card\'s Use sample photo opens the picker').toBeVisible();
+  const listed = await page.locator('#photo-samples [data-sample]').evaluateAll(ts => ts.map(t => t.dataset.sample));
+  expect(listed.sort(), 'the same picker: every sample').toEqual([...ids].sort());
+  expect(sent.length, 'nothing sent until a tile is chosen').toBe(1);
+  await pickSample(page, 'demo-board');
+  await expect.poll(() => sent.length).toBe(2);
+  expect(sent[1].sample, 'the default sample, from the error card').toBe('demo-board');
+  await expect(page.locator('#photo-confirm')).toBeVisible();
+  expect(errors.filter(e => !/\/api\/photo|status of 504/.test(e))).toEqual([]);
 });
 
 // ── Errors ────────────────────────────────────────────────────────────────
@@ -286,12 +477,14 @@ test('an error shows the reply with Use sample photo; a stalled /api/photo gives
 
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
+  await pickSample(page, 'demo-board');
   await expect(page.locator('#photo-status')).toContainText(TIMEOUT_REPLY);
   await expect(page.locator('#photo-error-sample')).toBeVisible();
   await expect(page.locator('#photo-error-sample')).toHaveText(/Use sample photo/);
 
   // The page shows whatever reply the server sends.
   await page.locator('#photo-error-sample').click();
+  await pickSample(page, 'demo-board');
   await expect(page.locator('#photo-status')).toContainText(NO_BOARD_REPLY);
   expect(sent[1].sample).toBe('demo-board');
   await expect(page.locator('#photo-error-sample')).toBeVisible();
@@ -299,6 +492,7 @@ test('an error shows the reply with Use sample photo; a stalled /api/photo gives
   // A hang: the page's own timeout, shortened, ends it with the AI_TIMEOUT message.
   await page.evaluate(() => { window.PhotoCapture.timeoutMs = 500; });
   await page.locator('#photo-error-sample').click();
+  await pickSample(page, 'demo-board');
   await expect(page.locator('#photo-status')).toContainText('Reading your board');
   await expect(page.locator('#photo-status')).toContainText(TIMEOUT_REPLY, { timeout: 5000 });
   await expect(page.locator('#photo-error-sample')).toBeVisible();

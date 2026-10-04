@@ -1,0 +1,156 @@
+{
+  "sample": "multimeter",
+  "sha256": "e745dff090aef6ec80c206f1883efd4d6e915f2d591b0418c28d14a108ff9968",
+  "reading": {
+    "board": {
+      "visible": true,
+      "cols": 63,
+      "rails": {
+        "aOuter": "+",
+        "aInner": "-",
+        "jInner": "+",
+        "jOuter": "-"
+      },
+      "split": false
+    },
+    "parts": [
+      {
+        "id": "LED1",
+        "type": "led",
+        "what": "red led",
+        "value": 0,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              485.5,
+              128.9
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              805.8,
+              128.9
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          485.5,
+          55.4,
+          805.8,
+          202.4
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "R1",
+        "type": "resistor",
+        "what": "10k resistor",
+        "value": 10000,
+        "bands": [],
+        "color": "",
+        "leads": [
+          {
+            "hole": "?",
+            "pt": [
+              569.2,
+              359.6
+            ],
+            "role": "unknown"
+          },
+          {
+            "hole": "?",
+            "pt": [
+              838.4,
+              359.6
+            ],
+            "role": "unknown"
+          }
+        ],
+        "box": [
+          569.2,
+          258.4,
+          838.4,
+          460.8
+        ],
+        "confidence": 0.9,
+        "unsure": [
+          "leads"
+        ]
+      }
+    ],
+    "wires": [
+      {
+        "id": "W1",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              0,
+              472.6
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              777.2,
+              472.6
+            ]
+          }
+        ],
+        "box": [
+          0,
+          323.1,
+          777.2,
+          622
+        ],
+        "confidence": 0.8,
+        "unsure": [
+          "leads"
+        ]
+      },
+      {
+        "id": "W2",
+        "color": "",
+        "ends": [
+          {
+            "hole": "?",
+            "pt": [
+              0,
+              548.9
+            ]
+          },
+          {
+            "hole": "?",
+            "pt": [
+              797.6,
+              548.9
+            ]
+          }
+        ],
+        "box": [
+          0,
+          465.1,
+          797.6,
+          632.6
+        ],
+        "confidence": 0.8,
+        "unsure": [
+          "leads"
+        ]
+      }
+    ],
+    "power": []
+  },
+  "provider": "gemini",
+  "model": "gemini-robotics-er-2-preview"
+}

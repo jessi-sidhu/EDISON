@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "Textbook figure 1.1: 10 V across 1 kΩ",
+  "thumbnail": "",
+  "components": [
+    {"type":"bench_supply","id":"PS1","label":"PS1","values":{"voltage":10,"limit":0.5},"holeRefs":null,"position":{"x":16.4,"z":-1}},
+    {"type":"resistor","id":"R1","label":"R1","values":{"resistance":1000},"holeRefs":[{"pin":"lead1","col":29,"row":"a"},{"pin":"lead2","col":33,"row":"a"}],"position":{"x":0,"z":0}}
+  ],
+  "wires": [
+    {"id":"W1","startHole":null,"endHole":{"col":44,"row":"tp"},"startCompIdx":0,"startPinIdx":0,"endCompIdx":-1,"endPinIdx":-1,"startPin":"pos","color":15680580},
+    {"id":"W2","startHole":null,"endHole":{"col":44,"row":"tn"},"startCompIdx":0,"startPinIdx":1,"endCompIdx":-1,"endPinIdx":-1,"startPin":"com","color":0},
+    {"id":"W3","startHole":{"col":29,"row":"tp"},"endHole":{"col":29,"row":"b"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":15680580},
+    {"id":"W4","startHole":{"col":33,"row":"b"},"endHole":{"col":33,"row":"tn"},"startCompIdx":-1,"startPinIdx":-1,"endCompIdx":-1,"endPinIdx":-1,"color":0}
+  ]
+}

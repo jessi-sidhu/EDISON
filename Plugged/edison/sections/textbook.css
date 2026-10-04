@@ -1,0 +1,80 @@
+/* edison/sections/textbook.css — the Textbook (spec §5.2, §4a). STIX body on
+   the pad, Barlow Condensed openers with a square live figure (Elodin), and
+   fine-line engraved diagrams in graphite (Synthetic Sciences). Tokens only;
+   borders, never shadows. */
+
+main > section[data-route="textbook"] { max-width: 920px; }
+.tb-intro { margin: 0 0 24px; }
+
+/* ── Contents: one row of chapters that stays on screen; the open one has a mask bar ── */
+.tb-toc {
+  position: sticky; top: 0; z-index: 1; display: flex; margin: 0 0 40px; padding: 0; list-style: none;
+  background-color: var(--pad); border-top: 1px solid var(--graphite); border-bottom: 1px solid var(--pad-grid);
+}
+.tb-toc li { flex: 1; }
+.tb-toc button {
+  display: block; width: 100%; padding: 12px 16px 10px 0; border: 0; border-bottom: 2px solid transparent;
+  background: none; color: var(--graphite); font: 500 var(--t-16)/1.3 var(--font-ui); text-align: left; cursor: pointer;
+}
+.tb-toc button:hover { text-decoration: underline; text-underline-offset: 3px; }
+.tb-toc button:focus-visible { outline: 2px solid var(--mask); outline-offset: -2px; }
+.tb-toc button[aria-current="true"] { border-bottom-color: var(--mask); font-weight: 600; }
+.tb-toc-n { margin-right: 6px; color: var(--graphite-2); font-variant-numeric: tabular-nums; }
+
+/* ── The opener: a huge condensed title, a quiet standfirst, a square live figure ── */
+.tb-opener {
+  display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 40px; align-items: start;
+  padding-bottom: 32px; border-bottom: 1px solid var(--graphite);
+}
+.tb-opener h3 { margin: 4px 0 24px; font: 600 var(--t-49)/1.04 var(--font-display); letter-spacing: 0.01em; }
+.tb-lede { max-width: 30em; margin: 0; font: italic 400 var(--t-20)/1.5 var(--font-text); }
+.tb-in { margin: 32px 0 0; padding: 0; list-style: none; }
+.tb-in button {
+  display: block; padding: 4px 0; border: 0; background: none; color: var(--graphite);
+  font: 400 var(--t-16)/1.5 var(--font-ui); text-align: left; cursor: pointer;
+}
+.tb-in button:hover { text-decoration: underline; text-underline-offset: 3px; }
+.tb-in button:focus-visible { outline: 2px solid var(--mask); outline-offset: 2px; }
+.tb-in .tb-sec-n { color: var(--graphite-2); }
+
+/* ── Live figures: the viewer in a bezel window, its caption and the editor link ── */
+.tb-live { margin: 0; }
+.tb-frame { padding: 8px; background: var(--bezel); border: 1px solid rgb(0 0 0 / 40%); }   /* an instrument window */
+.tb-frame iframe { display: block; width: 100%; aspect-ratio: 16 / 10; border: 0; }
+.tb-inset .tb-frame iframe { aspect-ratio: 1 / 1; }
+.tb-live figcaption, .tb-diagram figcaption {
+  margin: 8px 0 0; font: 400 var(--t-13)/1.45 var(--font-ui); color: var(--graphite-2); max-width: 60ch;
+}
+.tb-fig-n { font-weight: 600; color: var(--graphite); }
+.tb-live .btn { margin-top: 12px; padding: 6px 12px; font-size: var(--t-13); }
+.tb-section .tb-live { margin: 24px 0 8px; max-width: 508px; }
+
+/* ── Sections: numbered headings in Barlow, the body in STIX at 18 px / 1.6 (plan E7),
+      57ch wide: about 68 characters a line, under the spec's 75 ── */
+.tb-section h4 { margin: 40px 0 12px; font: 600 var(--t-20)/1.3 var(--font-ui); scroll-margin-top: 64px; }
+.tb-sec-n { margin-right: 10px; font-variant-numeric: tabular-nums; }
+.tb-body p { max-width: 57ch; margin: 0 0 16px; font: 400 18px/1.6 var(--font-text); }
+
+/* ── Engraved diagrams: 1 px graphite strokes at any size, paths never filled ── */
+.tb-diagram { margin: 32px 0 8px; max-width: 508px; }
+.tb-diagram svg { display: block; max-width: 100%; height: auto; overflow: visible; }
+.tb-diagram :is(path, line, polyline, polygon, circle) {
+  fill: none; stroke: var(--graphite); stroke-width: 1; vector-effect: non-scaling-stroke;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.tb-diagram .dot   { fill: var(--graphite); }
+.tb-diagram .dash  { stroke-dasharray: 5 4; }
+.tb-diagram .guide { stroke: var(--graphite-2); stroke-dasharray: 1 3; }
+.tb-diagram text   { font: 400 var(--t-16) var(--font-text); fill: var(--graphite); }
+.tb-diagram .v     { font-style: italic; }
+.tb-diagram .sub   { font-size: var(--t-13); }
+
+@media (max-width: 900px) {
+  .tb-opener { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .tb-inset { max-width: 320px; }
+}
+@media (max-width: 760px) {
+  .tb-toc { position: static; flex-direction: column; }
+  .tb-toc button { padding: 10px 0 8px; }
+  .tb-opener h3 { font-size: var(--t-39); }
+}

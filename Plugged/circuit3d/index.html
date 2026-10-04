@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sparky</title>
+  <script src="../edison/ui-flag.js"></script>
+  <link rel="stylesheet" href="../edison/fonts.css" media="print" onload="this.media='all'" />
+  <link rel="stylesheet" href="../edison/tokens.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
@@ -11,6 +14,8 @@
   <link rel="stylesheet" href="css/sidebar.css" />
   <link rel="stylesheet" href="css/inspector.css" />
   <link rel="stylesheet" href="css/tools.css" />
+  <link rel="stylesheet" href="css/lab-sheet.css" />
+  <link rel="stylesheet" href="css/theme-edison.css" />
 </head>
 <body>
 
@@ -242,9 +247,14 @@
           <button class="btn-simulate" id="photo-ok" disabled>Looks right</button>
         </div>
       </div>
+      <!-- Sample picker (js/photo.js, #182): a tile per window.PhotoSamples entry -->
+      <div id="photo-samples" hidden></div>
       <!-- Confirm screen (js/photo-confirm.js, #141) -->
       <div id="photo-confirm" hidden>
-        <canvas id="photo-confirm-canvas"></canvas>
+        <div class="photo-shot">
+          <canvas id="photo-confirm-canvas"></canvas>
+          <div id="photo-credit"></div>
+        </div>
         <div class="photo-side">
           <div id="photo-confirm-help">Check every dot against your board. Tap a dot, then the hole it's really in. The + dot is the LED's long leg.</div>
           <ul id="photo-parts"></ul>
@@ -313,6 +323,8 @@
 <script src="js/tools/flow-dots.js"></script>
 <script src="js/tools/scope.js"></script>
 <script src="js/tools/meter-display.js"></script>
+<script src="labs/sheets.js"></script>
+<script src="js/tools/lab-sheet.js"></script>
 <script src="js/tools/labs.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/ids.js"></script>
@@ -329,6 +341,7 @@
 <script src="samples/samples.js"></script>
 <script src="js/photo-confirm.js"></script>
 <script src="js/photo.js"></script>
+<script src="../edison/skin.js"></script>
 
 </body>
 </html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en" data-ui="edison" data-ui-fixed>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="ui-flag.js"></script>
+  <title>ENSC 220: Electric Circuits I</title>
+  <link rel="stylesheet" href="fonts.css">
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="course.css">
+  <link rel="stylesheet" href="sections/textbook.css">
+  <link rel="stylesheet" href="sections/grades.css">
+  <link rel="stylesheet" href="sections/ta.css">
+</head>
+<body>
+  <aside class="side">
+    <p class="side-code">ENSC 220</p>
+    <p class="side-term">Fall 2026</p>
+    <nav aria-label="Course">
+      <a href="#home">Home</a>
+      <a href="#labs">Labs</a>
+      <a href="#textbook">Textbook</a>
+      <a href="#grades">Grades</a>
+      <a href="#ta">TA view</a>
+    </nav>
+    <p class="side-about">Edison: electrical design and interactive simulation of networks.</p>
+  </aside>
+
+  <div class="page">
+    <header class="banner">
+      <img src="img/course-banner.jpg" alt="The Lab 1 circuit on a breadboard, wired to the bench supply" width="1600" height="500">
+      <h1>Electric Circuits I</h1>
+    </header>
+
+    <main class="ed-pad">
+      <section data-route="home" hidden></section>
+      <section data-route="labs" hidden></section>
+      <section data-route="textbook" hidden></section>
+      <section data-route="grades" hidden></section>
+      <section data-route="ta" hidden></section>
+    </main>
+
+    <footer>A demo course page. Not an official SFU site.</footer>
+  </div>
+
+  <script src="course-data.js"></script>
+  <script src="../circuit3d/labs/sheets.js"></script>
+  <script src="course.js"></script>
+  <script src="sections/textbook.js"></script>
+  <script src="sections/grades.js"></script>
+  <script src="sections/ta.js"></script>
+</body>
+</html>

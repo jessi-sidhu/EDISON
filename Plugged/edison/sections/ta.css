@@ -1,0 +1,63 @@
+/* edison/sections/ta.css — the TA view (spec §4a: Quindar's isometric line art
+   with dashed callouts, Godela's heat scale and legend). Colours, type and
+   radii come only from tokens.css. Flat fills and 1 px strokes; no gradients. */
+
+/* The drawing and the feed sit side by side, so this section is wider than the rest. */
+main > section[data-route="ta"] { max-width: 1120px; }
+
+.ta-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-bottom: 16px; }
+.ta-head h2 { margin: 0; }
+.ta-sample {
+  margin: 0; padding: 0 8px; border: 1px solid var(--graphite-2); border-radius: var(--r-control);
+  font-size: var(--t-13); line-height: 22px; color: var(--graphite-2); white-space: nowrap;
+}
+.ta-summary { margin: 0 0 32px; font-size: var(--t-20); line-height: 1.45; max-width: 58ch; }
+
+.ta-grid { display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 40px; align-items: start; }
+.ta-figure { margin: 0; min-width: 0; }
+
+/* ── The isometric breadboard: graphite line art on the pad ── */
+.ta-art { display: block; max-width: 100%; height: auto; overflow: visible; }
+.ta-art text { font-family: var(--font-ui); }
+.ta-outline { fill: var(--pad); stroke: var(--graphite); stroke-width: 1; stroke-linejoin: round; }
+.ta-side    { fill: var(--pad-grid); stroke: var(--graphite); stroke-width: 1; stroke-linejoin: round; }
+.ta-plane * { vector-effect: non-scaling-stroke; }   /* the plane is scaled into the drawing; its strokes stay 1 px */
+.ta-channel { fill: var(--pad-grid); stroke: var(--graphite); stroke-width: 0.5; }
+.ta-holes   { fill: var(--graphite-2); }
+.ta-pos     { stroke: var(--bus-red);  stroke-width: 1.5; }
+.ta-neg     { stroke: var(--bus-blue); stroke-width: 1.5; }
+.ta-dot     { stroke: var(--graphite); stroke-width: 1; }
+.ta-num     { fill: var(--graphite-2); font-size: var(--t-13); text-anchor: middle; font-variant-numeric: tabular-nums; }
+
+/* ── Callouts: a dashed graphite leader ending in a pip on the hole ── */
+.ta-ko      { fill: none; stroke: var(--pad); stroke-width: 4; stroke-linejoin: round; }
+.ta-leader  { fill: none; stroke: var(--graphite); stroke-width: 1; stroke-dasharray: 4 3; stroke-linejoin: round; }
+.ta-pip     { fill: var(--graphite); }
+.ta-note    { fill: var(--graphite); font-size: var(--t-16); font-weight: 500; }
+.ta-val     { fill: var(--mask); font-size: var(--t-13); font-weight: 500; }
+.ta-art-error { margin: 0; padding: 24px 0; color: var(--graphite-2); }
+
+/* ── The legend: the heat scale in its steps, 0 at one end and the busiest hole at the other ── */
+.ta-legend { width: 288px; margin-top: 16px; }
+.ta-legend-title { margin: 0 0 8px; font-size: var(--t-13); line-height: 1.4; color: var(--graphite-2); }
+.ta-scale { display: flex; border: 1px solid var(--graphite); }
+.ta-swatch { flex: 1; height: 12px; }
+.ta-swatch + .ta-swatch { border-left: 1px solid var(--pad); }
+.ta-ticks { display: flex; justify-content: space-between; margin-top: 4px; font-size: var(--t-13); line-height: 1.4; font-variant-numeric: tabular-nums; }
+
+/* ── The live feed: newest first, time beside each event ── */
+.ta-feed-panel { border: 1px solid var(--pad-grid); border-radius: var(--r-panel); background: var(--pad); }
+.ta-feed-panel h3 { margin: 0; padding: 16px 20px 4px; font-size: var(--t-20); font-weight: 600; line-height: 1.3; }
+.ta-feed-about { max-width: none; margin: 0; padding: 0 20px 12px; font-size: var(--t-13); line-height: 1.4; color: var(--graphite-2); border-bottom: 1px solid var(--pad-grid); }
+.ta-feed { list-style: none; margin: 0; padding: 0; }
+.ta-feed li { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 0 12px; padding: 12px 20px; border-bottom: 1px solid var(--pad-grid); }
+.ta-feed li:last-child { border-bottom: 0; }
+.ta-feed time { grid-row: span 2; padding-top: 2px; font-size: var(--t-13); color: var(--graphite-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ta-feed-text { margin: 0; line-height: 1.4; text-wrap: pretty; }
+.ta-feed-where { margin: 2px 0 0; font-size: var(--t-13); line-height: 1.4; color: var(--graphite-2); }
+
+/* Narrower screens: the feed goes under the drawing. */
+@media (max-width: 1100px) {
+  .ta-grid { grid-template-columns: minmax(0, 1fr); }
+  .ta-feed-panel { max-width: 560px; }
+}

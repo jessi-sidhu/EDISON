@@ -1,0 +1,19 @@
+/* edison/tokens.css — the only source of Edison's look (spec §4). */
+html[data-ui="edison"] {
+  --pad: #E9EFE2;  --pad-grid: #CFDCC3;  --pad-grid-line: #E1E9D8;   /* the grid itself, 6% under --pad */
+  --graphite: #262927;  --graphite-2: #4D534E;
+  --mask: #1D6A45;  --bus-red: #C4333B;  --bus-blue: #2C5CC0;
+  --bezel: #1E2225;  --ch1: #E6B72E;  --ch2: #38B2D4;  --sfu: #A6192E;
+  --font-ui: 'Barlow', system-ui, sans-serif;
+  --font-dense: 'Barlow Semi Condensed', 'Barlow', sans-serif;
+  --font-display: 'Barlow Condensed', 'Barlow', sans-serif;
+  --font-num: 'B612', Menlo, Consolas, 'DejaVu Sans Mono', monospace;   /* Ω isn't in Google's B612 subset */
+  --font-text: 'STIX Two Text', Georgia, serif;
+  --t-13: 13px; --t-16: 16px; --t-20: 20px; --t-25: 25px; --t-31: 31px; --t-39: 39px; --t-49: 49px;
+  --r-control: 2px; --r-panel: 4px;
+  --pad-grid-image: linear-gradient(var(--pad-grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--pad-grid-line) 1px, transparent 1px);
+  --scene-bg: #1E2225;
+  --scene-ground: #121416;   /* lit by scene.js's lights, the bench reads as --bezel */
+}
+html[data-ui="edison"] .ed-pad { background-color: var(--pad); background-image: var(--pad-grid-image); background-size: 20px 20px; }
+html[data-ui="edison"] .ed-num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }

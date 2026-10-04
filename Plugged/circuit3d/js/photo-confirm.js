@@ -4,8 +4,11 @@
 //  battery lead, the parts list (values, colours, volts, amber flags,
 //  greyed not-built parts), + Add a part, swap + / − per rail side, and
 //  Build it.
-//  DOM only: the geometry is PhotoGrid, the labels and actions are
-//  PhotoImport.build. Contract: docs/API-CONTRACT.md → "Reading v1",
+//  DOM only: the geometry is PhotoGrid, the flags and actions are
+//  PhotoImport.build. Each row and canvas label is named by its Reading id
+//  (PhotoImport's key when that is missing or repeated; a battery its app
+//  label, BAT1), never by its built label (#178).
+//  Contract: docs/API-CONTRACT.md → "Reading v1",
 //  "PhotoGrid", "PhotoImport"; spec → "The confirm screen".
 //
 //  FLOW
@@ -144,15 +147,32 @@
     buildB.disabled = unknown();
   }
 
+  // Each part's and wire's name on this screen (#178), in Reading order:
+  // its Reading id, the one its why-text uses; a missing or repeated id
+  // takes PhotoImport's key instead (part<n> / wire<n>, <id>#2), so no two
+  // read the same. PhotoImport's labels name the built board, not these.
+  function names() {
+    const uses = new Map();
+    const key  = (id, fallback) => {
+      const base = id != null && String(id).trim() ? String(id).trim() : fallback;
+      uses.set(base, (uses.get(base) || 0) + 1);
+      return uses.get(base) > 1 ? `${base}#${uses.get(base)}` : base;
+    };
+    return { parts: C.reading.parts.map((p, i) => key(p.id, `part${i + 1}`)),
+             wires: C.reading.wires.map((w, i) => key(w.id, `wire${i + 1}`)) };
+  }
+  const battery = k => C.result.labels['power:' + k] || 'power:' + k;   // its app label (BAT1)
+
   // What is drawn: a dot per part lead, wire end and battery lead (end 0
-  // its +, end 1 its −), flattened pixels.
+  // its +, end 1 its −), flattened pixels, labelled with its item's name.
   function dots() {
     if (!C.reading) return [];
-    const dot = (id, e, i, plus) => ({ id, end: i, hole: e.hole, x: where(e)[0], y: where(e)[1], label: C.result.labels[id] || '', plus });
+    const n   = names();
+    const dot = (id, label, e, i, plus) => ({ id, end: i, hole: e.hole, x: where(e)[0], y: where(e)[1], label, plus });
     return [
-      ...C.reading.parts.flatMap(p => p.leads.map((l, i) => dot(p.id, l, i, isLed(p) && l.role === 'anode'))),
-      ...C.reading.wires.flatMap(w => w.ends.map((e, i) => dot(w.id, e, i, false))),
-      ...C.reading.power.flatMap((s, k) => [s.plus, s.minus].map((e, i) => dot('power:' + k, e, i, false))),
+      ...C.reading.parts.flatMap((p, k) => p.leads.map((l, i) => dot(p.id, n.parts[k], l, i, isLed(p) && l.role === 'anode'))),
+      ...C.reading.wires.flatMap((w, k) => w.ends.map((e, i) => dot(w.id, n.wires[k], e, i, false))),
+      ...C.reading.power.flatMap((s, k) => [s.plus, s.minus].map((e, i) => dot('power:' + k, battery(k), e, i, false))),
     ];
   }
 
@@ -197,10 +217,10 @@
     ctx.textBaseline = 'middle';
     drawBoard(ctx, at, d);
 
-    const all = dots();
-    const ends = id => all.filter(q => q.id === id);
-    for (const p of C.reading.parts) link(ctx, ends(p.id), at, d, isLed(p) ? INK[p.color] || INK.red : '#d6a85c');
-    for (const w of C.reading.wires) link(ctx, ends(w.id), at, d, INK[w.color] || '#a3a3a3');
+    const all = dots(), n = names();
+    const ends = (id, name) => all.filter(q => q.id === id && q.label === name);   // one item's: ids may repeat, names don't (#178)
+    C.reading.parts.forEach((p, k) => link(ctx, ends(p.id, n.parts[k]), at, d, isLed(p) ? INK[p.color] || INK.red : '#d6a85c'));
+    C.reading.wires.forEach((w, k) => link(ctx, ends(w.id, n.wires[k]), at, d, INK[w.color] || '#a3a3a3'));
     for (const q of all) {
       const [x, y] = at([q.x, q.y]);
       const sel = C.selected && C.selected.id === q.id && C.selected.end === q.end;
@@ -228,10 +248,13 @@
       ctx.stroke();
     }
     ctx.font = `600 ${11 * d}px sans-serif`;
-    for (const id of new Set(all.map(q => q.id))) {
-      const e = ends(id), lab = e[0].label || id;
+    const named = new Set();
+    for (const q of all) {                                         // one label per item, by its name
+      if (named.has(q.id + '\n' + q.label)) continue;
+      named.add(q.id + '\n' + q.label);
+      const e = ends(q.id, q.label);
       const [x, y] = at([(e[0].x + e[e.length - 1].x) / 2, (e[0].y + e[e.length - 1].y) / 2]);
-      text(ctx, lab, x, y - 12 * d, d);
+      text(ctx, q.label, x, y - 12 * d, d);
     }
   }
 
@@ -322,17 +345,18 @@
       rows.push(li);
     }
     const holes = ends => ends.map(e => e.hole).join(' → ');
-    for (const p of C.reading.parts) {
+    const n = names();
+    C.reading.parts.forEach((p, k) => {
       let note = p.type === 'resistor' || isLed(p) ? holes(p.leads) : p.what || p.type;
       if (isLed(p)) {
         const a = p.leads.find(l => l.role === 'anode');
         note += picked(p) ? ` · + in ${a.hole}` : ' · which leg is +? Press ⇄';
       }
       const pick = p.type === 'resistor' ? valueSelect(p) : isLed(p) ? colorSelect(p, Object.keys(Parts.get('led').values.color.choices)) : null;
-      rows.push(row(p.id, note, isLed(p) && (() => swapLegs(p.id)), pick));
-    }
-    for (const w of C.reading.wires) rows.push(row(w.id, holes(w.ends), null, colorSelect(w, WIRE_COLORS)));
-    C.reading.power.forEach((s, i) => rows.push(row('power:' + i, s.kind === 'bench_supply' ? 'bench supply' : 'battery', null, voltsInput(s, 'power:' + i))));
+      rows.push(row(p.id, n.parts[k], note, isLed(p) && (() => swapLegs(p.id)), pick));
+    });
+    C.reading.wires.forEach((w, k) => rows.push(row(w.id, n.wires[k], holes(w.ends), null, colorSelect(w, WIRE_COLORS))));
+    C.reading.power.forEach((s, i) => rows.push(row('power:' + i, battery(i), s.kind === 'bench_supply' ? 'bench supply' : 'battery', null, voltsInput(s, 'power:' + i))));
 
     const active = document.activeElement;
     const held   = keep && active && list.contains(active) ? active.closest('li[data-id]') : null;
@@ -366,11 +390,12 @@
     note.textContent = C.placing.size ? `Placing legs ${sent - C.placing.size}/${sent}…` : '';
   }
 
-  function row(id, note, swap, pick) {
+  // A row: data-id its Reading id ('power:N' a battery), named by its name.
+  function row(id, label, note, swap, pick) {
     const li = document.createElement('li');
     li.dataset.id = id;
     const name = document.createElement('b');
-    name.textContent = C.result.labels[id] || id;
+    name.textContent = label;
     const what = document.createElement('span');
     what.textContent = note;
     const why = document.createElement('small');
