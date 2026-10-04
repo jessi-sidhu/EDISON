@@ -934,17 +934,21 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   };
   let crossing = null;   // the first source whose wave crosses 0 V
 
-  const pos = new Set(), neg = new Set();
-  // A crossing wave's reversed pair (COM as +, OUT as −) grows into its own
-  // sets: mixed into pos / neg, its tn would meet another source's growth
-  // and excuse a backwards LED on that source (#3).
-  const posR = new Set(), negR = new Set();
+  // #9: orientation is judged within one group, { P, N }: a source's own
+  // pairs grow into that source's group (the bench supply's pos → com → neg
+  // in series spans both its pairs), and each current source's pair into its
+  // own. Mixed, one source's + meets another's − through a shared tn (a
+  // generator's − growth round a correct LED to tp) and excuses a backwards
+  // LED on the other source. A crossing wave's reversed pair (COM as +, OUT
+  // as −) grows into a wave group of its own, with its wave (#3).
+  const groups = [], waveGroups = [];
+  const newGroup = () => ({ P: new Set(), N: new Set() });
   const terminals = [];
-  // A terminal pair's reach into pos / neg (or `into`'s pair): first each
-  // side without diodes, then grown through forward diodes without crossing
-  // into the other side: an LED that lit up one branch must not carry +
-  // round through the ground rail and hide a reversed LED elsewhere.
-  function growPair(plus, minus, [P, N] = [pos, neg]) {
+  // A terminal pair's reach into a group: first each side without diodes,
+  // then grown through forward diodes without crossing into the other side:
+  // an LED that lit up one branch must not carry + round through the ground
+  // rail and hide a reversed LED elsewhere.
+  function growPair(plus, minus, { P, N }) {
     const plusSide = reach(plus), minusSide = reach(minus);
     const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
     const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
@@ -959,6 +963,10 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     const ref = def.pins.indexOf(def.ref);
     const wave = crossingWave(def, placeAction.get(`${def.type}|${n}`));
     if (wave && !crossing) crossing = wave;
+    const group = newGroup();
+    groups.push(group);
+    const waveGroup = wave ? { ...newGroup(), wave } : null;
+    if (waveGroup) waveGroups.push(waveGroup);
     if (n < (placed.get(def) || 0)) {
       if (isBattery(def)) {
         if (!wired(key(0))) problems.push(`${pinName(n, 0)} is not wired to a positive rail (tp_N), so nothing on the board is powered.`);
@@ -986,19 +994,21 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
       const pair = `${rails(plusWires)}|${rails(reach(minus, wireEdges))}`;
       if (isBattery(def) && !/^\||\|$/.test(pair)) railPairs.set(pair, [...(railPairs.get(pair) || []), n]);
 
-      growPair(plus, minus);
-      if (wave) growPair(minus, plus, [posR, negR]);
+      growPair(plus, minus, group);
+      if (waveGroup) growPair(minus, plus, waveGroup);
     }
   }
 
   for (const [p, m] of isrcPairs) {
     terminals.push([p, m]);
-    growPair(p, m);
+    const group = newGroup();
+    groups.push(group);
+    growPair(p, m, group);
   }
 
   // #118: an op-amp's output sources current into, and sinks it from, any
   // supply terminal, so for the on-path checks it pairs with each both ways.
-  // Not for orientation (pos / neg): a diode at an op-amp output is left to
+  // Not for orientation (the groups): a diode at an op-amp output is left to
   // the simulator, below. An unused op-amp (both inputs joined to nothing
   // outside their own column, as tl072.js's `unused`) drives nothing.
   const opampOuts = opamps.filter(o => o.ctrl.some(n => joined(n, o.i).size > 1)).map(o => o.out);
@@ -1029,10 +1039,14 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // nothing over accusing a correctly wired LED of being backwards.
   // A diode with a breakdown voltage (vz, a Zener) is used reversed: its
   // cathode on + and anode on − is how it regulates, not a mistake.
-  const reversedZener = d => d.el.vz !== undefined && pos.has(d.cathode) && neg.has(d.anode);
-  // Forward for some source's pair, or for a crossing wave's reversed pair
-  // on its own (#3).
-  const forward = d => (pos.has(d.anode) && neg.has(d.cathode)) || (posR.has(d.anode) && negR.has(d.cathode));
+  // Forward / against within one group: anode on its + side and cathode on
+  // its − side, or the other way round.
+  const forwardIn = d => g => g.P.has(d.anode) && g.N.has(d.cathode);
+  const againstIn = d => g => g.P.has(d.cathode) && g.N.has(d.anode);
+  const reversedZener = d => d.el.vz !== undefined && groups.some(againstIn(d));
+  // Forward for some source's own group, or for a crossing wave's reversed
+  // pair on its own (#3).
+  const forward = d => groups.some(forwardIn(d)) || waveGroups.some(forwardIn(d));
 
   // #77: the graph's "backwards" is only a candidate. A source with more
   // than one V element (the bench supply's com is the − of one pair and the
@@ -1101,8 +1115,18 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // op-amp output may be off as it should be on that half. With a wave that
   // crosses 0 V, it is read at the peak and the trough (t = 1/(4f), 3/(4f))
   // and is backwards only if reversed at both.
-  const moments = crossing && crossing.f > 0 ? [1 / (4 * crossing.f), 3 / (4 * crossing.f)] : [undefined];
-  const reversedAtOutput = d => moments.every(t => reverseBiased(d, t) === true);
+  const reversedAt = (d, wave) => (wave && wave.f > 0 ? [1 / (4 * wave.f), 3 / (4 * wave.f)] : [undefined])
+    .every(t => reverseBiased(d, t) === true);
+  const reversedAtOutput = d => reversedAt(d, crossing);
+  // #9: a diode against some source's group and forward for none is a
+  // candidate. Forward only for a crossing wave's reversed pair, it is
+  // backwards only if reversed at that wave's peak and trough; otherwise the
+  // plain solve decides, as above.
+  function backwardsDiode(d) {
+    if (groups.some(forwardIn(d)) || !groups.some(againstIn(d))) return false;
+    const byWave = waveGroups.filter(forwardIn(d));
+    return byWave.length ? byWave.every(g => reversedAt(d, g.wave)) : reverseBiased(d) !== false;
+  }
 
   for (const { i, a, def, holeOf, pinNodes } of fullRebuild ? placedParts : []) {
     if (def.place.kind === 'footprint') {
@@ -1113,9 +1137,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     // says backwards, and nothing is said without it.
     const atOutput = diodes.find(d => d.i === i && d.outer && !reversedZener(d) && driven(d));
     const backwards = atOutput ? (reversedAtOutput(atOutput) ? atOutput : null)
-      : diodes.find(d => d.i === i && d.outer && !reversedZener(d)
-        && !forward(d) && pos.has(d.cathode) && neg.has(d.anode)
-        && reverseBiased(d) !== false);
+      : diodes.find(d => d.i === i && d.outer && !reversedZener(d) && backwardsDiode(d));
     if (backwards) {
       const { el, holeOf } = backwards;
       const [ap, cp] = el.pins;
