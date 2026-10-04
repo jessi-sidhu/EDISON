@@ -14,12 +14,15 @@ async function openEditor(page, reply = { reply: '', actions: [] }) {
   await page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
 }
 
-// Today's 50-column board is 21.4 wide: the battery sits 2.5 past its right
-// end (x 13.2), right behind the top rails (midpoint of tp -3.35 and tn -2.95).
-const SPOT = { x: 21.4 / 2 + 2.5, z: -3.15 };
+// The battery sits 2.5 past the board's right end, right behind the top rails
+// (midpoint of tp and tn). The board's size comes from board-geometry.js
+// (issue #22): 63 columns, 26.6 wide, so x 15.8, z -3.15.
+const GEOMETRY = require('../circuit3d/js/board-geometry.js');
+const SPOT = { x: GEOMETRY.BOARD_W / 2 + 2.5, z: (GEOMETRY.ROW_Z.tp + GEOMETRY.ROW_Z.tn) / 2 };
 
 test('the AI battery preview and the accepted battery land on the same spot, behind the top rails', async ({ page }) => {
   await openEditor(page, batteryBuild);
+  expect(SPOT.x).toBeCloseTo(15.8, 5);
   expect(await page.evaluate(() => App.batterySpot())).toEqual({ x: expect.closeTo(SPOT.x, 2), z: expect.closeTo(SPOT.z, 2) });
 
   await page.evaluate(() => { window.__before = App.scene.children.length; });
@@ -44,20 +47,20 @@ test('the AI battery preview and the accepted battery land on the same spot, beh
   expect(placed.z).toBeCloseTo(SPOT.z, 2);
 });
 
-test('App.resetCamera puts the camera back on App.CAMERA.home, (0, 22, 30) looking at the origin', async ({ page }) => {
+// The numbers in App.CAMERA may change with the board's width (issue #22);
+// board-63.spec.js checks the views still show the whole board.
+test('App.resetCamera puts the camera back on App.CAMERA.home', async ({ page }) => {
   await openEditor(page);
   const cam = await page.evaluate(() => {
-    const before = { home: App.CAMERA.home, thumb: App.CAMERA.thumb };
+    const home = App.CAMERA.home;
     App.camera.position.set(5, 5, 5);
     App.controls.target.set(1, 1, 1);
     App.controls.update();
     App.resetCamera();
     const p = App.camera.position, t = App.controls.target;
-    return { ...before, pos: [p.x, p.y, p.z], target: [t.x, t.y, t.z] };
+    return { home, pos: [p.x, p.y, p.z], target: [t.x, t.y, t.z] };
   });
-  expect(cam.home).toEqual({ pos: [0, 22, 30], target: [0, 0, 0] });
-  expect(cam.thumb).toEqual({ pos: [20, 22, 20], target: [0, 0, 0] });
-  cam.pos.forEach((v, i) => expect(v).toBeCloseTo([0, 22, 30][i], 3));
-  cam.target.forEach((v, i) => expect(v).toBeCloseTo(0, 3));
+  cam.pos.forEach((v, i) => expect(v).toBeCloseTo(cam.home.pos[i], 3));
+  cam.target.forEach((v, i) => expect(v).toBeCloseTo(cam.home.target[i], 3));
   await expect(page.locator('#reset-cam-btn')).toBeHidden();
 });

@@ -7,14 +7,9 @@
 // The battery sits off the high-column end of the board, so its wires go to
 // the rails at the highest column, tp_N and tn_N (issue #12).
 
-// The board's highest column, read from GEOMETRY.COLS in breadboard.js (the
-// one source of truth for board size; that file only loads in a browser).
-const HIGHEST_COL = (() => {
-  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'circuit3d', 'js', 'breadboard.js'), 'utf8');
-  const m = /\bCOLS:\s*(\d+)/.exec(src);
-  if (!m) throw new Error('recipes.js: no COLS in breadboard.js GEOMETRY');
-  return +m[1];
-})();
+// The board's highest column: COLS from circuit3d/js/board-geometry.js, the one
+// source of truth for board size, which loads in Node (issue #22).
+const HIGHEST_COL = require('../../circuit3d/js/board-geometry.js').COLS;
 
 // Row a is the row nearest the rails, so every rail-to-body wire lands in
 // row a and the parts sit one row further back (rows b-d). No wire passes

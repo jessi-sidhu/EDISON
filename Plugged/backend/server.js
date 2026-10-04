@@ -13,6 +13,8 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 const { makeAsk } = require('./ai-providers');
+// The board's size: the same file the 3D editor builds the board from.
+const { COLS, TOTAL_HOLES } = require('../circuit3d/js/board-geometry.js');
 
 // ── Load .env ─────────────────────────────────────────────────
 function loadEnv() {
@@ -49,10 +51,10 @@ const MODEL_NAME = AI_PROVIDER === 'deepseek' ? (process.env.DEEPSEEK_MODEL || '
 
 // ── Gemini system prompt ─────────────────────────────────────
 const SYSTEM_PROMPT = [
-  'You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual 700-point breadboard.',
+  `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
   '',
   'BREADBOARD LAYOUT:',
-  '- Columns 1-50. Rows a/b/c/d/e = top half. Rows f/g/h/i/j = bottom half.',
+  `- Columns 1-${COLS}. Rows a/b/c/d/e = top half. Rows f/g/h/i/j = bottom half.`,
   '- Same column + same half = electrically connected (e.g. a14 and e14 share a node).',
   '- The CENTER CHANNEL separates top from bottom. a14 and f14 are NOT connected unless you wire them.',
   '- tp_N = positive power rail at column N (+9V). tn_N = GND rail at column N.',
@@ -144,7 +146,7 @@ const SYSTEM_PROMPT = [
   '  Total calls: 9.',
   '',
   'SEPARATE BRANCHES, ONLY WHEN ASKED (e.g. "3 LEDs, each with its own resistor", at C=2, C=10, C=18):',
-  '  Battery wires once: BAT1.0 -> tp_{N} (red) and BAT1.1 -> tn_{N} (black), tp_50 and tn_50 on a 50-column board.',
+  `  Battery wires once: BAT1.0 -> tp_{N} (red) and BAT1.1 -> tn_{N} (black), tp_${COLS} and tn_${COLS} on a ${COLS}-column board.`,
   '  Each group is steps 5-8 of the one-LED recipe at its own C.',
   '  Total calls: 1 delete_all + 1 place_battery + 2 battery wires + 3*(place_resistor + place_led + 2 rail wires) = 16 calls.',
   '  Every LED group needs its own pair of rail-to-body wires: tp_{C+1}->a{C} and a{C+6}->tn_{C+6}.',
@@ -714,4 +716,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, clientKey, finishAIReply };
+module.exports = { server, clientKey, finishAIReply, SYSTEM_PROMPT };

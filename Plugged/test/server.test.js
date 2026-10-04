@@ -4,6 +4,14 @@ const assert = require('node:assert');
 process.env.AI_PROVIDER = 'fixture';   // no key needed, never calls out
 const Server = require('../backend/server.js');
 
+// The system prompt as the server builds it and sends it. Its column lines are
+// generated from board-geometry.js at startup (issue #22), so the tests read the
+// built string, not the source.
+const promptText = () => {
+  assert.equal(typeof Server.SYSTEM_PROMPT, 'string', 'server.js must export the built SYSTEM_PROMPT');
+  return Server.SYSTEM_PROMPT;
+};
+
 test('finishAIReply drops malformed actions, fills an empty reply and flags an unwired battery', () => {
   const out = Server.finishAIReply({ reply: '', actions: [
     { tool: 'place_battery' },
@@ -59,8 +67,7 @@ test('a battery with only BAT1.0 wired is flagged for its unwired negative pin',
 });
 
 test('the system prompt teaches the label form for battery pins', () => {
-  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'backend', 'server.js'), 'utf8');
-  const prompt = src.slice(src.indexOf('const SYSTEM_PROMPT'), src.indexOf("].join('\\n');", src.indexOf('const SYSTEM_PROMPT')));
+  const prompt = promptText();
   assert.match(prompt, /BAT1\.0/);
   assert.match(prompt, /BAT1\.1/);
   assert.doesNotMatch(prompt, /battery_0_pin/);
@@ -195,8 +202,7 @@ test('the colours finishAIReply accepts are exactly red, yellow, green, blue and
 });
 
 test('the system prompt tells the AI to pass the values the user names', () => {
-  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'backend', 'server.js'), 'utf8');
-  const prompt = src.slice(src.indexOf('const SYSTEM_PROMPT'), src.indexOf("].join('\\n');", src.indexOf('const SYSTEM_PROMPT')));
+  const prompt = promptText();
   assert.match(prompt, /resistance/);
   assert.match(prompt, /color/);
   assert.match(prompt, /voltage/);
@@ -207,10 +213,6 @@ test('the system prompt tells the AI to pass the values the user names', () => {
 // end (or two part legs) in the same body hole is flagged. Rail holes are
 // one net each and are left alone.
 
-const promptText = () => {
-  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'backend', 'server.js'), 'utf8');
-  return src.slice(src.indexOf('const SYSTEM_PROMPT'), src.indexOf("].join('\\n');", src.indexOf('const SYSTEM_PROMPT')));
-};
 const hole = h => new RegExp(`\\b${h}\\b`, 'i');
 
 test('the recipe builds put at most one lead in each hole', () => {
@@ -506,4 +508,46 @@ test('a reply whose delete_all is not the first action is a full rebuild and kee
   const out = Server.finishAIReply({ reply: 'Built it.', actions });
   assert.match(out.reply, /Heads up/);
   assert.match(out.reply, new RegExp(`LED at ${led.holeA}/${led.holeB} is backwards`));
+});
+
+// ── 63-column board, issue #22 ─────────────────────────────────────────────
+// The prompt's column count and the battery-column note are built from
+// circuit3d/js/board-geometry.js, so no board width is typed into server.js.
+
+const GEOMETRY_FILE = require('node:path').join(__dirname, '..', 'circuit3d', 'js', 'board-geometry.js');
+
+test('the built system prompt says "Columns 1-63"', () => {
+  const prompt = promptText();
+  assert.match(prompt, /Columns 1-63\b/);
+  assert.doesNotMatch(prompt, /Columns 1-50\b/, 'the old 50-column line is still there');
+});
+
+test('the built system prompt has no 50 left in it', () => {
+  const hits = promptText().split('\n').filter(l => /\b50\b/.test(l));
+  assert.deepEqual(hits, [], 'lines still mentioning 50');
+});
+
+test('the separate-branches note puts the battery wires on tp_63 and tn_63 of a 63-column board', () => {
+  const line = promptText().split('\n').find(l => /Battery wires once/i.test(l));
+  assert.ok(line, 'no "Battery wires once" line in the separate-branches recipe');
+  assert.match(line, /\btp_63\b/);
+  assert.match(line, /\btn_63\b/);
+  assert.match(line, /\b63-column board\b/);
+});
+
+test('the prompt\'s column count follows board-geometry.js, not a number typed into server.js', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'backend', 'server.js'), 'utf8');
+  assert.match(src, /require\([^)]*board-geometry(\.js)?['"]\)/, 'server.js must require circuit3d/js/board-geometry.js');
+  assert.doesNotMatch(src, /Columns 1-\d/, 'server.js still types the column count into the prompt');
+  assert.doesNotMatch(src, /\b(tp|tn)_\d+ and (tp|tn)_\d+ on a \d+-column board/, 'server.js still types the battery column into the prompt');
+  const { COLS } = require(GEOMETRY_FILE);
+  assert.match(promptText(), new RegExp(`Columns 1-${COLS}\\b`));
+});
+
+test('the recipe builds put the battery wires on tp_63 and tn_63', () => {
+  assert.equal(Recipes.HIGHEST_COL, 63, 'recipes.js must read COLS from board-geometry.js');
+  for (const name of ['ONE_LED', 'PARALLEL_2', 'SERIES_2']) {
+    const ends = Object.fromEntries(batteryWires(Recipes[name]).map(w => [w.from, w.to]));
+    assert.deepStrictEqual(ends, { 'BAT1.0': 'tp_63', 'BAT1.1': 'tn_63' }, name);
+  }
 });

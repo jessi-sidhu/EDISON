@@ -8,13 +8,20 @@ const Chat = require('../circuit3d/js/chat.js');
 // chat.js never works this out itself; it asks the board (issue #6).
 const spotFor = BOARD_W => ({ x: BOARD_W / 2 + 2.5, z: -3.15 });
 
+// The real board's width, from circuit3d/js/board-geometry.js (issue #22).
+// NaN while that file is missing, so only the test that checks the width
+// fails for it; the others don't read the battery's x.
+const boardWidth = () => {
+  try { return require('../circuit3d/js/board-geometry.js').BOARD_W; } catch { return NaN; }
+};
+
 // Stands in for the 3D board. Records wires instead of drawing them.
 function fakeBoard(parts) {
   const wires = [];
   return {
     wires,
     components: () => parts,
-    batterySpot: () => spotFor(21.4),   // today's 50-column board
+    batterySpot: () => spotFor(boardWidth()),   // the real board, 63 columns
     parseHole: s => {
       const m = /^([a-j])(\d+)$/.exec(s);
       if (!m) throw new Error('parseHole: unrecognised hole address: ' + s);
@@ -283,7 +290,8 @@ function spotBoard(spot) {
 }
 
 test('on a 63-column board the AI battery lands past the board end, behind the top rails', () => {
-  const board = spotBoard(spotFor(26.6));   // (63 - 1) * 0.40 + 2 * 0.90
+  assert.ok(Math.abs(boardWidth() - 26.6) < 1e-9, `expected the 63-column board 26.6 wide, got ${boardWidth()}`);
+  const board = spotBoard(spotFor(boardWidth()));   // (63 - 1) * 0.40 + 2 * 0.90 = 26.6
   const out = Chat.applyActions([{ tool: 'place_battery' }], board);
   assert.deepEqual(out, { applied: 1, failed: 0 });
   assert.equal(board.got.length, 1);

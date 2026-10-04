@@ -82,8 +82,18 @@ function copiesOf(re) {
 const total = hits => hits.reduce((s, x) => s + x.n, 0);
 const where = hits => hits.map(x => `${x.file} x${x.n}`).join(', ') || 'nowhere';
 
-test('the home camera view (0, 22, 30) is written once, as App.CAMERA in scene.js', () => {
-  const hits = copiesOf(/22,\s*(z:\s*)?30\b/);
+// The views as App.CAMERA in scene.js writes them. The numbers may change
+// (issue #22 widens the board), but only there.
+function cameraView(name) {
+  const m = new RegExp(`${name}:\\s*\\{\\s*pos:\\s*\\[([^\\]]+)\\]`).exec(read('circuit3d/js/scene.js'));
+  assert.ok(m, `App.CAMERA.${name} not found in scene.js`);
+  return m[1].split(',').map(v => v.trim());
+}
+// "a, b, c" written with any spacing.
+const numbersRe = nums => new RegExp('(?<![\\d.])' + nums.map(n => n.replace(/\./g, '\\.')).join(',\\s*') + '(?![\\d.])');
+
+test('the home camera view is written once, as App.CAMERA in scene.js', () => {
+  const hits = copiesOf(numbersRe(cameraView('home')));
   assert.equal(total(hits), 1, 'home camera position found in: ' + where(hits));
   assert.equal(hits[0].file, 'circuit3d/js/scene.js');
   const scene = read('circuit3d/js/scene.js');
@@ -92,8 +102,8 @@ test('the home camera view (0, 22, 30) is written once, as App.CAMERA in scene.j
   assert.match(read('circuit3d/js/app.js'), /App\.CAMERA\.home/, '_isCamDefault must read App.CAMERA.home');
 });
 
-test('the thumbnail camera view (20, 22, 20) is written once', () => {
-  const hits = copiesOf(/20,\s*22,\s*20/);
+test('the thumbnail camera view is written once', () => {
+  const hits = copiesOf(numbersRe(cameraView('thumb')));
   assert.equal(total(hits), 1, 'thumbnail camera position found in: ' + where(hits));
 });
 
@@ -102,7 +112,7 @@ test('the reset-camera button calls App.resetCamera() instead of its own copy of
   const btn = /<button id="reset-cam-btn"[^>]*>/.exec(html);
   assert.ok(btn, 'reset-cam-btn not found');
   assert.match(btn[0], /App\.resetCamera\(\)/);
-  assert.doesNotMatch(html, /position\.set\(\s*0\s*,\s*22\s*,\s*30\s*\)/, 'index.html still sets the camera to (0,22,30) itself');
+  assert.doesNotMatch(html, /camera\.position\.set\(\s*-?[\d.]+\s*,/, 'index.html still sets the camera position itself');
 });
 
 test('the battery margin is one named constant, not "BOARD_W / 2 + 2.5" in each file', () => {
@@ -181,4 +191,33 @@ test('the code guide names parts by label (BAT1), not battery_0', () => {
   assert.doesNotMatch(guide, /battery_0/, 'AGENTS.md still says battery_0');
   assert.match(guide, /\bBAT1\b/, 'AGENTS.md should name the battery BAT1');
   assert.match(guide, /\bBAT1\.0\b/, 'AGENTS.md should give battery pins as BAT1.0 / BAT1.1');
+});
+
+// ── 63-column board, issue #22 ──────────────────────────────────
+//  The board's size lives in circuit3d/js/board-geometry.js, which Node can
+//  load too. breadboard.js reads it instead of keeping its own GEOMETRY.
+
+test('breadboard.js keeps no geometry numbers of its own', () => {
+  const src = read('circuit3d/js/breadboard.js');
+  for (const key of ['COLS', 'HS', 'MARGIN_X', 'BOARD_THICK', 'BOARD_D', 'ROW_Z', 'RAIL_IS_POS', 'ALL_ROWS']) {
+    assert.doesNotMatch(src, new RegExp(`\\b${key}:\\s*[\\d.{\\[]`), `breadboard.js still defines ${key}`);
+  }
+  assert.doesNotMatch(src, /GEOMETRY\.(BOARD_W|TOTAL_HOLES)\s*=/, 'breadboard.js still works out BOARD_W / TOTAL_HOLES itself');
+});
+
+test('both 3D pages load js/board-geometry.js before js/breadboard.js', () => {
+  for (const page of ['circuit3d/index.html', 'circuit3d/viewer.html']) {
+    const order = scriptOrder(read(page));
+    const geo = order.indexOf('js/board-geometry.js'), bb = order.indexOf('js/breadboard.js');
+    assert.ok(geo >= 0, `${page} does not load js/board-geometry.js: ${order.join(', ')}`);
+    assert.ok(bb >= 0 && geo < bb, `${page} must load board-geometry.js before breadboard.js: ${order.join(', ')}`);
+  }
+});
+
+test('no editor or server file says COLS: 50', () => {
+  const files = [...editorSources(),
+    { file: 'circuit3d/viewer.html', src: read('circuit3d/viewer.html') },
+    { file: 'backend/server.js',     src: read('backend/server.js') }];
+  const hits = files.filter(({ src }) => /\bCOLS\s*[:=]\s*50\b/.test(src)).map(x => x.file);
+  assert.deepEqual(hits, [], 'COLS: 50 still in');
 });

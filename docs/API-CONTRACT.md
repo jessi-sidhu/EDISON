@@ -148,6 +148,8 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
   wires: [ ['BAT1.0','tp_50'], ['BAT1.1','tn_50'], ['tp_2','b2'], ['c8','tn_8'] ],        // one lead per hole
   expect: { 'LED1': { on: true, current: [14.0, 15.8] } },   // exact value or [lo, hi]; keys are measure() fields
 }
+// A part in `parts` may also set `controls` (same shape as the saved record), e.g.
+//   { type: 'toggle_switch', label: 'SW1', holes: ['a10','a12'], controls: { closed: true } }
 ```
 
 ### Placed-part record (runtime) and saved record
