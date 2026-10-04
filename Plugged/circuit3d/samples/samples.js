@@ -14,8 +14,9 @@
 //  (place_* with holeA / holeB, add_wire { from, to }, holes like e3, rails
 //  like bp_23, battery leads BAT1.0 / BAT1.1), no delete_all. It wins over
 //  any recording: the tile shows the photo with "Reading your board…" for
-//  about a second, then builds this exactly (photo.js), with no /api/photo
-//  and no confirm screen. Such an entry needs no taps and no recording.
+//  7 s, then builds this exactly (photo.js), with no /api/photo and no
+//  confirm screen (unless it has a `reading`, below). Such an entry needs
+//  no taps and no recording.
 //  test/sample-boards.test.js checks each board applies and simulates.
 //
 //  match, explain, fix (#17): a rehearsed upload. match lists the SHA-256
@@ -30,7 +31,8 @@
 //  reading (#20): a recorded Reading v1 (as Gemini returned it) for a
 //  rehearsed upload. After "Reading your board…" it opens on the confirm
 //  screen over her flattened photo (no crop round); Build it still builds
-//  `board`, not the reading. A tile ignores it.
+//  `board`, not the reading. Its tile (#22) runs the same: the corner step
+//  on `file`, then Looks right as for a rehearsed upload.
 //
 //  demo-board.jpg is a placeholder until #144: test/fixtures/photo/web/
 //  p6_piranha.jpg (lungstruck, CC BY 2.0), its a1/a24/j24/j1 taps used as
@@ -116,6 +118,30 @@ window.PhotoSamples = {
       { tool: 'add_wire', from: 'j60', to: 'bn_60', color: 'green' },
       { tool: 'add_wire', from: 'g41', to: 'h58', color: 'green' },
     ],
+    // Gemini's real reading of this photo, recorded 2026-10-04; shown on the confirm screen only (#20, #22)
+    reading: {
+      board: { visible: true, cols: 63, rails: { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' }, split: false },
+      parts: [
+        { id: 'X1', type: 'other', what: 'ic', value: 0, bands: [], color: '', leads: [{ hole: 'f4', pt: [167.3, 347.6], role: 'unknown' }, { hole: 'f8', pt: [289.7, 347.6], role: 'unknown' }], box: [167.3, 301, 289.7, 394.1], confidence: 0.9, unsure: ['leads'] },
+        { id: 'R1', type: 'resistor', what: '10k resistor', value: 10000, bands: [], color: '', leads: [{ hole: 'g5', pt: [215.5, 273.7], role: 'unknown' }, { hole: 'off', pt: [526.7, 275.6], role: 'unknown' }], box: [218.3, 276.9, 526.3, 323.8], confidence: 0.9, unsure: [] },
+        { id: 'R2', type: 'resistor', what: '10k resistor', value: 10000, bands: [], color: '', leads: [{ hole: 'off', pt: [764.7, 242.8], role: 'unknown' }, { hole: 'h35', pt: [1100.9, 242.8], role: 'unknown' }], box: [765, 156.9, 1122, 232.2], confidence: 0.9, unsure: [] },
+        { id: 'R3', type: 'resistor', what: '10k resistor', value: 10000, bands: [], color: '', leads: [{ hole: 'off', pt: [796.2, 431.3], role: 'unknown' }, { hole: 'off', pt: [1123.8, 431.3], role: 'unknown' }], box: [795.6, 400.4, 1122, 470.7], confidence: 0.9, unsure: [] },
+      ],
+      wires: [
+        { id: 'W1', color: '', ends: [{ hole: 'rail:jOuter:4', pt: [183.6, 58.4] }, { hole: 'j4', pt: [185.6, 181.5] }], box: [14.3, 27, 183.6, 199.5], confidence: 0.9, unsure: [] },
+        { id: 'W2', color: '', ends: [{ hole: 'off', pt: [499.8, 0] }, { hole: 'off', pt: [523.7, 182.6] }], box: [463.1, 0, 536.5, 169.7], confidence: 0.9, unsure: [] },
+        { id: 'W3', color: '', ends: [{ hole: 'h6', pt: [245.1, 238.5] }, { hole: 'h24', pt: [780.4, 243.3] }], box: [236.6, 151.2, 763, 248.5], confidence: 0.9, unsure: [] },
+        { id: 'W4', color: '', ends: [{ hole: 'j4', pt: [182.6, 183.3] }, { hole: 'off', pt: [285.6, 159.8] }], box: [0, 120, 285.6, 199.5], confidence: 0.9, unsure: [] },
+        { id: 'W5', color: '', ends: [{ hole: 'off', pt: [523.1, 305.9] }, { hole: 'off', pt: [666.1, 649.7] }], box: [518.2, 311, 814, 649.7], confidence: 0.9, unsure: [] },
+        { id: 'W6', color: '', ends: [{ hole: 'g24', pt: [784.9, 270.9] }, { hole: 'off', pt: [793.6, 400.1] }], box: [773.2, 257.7, 801.7, 407.5], confidence: 0.9, unsure: [] },
+        { id: 'W7', color: '', ends: [{ hole: 'rail:jInner:35', pt: [1096.8, 100.4] }, { hole: 'i35', pt: [1099.9, 214.4] }], box: [1054.7, 87.3, 1120, 218], confidence: 0.9, unsure: [] },
+        { id: 'W8', color: '', ends: [{ hole: 'rail:jInner:59', pt: [1836.9, 96.2] }, { hole: 'rail:aInner:59', pt: [1832.1, 604.8] }], box: [1664.6, 80.9, 1844.2, 598.5], confidence: 0.9, unsure: [] },
+        { id: 'W9', color: '', ends: [{ hole: 'b7', pt: [276.8, 487.7] }, { hole: 'rail:aOuter:7', pt: [271.8, 636.2] }], box: [195.8, 465.1, 279.5, 647.5], confidence: 0.9, unsure: [] },
+        { id: 'W10', color: '', ends: [{ hole: 'a35', pt: [1118.7, 521.6] }, { hole: 'rail:aOuter:35', pt: [1116.3, 641.5] }], box: [1032.2, 487.1, 1130.2, 647.5], confidence: 0.9, unsure: [] },
+        { id: 'W11', color: '', ends: [{ hole: 'rail:aOuter:61', pt: [1886.9, 638.2] }, { hole: 'off', pt: [1993.1, 622.7] }], box: [1878.8, 573.7, 1993.1, 671.7], confidence: 0.9, unsure: [] },
+      ],
+      power: [],
+    },
   },
   // Thandi's real board (#17), the photoexample op-amp blinker as she built it,
   // decoded from her photos (the file is a 2048-px copy of IMG_2013): U1 turned

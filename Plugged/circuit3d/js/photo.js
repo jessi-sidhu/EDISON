@@ -23,7 +23,9 @@
 //         it, nothing sent. One offered sample: no picker, straight to it.
 //         A sample with a `board` (#15): its photo as it is, under
 //         "Reading your board…" for SAMPLE_READ_MS, then that board straight
-//         to Build it's path below (no /api/photo, no confirm screen)
+//         to Build it's path below (no /api/photo, no confirm screen).
+//         With a `board` and a `reading` (#22): the corner step on its photo,
+//         then Looks right as for a rehearsed upload of it (above)
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
 //    → the Reading opens the confirm screen (PhotoConfirm.open) at once, on
 //      the same flattened image, with the box round's placeholders (#173),
@@ -153,7 +155,13 @@
     if (!im && match) im = await loadImage(window.PhotoSamples[match].file).catch(() => null);   // a HEIC: its sample's own photo
     if (my !== job) return;
     if (!im) return showStatus(BAD_IMAGE, true);
-    rehearsed = match;
+    tapCorners(im, match);
+  }
+
+  // The corner step on a loaded photo. sample: the rehearsed sample whose
+  // board Looks right builds (#17, #22), or null for /api/photo.
+  function tapCorners(im, sample) {
+    rehearsed = sample;
     img = im;
     taps = [];
     corners.hidden = false;
@@ -431,14 +439,18 @@
     picker.hidden = false;
   }
 
+  // A sample with a `board` and a recorded `reading` (#22): the corner step on
+  // its photo, then Looks right as for a rehearsed upload of it.
   async function sendSample(id) {
     const my = nextJob();
     open();
-    showStatus(READING, false);
-    const s  = window.PhotoSamples[id];
+    const s   = window.PhotoSamples[id];
+    const tap = Boolean(s.board && s.reading);
+    if (!tap) showStatus(READING, false);
     const im = await loadImage(s.file).catch(() => null);
     if (my !== job) return;
     if (!im) return showStatus(AI_FAILED, true);
+    if (tap) { colsEl.value = String(s.cols); return tapCorners(im, id); }
     if (s.board) return buildBoard(my, im, id);
     Capture.grid = PhotoGrid.homography(s.taps, s.cols);
     send(im, Capture.grid, id);
