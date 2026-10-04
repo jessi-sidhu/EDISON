@@ -11,7 +11,9 @@
 // - Each DeepSeek fetch gets an AbortSignal (opts.signal) that is aborted
 //   when the deadline passes.
 // - Past the deadline the ask rejects with an Error whose code is
-//   'AI_TIMEOUT'.
+//   'AI_TIMEOUT', unless the model has already ended its turn on a build:
+//   then the best build so far is the reply (issue #7; the details are in
+//   repair-best-build.test.js).
 // - /api/ask answers that with status 504 and
 //   { reply: 'The AI took too long — try again.', actions: [], code: 'AI_TIMEOUT' }.
 //   `reply` is what the page already shows for a failed ask. Every other
@@ -151,13 +153,22 @@ test('the deadline aborts the DeepSeek request itself: its signal fires', async 
   assert.equal(signal.aborted, true, 'the DeepSeek request is still open after the deadline');
 });
 
-test('a repair round that hangs still ends by the overall deadline', async () => {
+// Issue #7: the model ended its turn on a build before the repair round hung,
+// so that build is the reply at the deadline (with the checker's Heads up),
+// not AI_TIMEOUT. The real checker and finishAIReply.
+test('a repair round that hangs still ends by the overall deadline, with the build made before it as the reply (issue #7)', async () => {
   const fetch = scriptedDeepSeek([tools('a', BACKWARDS), says('Done.'), says('never sent')], [0, 0, Infinity]);
   vi.stubGlobal('fetch', fetch);
   const out = await settleWithin(Server.ask('', 'Build a single LED circuit.', []), DEADLINE + SLACK);
 
   assert.equal(fetch.calls.length, 3, `precondition: the backwards LED starts a repair round (requests: ${fetch.calls.length})`);
-  assertTimedOut(out, 'Server.ask with a hung repair round');
+  assert.notEqual(out.state, 'pending', `Server.ask still had no answer after ${out.ms} ms (deadline ${DEADLINE} ms)`);
+  assert.equal(fetch.signals[2].aborted, true, 'the hung repair request is still open after the deadline');
+  assert.equal(out.state, 'resolved',
+    `the deadline threw away the build made before the repair: rejected with ${out.error && out.error.code} (${out.error && out.error.message})`);
+  assert.deepStrictEqual(out.value.actions, BACKWARDS, `the build returned: ${JSON.stringify(out.value.actions)}`);
+  assert.ok(out.value.reply.startsWith('Done.'), `reply: ${out.value.reply}`);
+  assert.match(out.value.reply, /Heads up[\s\S]*backwards/, `the kept build's problem is not flagged: ${out.value.reply}`);
 });
 
 test('rounds that each beat the deadline cannot add up past it: the deadline covers the whole ask', async () => {

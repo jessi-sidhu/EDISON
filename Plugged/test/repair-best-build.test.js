@@ -35,6 +35,22 @@
 //   loop's check and for finishAIReply's Heads up, so the returned build is
 //   the fixed one.
 //
+//
+// Issue #7, the follow-ups (the last two sections):
+// - An EMPTY attempt is a rebuild whose actions from its last delete_all
+//   place no parts (delete_all alone, or with wires only). It is never kept
+//   over an attempt that places parts, whatever the problem counts; the real
+//   checker calls delete_all alone clean. If every attempt is empty, the
+//   choice above stands. An edit on a sent board (no delete_all) is never
+//   empty: it is judged on its problems as before.
+// - When the overall deadline (DEEPSEEK_TIMEOUT_MS) passes after at least one
+//   attempt was recorded, the ask returns the attempt chosen as above
+//   ({ reply, actions }), not AI_TIMEOUT, and logs one line:
+//     "[repair] deadline: kept round N: K problems"
+//   With no attempt recorded, AI_TIMEOUT as today.
+// - The fallback model's restart (#130, #4) keeps nothing from the primary's
+//   rounds, its attempts included.
+//
 // How: deepSeekRounds through P.askDeepSeek with a scripted fake model and a
 // fake ctx.checkBuild that returns scripted problem lists per build (the
 // first part), and the real Server.ask with the real checker and simulator
@@ -139,12 +155,12 @@ function keepConsole() {
   return lines;
 }
 
-// deepSeekRounds with a fake checkBuild.
-async function runLoop(replies, table) {
-  const fetch = scriptedFetch(replies);
+// deepSeekRounds with a fake checkBuild. An edit passes the sent board and
+// its message; a test that needs delays or HTTP errors passes its own fetch.
+async function runLoop(replies, table, { board, message = 'Build a single LED circuit with a current-limiting resistor.', fetch = scriptedFetch(replies) } = {}) {
   const lines = keepConsole();
-  const out = await P.askDeepSeek('', 'Build a single LED circuit with a current-limiting resistor.', [],
-    { SYSTEM_PROMPT: 'S', CIRCUIT_TOOLS: TOOLS, fetch, apiKey: 'k', checkBuild: fakeCheck(table) });
+  const out = await P.askDeepSeek('', message, [],
+    { SYSTEM_PROMPT: 'S', CIRCUIT_TOOLS: TOOLS, fetch, apiKey: 'k', checkBuild: fakeCheck(table) }, board);
   return { out, calls: fetch.calls, lines, kept: lines.filter(l => l.startsWith('[repair] kept')) };
 }
 
@@ -370,3 +386,189 @@ test('a fixable rebuild repaired with delete_wire W4 + add_wire a8 → tn_8 is c
   assert.ok(ends.includes('a8→tn_8') && !ends.includes('a8→tp_8'), `the board's wires: ${JSON.stringify(ends)}`);
   assert.ok(Math.abs(result.parts.LED1.m.current - lit) < 0.01, `LED1: ${result.parts.LED1.m.current} mA, want ${lit.toFixed(1)}`);
 });
+
+// ── 6. An empty rebuild never wins (issue #7) ───────────────────────────────
+
+const DELETE_ALL = { tool: 'delete_all' };
+// A wire with no part on either end.
+const BARE_WIRE  = { tool: 'add_wire', from: 'tp_40', to: 'a40', color: 'red' };
+
+test('precondition: the real checker calls delete_all alone clean, so an empty rebuild checks as 0 problems', () => {
+  assert.deepStrictEqual(Server.checkBuild([DELETE_ALL]), [], 'if this changes, the empty-rebuild rule may no longer be needed');
+});
+
+// The fake checker calls the empty rebuild clean, as the real one does, so
+// only the empty-rebuild rule keeps it out.
+for (const [name, empty] of [
+  ['delete_all alone',                  [DELETE_ALL]],
+  ['delete_all and a wire, no parts',   [DELETE_ALL, BARE_WIRE]],
+]) {
+  test(`a repair answered with ${name} (0 problems) loses to the earlier 1-problem build: that build, its reply and "kept round 0: 1 problems"`, async () => {
+    const { out, calls, lines, kept } = await runLoop([
+      tools('a', BACKWARDS), says('Built it.'),
+      tools('b', empty),     says('Cleared the board.'),
+    ], [[BACKWARDS, problems(1, 'first build')]]);
+
+    assert.equal(calls.length, 4, `precondition: the empty rebuild checks clean and ends the loop; got ${calls.length} requests`);
+    assert.equal(boardOf(out.actions).parts.length > 0, true,
+      `an empty board was sent: ${JSON.stringify(effective(out.actions))}`);
+    assertBoard(out.actions, BACKWARDS, 'the build sent is round 0\'s (1 problem), not the empty rebuild (0 problems)');
+    assert.equal(out.reply, 'Built it.', 'the reply goes with the build kept');
+    assertKept(kept, 0, 1, lines);
+  });
+}
+
+// Pin (passes today): with every attempt empty, the choice is #6's: fewest
+// problems, a tie to the later one (not the first, not the last).
+test('pin: every attempt empty: a tie (1 → 1) still goes to the later one, even when a worse empty one (3) follows it', async () => {
+  const EMPTY_0 = [DELETE_ALL];
+  const EMPTY_1 = [DELETE_ALL, BARE_WIRE];
+  const EMPTY_2 = [DELETE_ALL, { tool: 'add_wire', from: 'tn_44', to: 'j44', color: 'black' }];
+  const { out, calls, lines, kept } = await runLoop([
+    tools('a', EMPTY_0), says('Cleared it.'),
+    tools('b', EMPTY_1), says('Added a wire.'),
+    tools('c', EMPTY_2), says('Moved the wire.'),
+  ], [[EMPTY_0, problems(1, 'empty 0')], [EMPTY_1, problems(1, 'empty 1')], [EMPTY_2, problems(3, 'empty 2')]]);
+
+  assert.equal(calls.length, 6, `precondition: two repairs; got ${calls.length} requests`);
+  assertBoard(out.actions, EMPTY_1, 'with every attempt empty, round 1 is kept (the tie with round 0 goes to the later; round 2 is worse)');
+  assert.equal(out.reply, 'Added a wire.');
+  assertKept(kept, 1, 1, lines);
+});
+
+// Pin (passes today): an edit on a sent board has no delete_all, so it is
+// never an empty rebuild, even when its own steps place no part. It is
+// judged on its problems: the wire move (1) beats the repair that adds a
+// resistor (2).
+test('pin: an edit on a sent board that places no part is not empty: the 1-problem wire move beats the 2-problem repair that adds a resistor', async () => {
+  const MOVE_W4 = [{ tool: 'delete_wire', wire: 'W4' }, { tool: 'add_wire', from: 'a8', to: 'tp_8', color: 'red' }];
+  const { out, calls, lines, kept } = await runLoop([
+    tools('a', MOVE_W4), says('Moved the LED wire.'),
+    tools('b', [PLACE_R]), says('Added a resistor.'),
+    says('Done.'),
+  ], [[MOVE_W4, problems(1, 'wire move')], [[...MOVE_W4, PLACE_R], problems(2, 'resistor added')]],
+  { board: LED_BOARD, message: 'Move the LED\'s ground wire to the other rail.' });
+
+  assert.equal(calls.length, 5, `precondition: two repairs (edit, end, resistor, end, "Done."); got ${calls.length} requests`);
+  assert.deepStrictEqual(out.actions, MOVE_W4, `the edit kept should be round 0's wire move, got ${JSON.stringify(out.actions)}`);
+  assert.equal(out.reply, 'Moved the LED wire.');
+  assertKept(kept, 0, 1, lines);
+});
+
+// ── 7. A deadline returns the best build so far (issue #7) ──────────────────
+
+const abortError = () => Object.assign(new Error('This operation was aborted'), { name: 'AbortError' });
+
+// Waits ms, or rejects like fetch when the signal aborts first.
+function wait(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal && signal.aborted) return reject(abortError());
+    if (!ms) return resolve();
+    const t = ms === Infinity ? null : setTimeout(resolve, ms);
+    if (signal) signal.addEventListener('abort', () => { clearTimeout(t); reject(abortError()); }, { once: true });
+  });
+}
+
+// Request n follows steps[n] (the last repeats): { message, ms } answers
+// after ms (Infinity: never, aborting like fetch), { status } is an HTTP
+// error. Keeps every body and every signal.
+function timedFetch(steps) {
+  const calls = [], signals = [];
+  const fn = async (url, opts) => {
+    calls.push(JSON.parse(opts.body));
+    signals.push(opts.signal);
+    const step = steps[Math.min(calls.length - 1, steps.length - 1)];
+    await wait(step.ms || 0, opts.signal);
+    if (step.status) return { ok: false, status: step.status, text: async () => `upstream ${step.status}`, json: async () => ({}) };
+    return { ok: true, status: 200, text: async () => '', json: async () => ({ choices: [{ message: step.message }] }) };
+  };
+  Object.assign(fn, { calls, signals });
+  return fn;
+}
+
+// Read per ask and changed by the tests below: put back after each one.
+const ENV = ['DEEPSEEK_THINKING', 'DEEPSEEK_TIMEOUT_MS', 'DEEPSEEK_FALLBACK_MODEL'];
+function withEnv(set, body) {
+  const saved = ENV.map(k => process.env[k]);
+  for (const k of ENV) { if (set[k] === undefined) delete process.env[k]; else process.env[k] = set[k]; }
+  return Promise.resolve().then(body).finally(() => {
+    ENV.forEach((k, i) => { if (saved[i] === undefined) delete process.env[k]; else process.env[k] = saved[i]; });
+  });
+}
+
+const DEFAULT_DEADLINE = 240000;   // DEEPSEEK_TIMEOUT_MS unset (issue #4)
+const REASONING = 30000;           // each answered round, as a reasoning build takes
+const HANG      = { ms: Infinity };
+const answer    = message => ({ message, ms: REASONING });
+
+// On a fake clock, with the live defaults: reasoning on (so no 25 s switch
+// to the fallback), the 240 s deadline, the fallback left on. Each answered
+// round takes 30 s; the last request never answers.
+const DEADLINE_CASES = [
+  ['a deadline during the second repair, after a repair that made it worse (1 → 2), returns the first build, its reply, and logs "deadline: kept round 0: 1 problems"',
+    [answer(tools('a', BACKWARDS)), answer(says('Built it.')), answer(tools('b', WRONG)), answer(says('Rebuilt it.')), HANG],
+    [[BACKWARDS, problems(1, 'first build')], [WRONG, problems(2, 'rebuild')]],
+    { board: BACKWARDS, reply: 'Built it.', round: 0, count: 1 }],
+  ['a deadline during the second repair, after it queued a half-finished rebuild (delete_all, a battery), returns the best recorded build (the 1 → 1 tie: round 1), never the half-finished one',
+    [answer(tools('a', BACKWARDS)), answer(says('Built it.')), answer(tools('b', WRONG)), answer(says('Rebuilt it.')),
+      answer(tools('c', [DELETE_ALL, { tool: 'place_battery' }], 'Starting over.')), HANG],
+    [[BACKWARDS, problems(1, 'first build')], [WRONG, problems(1, 'rebuild')]],
+    { board: WRONG, reply: 'Rebuilt it.', round: 1, count: 1 }],
+  ['pin: a deadline before any turn-end, with the build\'s steps already queued, still rejects with AI_TIMEOUT',
+    [answer(tools('a', BACKWARDS)), HANG],
+    [[BACKWARDS, problems(1, 'first build')]],
+    'AI_TIMEOUT'],
+];
+
+test.each(DEADLINE_CASES)('%s', (_, steps, table, want) => withEnv({ DEEPSEEK_THINKING: undefined, DEEPSEEK_TIMEOUT_MS: undefined, DEEPSEEK_FALLBACK_MODEL: undefined }, async () => {
+  vi.useFakeTimers();
+  try {
+    const fetch = timedFetch(steps);
+    const lines = keepConsole();
+    let out = null;
+    P.askDeepSeek('', BUILD_MSG, [], { SYSTEM_PROMPT: 'S', CIRCUIT_TOOLS: TOOLS, fetch, apiKey: 'k', checkBuild: fakeCheck(table) }).then(
+      value => { out = { state: 'resolved', value }; },
+      error => { out = { state: 'rejected', error }; });
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_DEADLINE - 1000);
+    assert.equal(out, null, `the ask ended before the ${DEFAULT_DEADLINE / 1000} s deadline: ${JSON.stringify(out && (out.value || out.error.message))}`);
+    assert.equal(fetch.calls.length, steps.length, `precondition: every scripted request was made and the last one hangs; got ${fetch.calls.length} of ${steps.length}`);
+    await vi.advanceTimersByTimeAsync(2000);
+    assert.ok(out, `the ask had no answer 1 s past the ${DEFAULT_DEADLINE / 1000} s deadline`);
+    assert.equal(fetch.signals[fetch.signals.length - 1].aborted, true, 'the hung request is still open after the deadline');
+
+    if (want === 'AI_TIMEOUT') {
+      assert.equal(out.state, 'rejected', `with no build recorded, the ask should fail with the timeout; got a reply: ${JSON.stringify(out.value)}`);
+      assert.equal(out.error && out.error.code, 'AI_TIMEOUT', `rejected without code AI_TIMEOUT: ${out.error && out.error.message}`);
+      return;
+    }
+    assert.equal(out.state, 'resolved',
+      `the deadline threw away the recorded build(s): rejected with ${out.error && out.error.code} (${out.error && out.error.message})`);
+    assertBoard(out.value.actions, want.board, 'the build returned at the deadline');
+    assert.equal(out.value.reply, want.reply, 'the reply goes with the build kept');
+    const deadline = lines.filter(l => l.startsWith('[repair] deadline'));
+    assert.equal(deadline.length, 1, `expected one "[repair] deadline: kept round ${want.round}: ${want.count} problems" line, got ${JSON.stringify(deadline)}; [repair] lines: ${JSON.stringify(lines.filter(l => l.startsWith('[repair]')))}`);
+    assert.match(deadline[0], new RegExp(`^\\[repair\\] deadline: kept round ${want.round}: ${want.count} problems?\\b`), `the deadline line: ${JSON.stringify(deadline[0])}`);
+  } finally {
+    vi.useRealTimers();
+  }
+}));
+
+// Pin (passes today): the fallback's restart keeps nothing from the
+// primary's rounds (#130), its recorded attempts included. The primary's
+// 1-problem build would beat every fallback attempt (2) if it were kept.
+test('pin: after the primary records a build and then fails (500), the fallback\'s attempts alone are judged: its build comes back, not the primary\'s better one', () => withEnv({ DEEPSEEK_THINKING: '0', DEEPSEEK_TIMEOUT_MS: undefined, DEEPSEEK_FALLBACK_MODEL: undefined }, async () => {
+  const fetch = timedFetch([
+    { message: tools('a', BACKWARDS) }, { message: says('Built it.') },        // the primary: round 0, 1 problem
+    { status: 500 },                                                           // the primary fails on its repair
+    { message: tools('f', WRONG) }, { message: says('Built it on the fallback.') }, // the fallback: round 0, 2 problems
+    { message: says('Done.') },                                                // rounds 1 and 2, 2 problems each
+  ]);
+  const { out, calls, lines, kept } = await runLoop(null, [[BACKWARDS, problems(1, 'primary')], [WRONG, problems(2, 'fallback')]], { fetch });
+
+  assert.equal(calls.length, 7, `precondition: the primary's build, its end, the 500, then the fallback's build and three ends; got ${calls.length} requests`);
+  assert.notEqual(calls[3].model, calls[0].model, `precondition: the fourth request went to the fallback; models ${JSON.stringify(calls.map(c => c.model))}`);
+  assertBoard(out.actions, WRONG, 'the fallback\'s build, not the primary\'s');
+  assert.equal(out.reply, 'Done.');
+  assertKept(kept, 2, 2, lines);
+}));

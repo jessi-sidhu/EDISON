@@ -176,11 +176,16 @@ const deepSeekPrimaryTimeoutMs = () => Number(process.env.DEEPSEEK_PRIMARY_TIMEO
 // reasoning on (issue #4: a build took 8–195 s) running long never switches.
 // A 4xx never falls back. The fallback gets only the time left. A reply from
 // the fallback carries a non-enumerable `fallbackModel` (kept out of the JSON
-// for the page).
+// for the page). Past the deadline, the best build the current run ended its
+// turn on (issue #7) is the reply; with none, AI_TIMEOUT.
 function askDeepSeek(markdown, userMsg, history, ctx, board) {
   const fallback = deepSeekFallbackModel();
+  const fromFallback = r => Object.defineProperty(r, 'fallbackModel', { value: fallback, enumerable: false });
+  // The current run's checked builds (issue #7): the fallback's restart gets
+  // a new list, keeping nothing from the primary's rounds.
+  let attempts = [], onFallback = false;
   return withDeadline(deepSeekTimeoutMs(), async signal => {
-    const run = extra => deepSeekRounds(markdown, userMsg, history, { ...ctx, signal, ...extra }, board);
+    const run = extra => deepSeekRounds(markdown, userMsg, history, { ...ctx, signal, ...extra, attempts: (attempts = []) }, board);
     if (!fallback || fallback === DEEPSEEK_MODEL) return run({ model: DEEPSEEK_MODEL });
     try {
       return await run({ model: DEEPSEEK_MODEL, ...(thinkingOn(ctx) ? {} : { requestMs: deepSeekPrimaryTimeoutMs() }) });
@@ -188,8 +193,12 @@ function askDeepSeek(markdown, userMsg, history, ctx, board) {
       if (signal.aborted || !e.canFallBack) throw e;
       console.warn(`[ask] ${DEEPSEEK_MODEL} failed (${e.message.slice(0, 80)}); retrying on ${fallback}`);
     }
-    const result = await run({ model: fallback });
-    return Object.defineProperty(result, 'fallbackModel', { value: fallback, enumerable: false });
+    onFallback = true;
+    return fromFallback(await run({ model: fallback }));
+  }).catch(e => {
+    const kept = e && e.code === 'AI_TIMEOUT' ? keptAttempt(attempts, 'deadline: kept') : null;
+    if (!kept) throw e;
+    return onFallback ? fromFallback(kept) : kept;
   });
 }
 
@@ -228,9 +237,10 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
   let reply = '';
   let repairs = 0;
   // Each build the model ended its turn on, checked (issue #6): its actions
-  // with the wire fixes folded in, its reply, its problem count and the
-  // repairs sent before it. The best one is returned.
-  const attempts = [];
+  // with the wire fixes folded in, its reply, its problem count, the repairs
+  // sent before it, and whether its board has a part (#7). The best one is
+  // returned. askDeepSeek passes the list in, to answer with it at the deadline.
+  const attempts = ctx.attempts || [];
   // "Fix it." is judged on the whole board after the edit, not only on the
   // problems the edit adds (issue #85).
   const check = { fullCheck: isFixRequest(userMsg) };
@@ -245,7 +255,7 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
       if (!ctx.checkBuild) break;
       const build    = foldWireFixes(actions, board);
       const problems = safeCheck(ctx.checkBuild, build, board, check);
-      attempts.push({ build, reply, problems: problems.length, round: repairs });
+      attempts.push({ build, reply, problems: problems.length, round: repairs, hasParts: leavesParts(build, board) });
       if (repairs > 0) console.log(`[repair] after round ${repairs}: ${problems.length ? `${problems.length} problems left` : 'clean'}`);
       if (!problems.length || repairs >= MAX_REPAIRS || round + 1 >= DEEPSEEK_MAX_ROUNDS) break;
       repairs++;
@@ -292,16 +302,31 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
 }
 
 // The attempt with the fewest problems, a tie going to the later one, as
-// { reply, actions }, logged; null when there are none.
-function keptAttempt(attempts) {
+// { reply, actions }, logged as "[repair] <why> round N: K problems"; null
+// when there are none. An empty build (no part on its board, #7: the checker
+// calls delete_all alone clean) never beats one with parts.
+function keptAttempt(attempts, why = 'kept') {
   if (!attempts.length) return null;
-  const best = attempts.reduce((b, a) => (a.problems <= b.problems ? a : b));
-  console.log(`[repair] kept round ${best.round}: ${best.problems} problems`);
+  const pool = attempts.some(a => a.hasParts) ? attempts.filter(a => a.hasParts) : attempts;
+  const best = pool.reduce((b, a) => (a.problems <= b.problems ? a : b));
+  console.log(`[repair] ${why} round ${best.round}: ${best.problems} problems`);
   return { reply: best.reply, actions: best.build };
 }
 
 // A board-model board as the browser sends it (issue #84).
 const isBoard = b => !!b && Array.isArray(b.parts) && Array.isArray(b.wires);
+
+// Whether the board a build leaves has a part (#7): a rebuild from its last
+// delete_all, an edit on the sent board. True if the board can't be read, so
+// that build is judged on its problems alone, as before.
+function leavesParts(actions, board) {
+  const rebuild = lastBuild(actions);
+  try {
+    return Board.apply(rebuild || !isBoard(board) ? Board.empty() : board, rebuild || actions).board.parts.length > 0;
+  } catch {
+    return true;
+  }
+}
 
 // The actions from the last delete_all on, or null without one.
 function lastBuild(actions) {
