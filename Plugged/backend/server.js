@@ -1584,4 +1584,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, ask, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems, checkBuild, ALWAYS_SENT, MAX_TOOLS };
+module.exports = { server, ask, clientKey, finishAIReply, SYSTEM_PROMPT, CIRCUIT_TOOLS, selectTools, findCircuitProblems, checkBuild, ALWAYS_SENT, MAX_TOOLS, NEW_BUILD };

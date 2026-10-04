@@ -13,8 +13,12 @@
 //    📷 → Use sample photo → its stored taps (window.PhotoSamples)
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
 //    → the Reading opens the confirm screen (PhotoConfirm.open) on the same
-//      flattened image; Build it hands its result back here (logged until
-//      #143). Or the reply's friendly text with Use sample photo.
+//      flattened image; Build it hands its result back here: the board
+//      (SparkyChat.applyBuild), window.PhotoFlags, the simulation, then her
+//      question to Edison with the photo's context (#143). Or the reply's
+//      friendly text with Use sample photo.
+//  window.PhotoFlags (the labels of parts read unsure) is emptied when a
+//  photo opens and whenever App.clearAll empties the board.
 //  While the overlay is open, keydown stops at the window (capture
 //  phase), so Backspace and Ctrl+Z never reach the board. Escape cancels
 //  a confirm-screen move first, else closes.
@@ -30,6 +34,7 @@
   const MAX_SIDE  = 3000;                // the original is resized to this before flattening
   const SAMPLE    = 'demo-board';
   const READING   = 'Reading your board…';
+  const DEFAULT_Q = "What's wrong with my circuit?";       // Build it with nothing typed
   // docs/API-CONTRACT.md → "POST /api/photo" → Errors
   const BAD_IMAGE  = "I can't read that file. Try a JPEG or PNG photo, or use the sample photo.";
   const AI_FAILED  = "I couldn't read the photo just now. Try again, or use the sample photo.";
@@ -55,6 +60,7 @@
   const nextJob = () => { job++; if (ctrl) ctrl.abort(); return job; };
 
   function open() {
+    clearFlags();                                          // a new photo: the last one's flags are done
     menu.hidden = true;
     corners.hidden = true;
     confirm.hidden = true;
@@ -242,10 +248,20 @@
   }
 
   // Build it on the confirm screen: { actions, flags, labels, skipped }.
+  // The board, the simulation, then Edison answers her question (#143).
   function built(result) {
-    console.log('[photo] build', result);                  // until the build step (#143)
+    const question = $('sparky-input').value.trim() || DEFAULT_Q;
     close();
+    SparkyChat.applyBuild(result.actions);                 // may clear the board, and the flags with it
+    window.PhotoFlags = new Set(result.flags.map(f => result.labels[f.id]).filter(Boolean));
+    App.runSimulation();
+    sparkyAsk(question, { context: SparkyChat.photoContext(result) });   // clears the input
   }
+
+  // The flagged parts' labels go with the board they were read for.
+  const clearFlags = () => { window.PhotoFlags = new Set(); };
+  const _clearAll  = App.clearAll;
+  App.clearAll = function (opts) { clearFlags(); return _clearAll.call(this, opts); };
 
   async function useSample() {
     const my = nextJob();

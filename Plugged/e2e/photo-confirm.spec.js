@@ -63,6 +63,48 @@
 //                           the overlay.
 //   - While #photo-modal is open, keydown is swallowed in the capture phase
 //     (as for the corner step).
+//
+// Part 2 (issue #142), in photo-confirm.js, added to the page above:
+//   - Rows: #photo-parts also has one row per power entry,
+//     `[data-id="power:<i>"]` (PhotoImport's key), showing its label (BAT1).
+//     Every row's class follows `result` after every edit:
+//       .photo-flagged      (amber) iff result.flags has an entry with that
+//                           row's id; the row's text includes each such
+//                           flag's `why`.
+//       .photo-notbuilt     (greyed) iff result.skipped has that id; the row's
+//                           text includes "not built" (e.g. an `other` IC).
+//   - select.photo-value    on each resistor row. Option `value`s are ohms as
+//                           plain numbers ("470", "1000"). The options include
+//                           the Reading's `value`, the value its `bands`
+//                           decode to, and E12 values around it, 1 kΩ
+//                           included for a 470 Ω part (at least 390, 560 and
+//                           1000). Selected on open: the Reading's value.
+//                           A change sets the part's `value` (a number) and
+//                           re-runs the build.
+//   - select.photo-color    on each LED row (options exactly
+//                           Object.keys(Parts.get('led').values.color.choices))
+//                           and each wire row (exactly red, yellow, green,
+//                           blue, black, white). Selected on open: the
+//                           Reading's colour. A change sets its `color`.
+//   - input.photo-volts     on each power row: min "1", max "24", showing the
+//                           volts the build uses (9 when unread). A change
+//                           (the `change` or `input` event) sets that entry's
+//                           `volts` to the number typed, as typed: out of
+//                           1–24 V, PhotoImport itself builds 9 V and flags
+//                           `value` (so the row turns amber).
+//   - Power dots: dots() also lists each power entry's two ends,
+//                           { id: 'power:<i>', end: 0 (plus) | 1 (minus), hole, x, y }
+//                           at grid.holeCentre(hole), drawn, and movable like
+//                           any dot (tap it, tap a rail hole: its plus/minus
+//                           `hole` follows).
+//   - #photo-add            "+ Add a part": shows (in #photo-confirm) three
+//                           buttons [data-add="resistor"], [data-add="led"],
+//                           [data-add="wire"]. Pick one, then tap two points
+//                           on the canvas: each snaps (grid.snap) to a hole,
+//                           and a new part (leads in tap order) or wire (ends
+//                           in tap order) with an unused id is appended to the
+//                           Reading, with its own row. Her added part is not
+//                           flagged (a resistor gets a real default value).
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
@@ -419,5 +461,216 @@ test('LED roles none/none or anode/anode: Build waits; one ⇄ gives exactly one
     expect(s.dots.filter(x => x.plus).map(x => x.hole), 'the + is on the anode lead').toEqual([holeOf(s.reading, 'LED1', 'anode')]);
     await expect(page.locator('#photo-build'), `roles ${roles}: ⇄ enables Build`).toBeEnabled();
   }
+  expect(errors).toEqual([]);
+});
+
+// ── Part 2 (#142): amber flags, not built, values and colours, battery, + Add ──
+
+const rowOf = (page, id) => page.locator(`#photo-parts [data-id="${id}"]`);
+
+// Every part, wire and power row is amber exactly when PhotoImport flags its
+// id, and then shows each flag's why.
+async function expectAmber(page, s) {
+  const ids = [...s.reading.parts.map(p => p.id), ...s.reading.wires.map(w => w.id), ...s.reading.power.map((_, i) => 'power:' + i)];
+  for (const id of ids) {
+    const why = s.result.flags.filter(f => f.id === id).map(f => f.why);
+    if (why.length) {
+      await expect(rowOf(page, id), `${id} is flagged: amber`).toHaveClass(/\bphoto-flagged\b/);
+      for (const w of why) await expect(rowOf(page, id), `${id}'s row says why`).toContainText(w);
+    } else {
+      await expect(rowOf(page, id), `${id} has no flag: not amber`).not.toHaveClass(/\bphoto-flagged\b/);
+    }
+  }
+}
+
+const optionValues = loc => loc.locator('option').evaluateAll(os => os.map(o => o.value));
+
+// The Done-when Reading: one unsure LED (its + unknown) and one IC.
+function unsureReading() {
+  const r = stageReading();
+  for (const l of ledOf(r).leads) l.role = 'unknown';
+  r.parts.push({ id: 'U1', type: 'other', what: '555 timer IC', value: 0, bands: [], color: '',
+                 leads: [lead('e40'), lead('f40')], box: [0, 0, 0, 0], confidence: 0.6, unsure: [] });
+  return r;
+}
+
+test('#142 amber and not built: the unsure LED\'s row is amber with its reason until ⇄ settles it; the IC is listed greyed as not built', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openEditor(page);
+  await openConfirm(page, unsureReading());
+
+  let s = await confirmState(page);
+  expect(s.result).toEqual(await expectedBuild(page, s.reading));
+  expect(s.result.flags.map(f => [f.kind, f.id]), 'the importer flags LED1\'s polarity and the IC').toEqual(expect.arrayContaining([['polarity', 'LED1'], ['type', 'U1']]));
+  await expect(rowOf(page, 'LED1'), 'the unsure LED is amber').toHaveClass(/\bphoto-flagged\b/);
+  await expect(rowOf(page, 'LED1'), 'with its reason').toContainText(s.result.flags.find(f => f.id === 'LED1').why);
+
+  // The IC: listed, greyed, "not built"; built parts aren't.
+  await expect(rowOf(page, 'U1'), 'the IC has a row').toHaveCount(1);
+  await expect(rowOf(page, 'U1'), 'the IC is greyed').toHaveClass(/\bphoto-notbuilt\b/);
+  await expect(rowOf(page, 'U1')).toContainText('not built');
+  for (const id of ['R1', 'LED1', 'W1', 'W2']) await expect(rowOf(page, id), `${id} is built`).not.toHaveClass(/\bphoto-notbuilt\b/);
+  await expect(rowOf(page, 'power:0'), 'a battery row').toContainText(s.result.labels['power:0']);
+  await expectAmber(page, s);
+
+  // ⇄ picks the +: the polarity flag goes, and so does the amber.
+  await rowOf(page, 'LED1').locator('.photo-swap').click();
+  s = await confirmState(page);
+  expect(s.result.flags.filter(f => f.id === 'LED1'), 'no flag on LED1 once she picked').toEqual([]);
+  await expectAmber(page, s);
+  expect(errors).toEqual([]);
+});
+
+test('#142 values and colours: R1\'s dropdown offers the reading, the bands and E12 values, and 1 kΩ builds 1000 Ω; LED and wire colour dropdowns follow into the actions and Build it', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openEditor(page);
+  const r = stageReading();
+  r.parts[0].bands = ['yellow', 'orange', 'brown', 'gold'];     // 430 Ω: the bands disagree with the 470 Ω value
+  await openConfirm(page, r);
+
+  // R1: the value dropdown.
+  const value = rowOf(page, 'R1').locator('select.photo-value');
+  await expect(value, 'R1 has a value dropdown').toHaveCount(1);
+  expect(await optionValues(value), 'the reading\'s 470, the bands\' 430, E12 neighbours 390 / 560, and 1 kΩ').toEqual(expect.arrayContaining(['470', '430', '390', '560', '1000']));
+  await expect(value, 'R1 opens on the reading\'s value').toHaveValue('470');
+  await value.selectOption('1000');
+  let s = await confirmState(page);
+  expect(s.reading.parts[0].value).toBe(1000);
+  expect(s.result).toEqual(await expectedBuild(page, s.reading));
+  expect(s.result.actions.find(a => a.tool === 'place_resistor'), 'R1 builds at 1 kΩ').toMatchObject({ holeA: 'a10', holeB: 'a14', resistance: 1000 });
+
+  // LED1: the LED's own colours.
+  const ledColors = await page.evaluate(() => Object.keys(window.Parts.get('led').values.color.choices));
+  const led = rowOf(page, 'LED1').locator('select.photo-color');
+  expect(await optionValues(led), 'LED colours are the LED part\'s').toEqual(ledColors);
+  await expect(led).toHaveValue('red');
+  await led.selectOption('green');
+
+  // W2: the wire colours.
+  const wire = rowOf(page, 'W2').locator('select.photo-color');
+  expect(await optionValues(wire), 'wire colours').toEqual(['red', 'yellow', 'green', 'blue', 'black', 'white']);
+  await expect(wire).toHaveValue('black');
+  await wire.selectOption('blue');
+
+  s = await confirmState(page);
+  expect([ledOf(s.reading).color, s.reading.wires[1].color]).toEqual(['green', 'blue']);
+  expect(s.result).toEqual(await expectedBuild(page, s.reading));
+  await expectAmber(page, s);
+
+  await page.locator('#photo-build').click();
+  s = await confirmState(page);
+  const want = STAGE_ACTIONS.map(a => (a.tool === 'place_resistor' ? Object.assign({}, a, { resistance: 1000 })
+    : a.tool === 'place_led' ? Object.assign({}, a, { color: 'green' })
+    : a.from === 'b17' ? Object.assign({}, a, { color: 'blue' }) : a));
+  expect(s.built.actions, 'Build it hands on the edited values').toEqual(want);
+  expect(await refusals(page, s.built.actions)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('#142 battery: unread volts show 9 V in amber; 5 V builds a 5 V battery, out of 1–24 V falls back to 9 V flagged; its + / − dots sit on the rails and the + moves like any dot', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openEditor(page);
+  const r = stageReading();
+  r.power[0].volts = 0;                                         // unread
+  await openConfirm(page, r);
+
+  const bat = rowOf(page, 'power:0'), volts = bat.locator('input.photo-volts');
+  await expect(bat, 'a battery row').toHaveCount(1);
+  await expect(volts, 'unread → 9 V shown').toHaveValue('9');
+  await expect(volts).toHaveAttribute('min', '1');
+  await expect(volts).toHaveAttribute('max', '24');
+  let s = await confirmState(page);
+  expect(s.result.flags.filter(f => f.id === 'power:0').map(f => f.kind), 'unread volts are flagged').toContain('value');
+  await expectAmber(page, s);
+
+  // The + and − dots, at their rail holes.
+  const at = await page.evaluate(() => ['rail:aOuter:3', 'rail:aInner:3', 'rail:aOuter:6'].map(h => window.PhotoCapture.grid.holeCentre(h)));
+  for (const [end, hole, c] of [[0, 'rail:aOuter:3', at[0]], [1, 'rail:aInner:3', at[1]]]) {
+    const d = dotOf(s, 'power:0', end);
+    expect(d, `a dot for the battery's ${end ? '−' : '+'}`).toBeTruthy();
+    expect(d.hole).toBe(hole);
+    expect(Math.hypot(d.x - c[0], d.y - c[1]), `drawn at ${hole}`).toBeLessThan(1);
+  }
+
+  // 5 V.
+  await volts.fill('5');
+  await volts.dispatchEvent('change');
+  s = await confirmState(page);
+  expect(s.reading.power[0].volts).toBe(5);
+  expect(s.result).toEqual(await expectedBuild(page, s.reading));
+  expect(s.result.actions[0], 'the battery at 5 V').toEqual({ tool: 'place_battery', voltage: 5 });
+  await expectAmber(page, s);
+
+  // Out of range: PhotoImport uses 9 V and flags it.
+  await volts.fill('30');
+  await volts.dispatchEvent('change');
+  s = await confirmState(page);
+  expect(s.result.actions[0], '30 V is out of 1–24: 9 V is built').toEqual({ tool: 'place_battery', voltage: 9 });
+  await expectAmber(page, s);
+  await volts.fill('5');
+  await volts.dispatchEvent('change');
+
+  // Move the + dot along its rail: the battery's red lead follows.
+  const before6 = await patch(page, at[2]);
+  await tapFlat(page, at[0]);
+  expect((await confirmState(page)).selected, 'tapping the + dot selects it').toEqual({ id: 'power:0', end: 0 });
+  await tapFlat(page, at[2]);
+  s = await confirmState(page);
+  expect(s.reading.power[0].plus.hole).toBe('rail:aOuter:6');
+  expect(s.result).toEqual(await expectedBuild(page, s.reading));
+  expect(s.result.actions.find(a => a.from === 'BAT1.0'), 'the + lead now lands on tp_6').toMatchObject({ to: 'tp_6' });
+  expect(s.result.actions[0]).toEqual({ tool: 'place_battery', voltage: 5 });
+  expect(patchDiff(before6, await patch(page, at[2])), 'the + dot is redrawn at rail:aOuter:6').toBeGreaterThan(1);
+  expect(errors).toEqual([]);
+});
+
+test('#142 + Add a part: a resistor tapped onto a30 → a34 and a wire b30 → the − rail get rows and actions, unflagged; × removes the added resistor', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openEditor(page);
+  await openConfirm(page, stageReading());
+  const at = await page.evaluate(() => Object.fromEntries(['a30', 'a34', 'b30', 'rail:aInner:30'].map(h => [h, window.PhotoCapture.grid.holeCentre(h)])));
+  const ids = s => [...s.reading.parts.map(p => p.id), ...s.reading.wires.map(w => w.id)];
+  let s = await confirmState(page);
+  const before = ids(s);
+
+  await expect(page.locator('#photo-add'), 'a + Add a part button').toBeVisible();
+  await page.locator('#photo-add').click();
+  for (const t of ['resistor', 'led', 'wire']) await expect(page.locator(`#photo-confirm [data-add="${t}"]`), `+ Add offers ${t}`).toBeVisible();
+
+  // A resistor: two taps.
+  await page.locator('#photo-confirm [data-add="resistor"]').click();
+  await tapFlat(page, at.a30);
+  await tapFlat(page, at.a34);
+  s = await confirmState(page);
+  const added = s.reading.parts.filter(p => !before.includes(p.id));
+  expect(added.map(p => [p.type, p.leads.map(l => l.hole)]), 'one resistor added at a30 → a34').toEqual([['resistor', ['a30', 'a34']]]);
+  const rid = added[0].id;
+  await expect(rowOf(page, rid), 'the added resistor has a row').toHaveCount(1);
+  await expect(rowOf(page, rid).locator('select.photo-value'), 'with a value dropdown').toHaveCount(1);
+  expect(s.result).toEqual(await expectedBuild(page, s.reading));
+  expect(s.result.actions.find(a => a.tool === 'place_resistor' && a.holeA === 'a30'), 'a place_resistor at a30 → a34').toMatchObject({ holeB: 'a34', resistance: expect.any(Number) });
+  expect(s.result.flags.filter(f => f.id === rid), 'her own part is not flagged').toEqual([]);
+  expect(s.dots.filter(d => d.id === rid).map(d => d.hole), 'its dots are drawn').toEqual(['a30', 'a34']);
+
+  // A wire: two taps.
+  await page.locator('#photo-add').click();
+  await page.locator('#photo-confirm [data-add="wire"]').click();
+  await tapFlat(page, at.b30);
+  await tapFlat(page, at['rail:aInner:30']);
+  s = await confirmState(page);
+  const wires = s.reading.wires.filter(w => !before.includes(w.id));
+  expect(wires.map(w => w.ends.map(e => e.hole)), 'one wire added b30 → the a-side − rail').toEqual([['b30', 'rail:aInner:30']]);
+  await expect(rowOf(page, wires[0].id), 'the added wire has a row').toHaveCount(1);
+  expect(s.result).toEqual(await expectedBuild(page, s.reading));
+  expect(s.result.actions.find(a => a.tool === 'add_wire' && a.from === 'b30'), 'an add_wire b30 → tn_30').toMatchObject({ to: 'tn_30' });
+  expect(s.result.flags.filter(f => f.id === wires[0].id)).toEqual([]);
+
+  // × on the added resistor.
+  await rowOf(page, rid).locator('.photo-del').click();
+  await expect(rowOf(page, rid)).toHaveCount(0);
+  s = await confirmState(page);
+  expect(s.reading.parts.map(p => p.id)).toEqual(['R1', 'LED1']);
+  expect(s.result.actions.filter(a => a.tool === 'place_resistor' && a.holeA === 'a30'), 'its action is gone').toEqual([]);
+  expect(await refusals(page, s.result.actions)).toEqual([]);
   expect(errors).toEqual([]);
 });

@@ -7,6 +7,8 @@
 //  row selects the first part it names, which outlines it on the board.
 //  An info: true row (issue #126) is shown as information, not a mistake:
 //  .mistake-info, an "i" icon, and it doesn't count as a problem.
+//  A row naming a part in window.PhotoFlags gets a "read from photo,
+//  unsure" badge (issue #143).
 //  plugged:sim-stop hides the panel. Reads Readings only, never the solver.
 //
 //  LOADING
@@ -44,10 +46,19 @@
     const labels = document.createElement('span');
     labels.className = 'mistake-labels';
     labels.textContent = p.labels.join(', ');
+    el.append(icon, labels);
+    // A part the photo read unsure (issue #143; photo.js owns PhotoFlags).
+    if (window.PhotoFlags && p.labels.some(l => window.PhotoFlags.has(l))) {
+      const badge = document.createElement('span');
+      badge.className = 'mistake-photo';
+      badge.textContent = 'read from photo, unsure';
+      badge.style.cssText = 'margin-left: 6px; font-size: 10px; color: #64748b; font-style: italic;';
+      el.append(badge);
+    }
     const why = document.createElement('div');
     why.className = 'mistake-why';
     why.textContent = p.why;
-    el.append(icon, labels, why);
+    el.append(why);
     el.addEventListener('click', () => pick(p.labels));
     return el;
   }

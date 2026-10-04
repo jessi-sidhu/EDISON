@@ -295,6 +295,17 @@ html, body {
   cursor: pointer;
 }
 #photo-parts button:hover { border-color: var(--accent); }
+#photo-parts li { flex-wrap: wrap; }
+#photo-parts select, .photo-volts { max-width: 82px; font-family: inherit; font-size: 11px; }
+.photo-volts { width: 48px; }
+#photo-parts i { font-style: normal; }
+.photo-why { flex-basis: 100%; white-space: pre-line; font-size: 11px; line-height: 1.35; color: #92400e; }
+.photo-why:empty { display: none; }
+#photo-parts li.photo-flagged { background: #fef3c7; border-left: 3px solid #f59e0b; }
+#photo-parts li.photo-notbuilt { opacity: 0.55; }
+#photo-parts li.photo-board { font-size: 11px; color: #92400e; }
+.photo-addbar { flex-wrap: wrap; justify-content: stretch; }
+.photo-addbar span { display: flex; gap: 6px; width: 100%; }
 #photo-build { justify-content: center; }
 #photo-build:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
 

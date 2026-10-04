@@ -282,11 +282,30 @@
     return `${text}\nApplied: ${done.length ? done.map(describeAction).join(', ') : 'nothing'}` + (n ? ` (${n} could not be applied).` : '.');
   }
 
+  // The line a photo build adds to her question (issue #143): "Built from a
+  // photo of my real breadboard. Unsure readings: LED1 direction." `result`
+  // is PhotoImport.build's. It goes into the /api/ask message, so it never
+  // names a part keyword, a NEW_BUILD word or "fix": the server must treat
+  // question + context exactly as the question alone.
+  const UNSURE = { polarity: 'direction', value: 'value', moved: 'holes', shorted: 'shorted',
+                   source: 'kind', position: 'holes', mismatch: 'holes', type: 'kind' };
+  function photoContext(result) {
+    const labels = (result && result.labels) || {};
+    const said = ((result && result.flags) || []).map(f => {
+      if (f.kind === 'rails') return 'rail signs';
+      if (f.id == null)       return f.kind === 'source' ? 'no cell seen, a 9 V one assumed' : f.kind;
+      if (!labels[f.id])      return `the photo's ${f.id} not added`;
+      return `${labels[f.id]} ${UNSURE[f.kind] || f.kind}`;
+    });
+    const unique = [...new Set(said)];
+    return 'Built from a photo of my real breadboard.' + (unique.length ? ` Unsure readings: ${unique.join(', ')}.` : '');
+  }
+
   // The page's own guard on /api/ask (issue #129): longer than the server's
   // 60 s DeepSeek deadline, so the server's clear 504 normally arrives first.
   const ASK_TIMEOUT_MS = 75000;
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, EDITS, ROTATION, ASK_TIMEOUT_MS };
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, placesParts, partFor, partValues, colorHex, formatReply, modelHistoryText, photoContext, EDITS, ROTATION, ASK_TIMEOUT_MS };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -555,21 +574,46 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     App.requestRender();
   }
 
+  // An open preview, dismissed with no note: the history says it was declined.
+  function dropPreview() {
+    if (!_pendingActions) return;
+    settleHistory(_pendingActions, false);
+    clearGhosts();
+    _pendingActions = null;
+    document.getElementById('sparky-pending-bar').style.display = 'none';
+  }
+
+  // A confirmed photo's actions (issue #143) on a board of their own, as one
+  // undo step. A board that isn't empty becomes a new "Untitled" circuit
+  // first, so her open saved circuit is never overwritten (delete_all would
+  // keep it, and autosave would write the photo over it).
+  function applyBuild(actions) {
+    dropPreview();
+    if (App.state.components.length || App.state.wires.length) App.clearAll();
+    const labels = Chat.predictLabels(actions, App.state.components);
+    const result = Chat.acceptBuild(actions, board);
+    App.frameCircuit();
+    const bad    = new Set(result.failedActions);
+    const placed = (actions || []).map((a, i) => (Chat.placesParts([a]) && !bad.has(a) ? [a, labels[i]] : null)).filter(Boolean);
+    const n      = placed.length;
+    sparkyAddMsg(`Built ${n} part${n !== 1 ? 's' : ''} from your photo. Undo (Ctrl+Z) brings back the empty board.`, 'system');
+    const said = placed.map(([a, label]) => (a.holeA != null ? `${label} ${a.holeA}–${a.holeB}` : label));
+    chatHistory.push({ role: 'model', text: `I built your board from the photo: ${said.join(', ')}.` });
+    return result;
+  }
+
   // ── Main ask ─────────────────────────────────────────────────
 
-  async function sparkyAsk(overrideMsg) {
+  // { context }: a line added to the message sent (and kept in the history),
+  // never shown in her bubble (the photo build's, issue #143).
+  async function sparkyAsk(overrideMsg, { context } = {}) {
     const input = document.getElementById('sparky-input');
     const msg   = (overrideMsg !== undefined) ? overrideMsg : input.value.trim();
     if (!msg) return;
+    const sent  = context ? msg + '\n\n' + context : msg;
 
-    // If there's an open preview, dismiss it before sending a new message:
-    // the history says it was declined.
-    if (_pendingActions) {
-      settleHistory(_pendingActions, false);
-      clearGhosts();
-      _pendingActions = null;
-      document.getElementById('sparky-pending-bar').style.display = 'none';
-    }
+    // If there's an open preview, dismiss it before sending a new message.
+    dropPreview();
 
     sparkyAddMsg(msg, 'user');
     input.value = '';
@@ -580,12 +624,12 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     try {
       const markdown = App.exportMarkdown ? App.exportMarkdown() : '_Board not ready._';
       const boardNow = App.exportBoard ? App.exportBoard() : undefined;   // the board model, wire ids included (#84)
-      const data = await askSparky(markdown, msg, chatHistory.slice(-20), boardNow);
+      const data = await askSparky(markdown, sent, chatHistory.slice(-20), boardNow);
       typingEl.remove();
       sparkyAddMsg(data.reply || '(no reply)', 'ai');
 
       const entry = { role: 'model', text: data.reply || '' };
-      chatHistory.push({ role: 'user', text: msg });
+      chatHistory.push({ role: 'user', text: sent });
       chatHistory.push(entry);
 
       if (data.actions && data.actions.length) {
@@ -602,6 +646,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
 
   // The panel's buttons call these from inline onclick attributes.
   Object.assign(window, { sparkyAsk, sparkyQuick, sparkyAcceptChanges, sparkyDeclineChanges });
+  Chat.applyBuild = applyBuild;   // photo.js's Build it (issue #143)
 
   document.addEventListener('DOMContentLoaded', () => {
     const inp = document.getElementById('sparky-input');
