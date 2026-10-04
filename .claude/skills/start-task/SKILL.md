@@ -11,9 +11,14 @@ The issue is an approved design, so don't brainstorm or write a spec. You are th
 ## 1. Set up
 1. **Pick the issue.**
    - If no number was given, list open unassigned issues with `gh issue list --search "no:assignee" --state open --label task` and `... --label bug`, and let the user choose.
+   - Leave out any issue that has a "Claimed by" comment (check with `gh issue view <n> --comments`).
    - Suggest `bug` issues first when the user is Aarmen, and otherwise the lowest-numbered `task` on the demo path.
 2. **Read it.** Run `gh issue view <n> --comments`. If Goal, Files or Done-when is missing, or contradicts the docs, stop: tell the user what's unclear and suggest they ask the team on the issue.
-3. **Claim it.** `gh issue edit <n> --add-assignee @me`.
+3. **Claim it,** before making the worktree.
+   - Run `gh issue view <n> --comments`.
+   - If the issue is closed, or has a "Claimed by" comment from another session or machine, stop and tell the user who has it.
+   - Otherwise post `gh issue comment <n> --body "Claimed by: <machine> session, worktree .worktrees/<n>, branch <branch>, <date>"`. The machine is "Mac" or "school computer"; ask the user once if it isn't known.
+   - Also run `gh issue edit <n> --add-assignee @me`. Every session shares one GitHub account, so the assignee says nothing; the comment is the real signal.
 4. **Branch.**
    - Don't commit or stash anyone else's work.
    - Never switch branches in the main checkout. It stays on `dev`, and parallel sessions share it.

@@ -26,8 +26,9 @@ description: Finish the current task - run checks, review, commit, rebase onto t
    - Run `git fetch origin dev && git rebase origin/dev`.
    - On conflicts, keep both sides' intent, show the user what you chose, and re-run step 2's checks.
    - If a conflict touches someone else's module or is unclear, stop and ask.
+   - Just before the push, re-read the issue: `gh issue view <n> --comments --json state,comments`. If it's already closed, or has a "Claimed by" or "Shipped to dev" comment from another session newer than ours, stop and show the user instead of pushing.
    - Then push: `git push origin HEAD:dev`. Never force-push.
-   - If the push is rejected because `dev` moved, fetch, rebase and check again, then retry once.
+   - If the push is rejected because `dev` moved, fetch, rebase, run step 2's checks and the issue re-check again, then retry once. Also run `git log origin/dev --oneline --grep "#<n>"`: if another session already shipped this issue, stop and show the user.
 6. **Tidy up.**
    - On a task branch in a worktree (`.worktrees/<n>`, the normal case):
      - Find the main root first: `root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")`.
@@ -35,5 +36,5 @@ description: Finish the current task - run checks, review, commit, rebase onto t
      - Run `git -C "$root" worktree remove .worktrees/<n>`, then `git -C "$root" branch -d <task branch>`. Never leave a finished worktree behind.
      - Never switch branches in the main checkout. It stays on `dev`.
    - Worked directly on `dev` in the main checkout (the fallback): run `git pull`. There's no branch or worktree to remove.
-   - If the commit message didn't close the issue, run `gh issue close <n> --comment "Shipped to dev in <sha>"`.
+   - Always run `gh issue close <n> --comment "Shipped to dev in <sha>"`. `Closes #<n>` only closes it when the commit reaches `main`, and other sessions' claim checks look for this comment.
 7. **Report.** Give the commit on `dev`, and remind the user that CI runs on it now (`gh run list --branch dev --limit 1`). It reaches `main` at the next `/promote`.
