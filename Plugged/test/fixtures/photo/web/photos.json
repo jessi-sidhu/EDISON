@@ -1,0 +1,266 @@
+{
+ "p3_bjornr": {
+  "ncols": 30,
+  "a_top": false,
+  "rails": {
+   "j:+": -3.0,
+   "j:-": -4.0
+  },
+  "source": "https://commons.wikimedia.org/wiki/File:BjornR_breadboard_01.jpg",
+  "license": "Public domain",
+  "file": "p3_bjornr.jpg",
+  "width": 1561,
+  "height": 825,
+  "taps": {
+   "a1": [
+    1307.5,
+    156.25
+   ],
+   "a30": [
+    216.25,
+    165.5
+   ],
+   "j30": [
+    152.0,
+    543.25
+   ],
+   "j1": [
+    1398.75,
+    523.25
+   ]
+  },
+  "resized_from": [
+   1561,
+   825
+  ]
+ },
+ "p6_piranha": {
+  "ncols": 30,
+  "a_top": null,
+  "rails": {
+   "j:+": -4.0,
+   "j:-": -3.0,
+   "a:+": 14.0,
+   "a:-": 15.0
+  },
+  "source": "https://www.flickr.com/photos/52195472@N00/9079851401",
+  "license": "CC BY 2.0 (lungstruck)",
+  "file": "p6_piranha.jpg",
+  "width": 1024,
+  "height": 697,
+  "taps": {
+   "a1": [
+    949.0,
+    189.0
+   ],
+   "a24": [
+    264.2,
+    189.8
+   ],
+   "j24": [
+    264.2,
+    513.3
+   ],
+   "j1": [
+    949.0,
+    513.3
+   ]
+  },
+  "resized_from": [
+   1024,
+   697
+  ]
+ },
+ "p1_resistors": {
+  "ncols": 63,
+  "a_top": null,
+  "rails": {
+   "j:-": -3.9,
+   "j:+": -2.9,
+   "a:-": 13.9,
+   "a:+": 14.9
+  },
+  "source": "https://commons.wikimedia.org/wiki/File:ElectricCircuit.jpg",
+  "license": "CC BY-SA 4.0",
+  "file": "p1_resistors.jpg",
+  "width": 1152,
+  "height": 2048,
+  "taps": {
+   "a1": [
+    682.95,
+    1728.35
+   ],
+   "j1": [
+    458.26,
+    1702.98
+   ],
+   "j55": [
+    552.44,
+    646.59
+   ],
+   "a55": [
+    761.72,
+    658.74
+   ]
+  },
+  "resized_from": [
+   2988,
+   5312
+  ]
+ },
+ "p2_leds_buttons": {
+  "ncols": 63,
+  "a_top": null,
+  "rails": {
+   "j:-": -4.0,
+   "j:+": -2.9,
+   "a:-": 13.7,
+   "a:+": 14.8
+  },
+  "source": "https://commons.wikimedia.org/wiki/File:Solderless_Breadboard_with_LEDs.jpg",
+  "license": "Copyrighted free use",
+  "file": "p2_leds_buttons.jpg",
+  "width": 2048,
+  "height": 1536,
+  "taps": {
+   "j1": [
+    262.4,
+    587.76
+   ],
+   "j5": [
+    357.36,
+    589.2
+   ],
+   "j10": [
+    480.0,
+    593.12
+   ],
+   "j15": [
+    606.4,
+    595.68
+   ],
+   "j20": [
+    736.0,
+    598.4
+   ],
+   "j50": [
+    1553.92,
+    628.88
+   ],
+   "j55": [
+    1690.16,
+    633.52
+   ],
+   "j60": [
+    1826.08,
+    638.32
+   ],
+   "a15": [
+    558.48,
+    870.0
+   ],
+   "a20": [
+    695.52,
+    876.48
+   ],
+   "a30": [
+    978.48,
+    890.0
+   ],
+   "a35": [
+    1123.12,
+    896.48
+   ],
+   "a55": [
+    1706.8,
+    922.08
+   ],
+   "a60": [
+    1850.48,
+    927.6
+   ]
+  },
+  "resized_from": [
+   2560,
+   1920
+  ]
+ },
+ "p4_io_leds": {
+  "ncols": 30,
+  "a_top": null,
+  "rails": {
+   "j:+": -3.9,
+   "j:-": -2.9,
+   "a:+": 13.9,
+   "a:-": 14.9
+  },
+  "source": "https://commons.wikimedia.org/wiki/File:Test_the_IO_pins.jpg",
+  "license": "CC BY-SA 2.0",
+  "file": "p4_io_leds.jpg",
+  "width": 2048,
+  "height": 1536,
+  "taps": {
+   "j1": [
+    1167.09,
+    1210.71
+   ],
+   "a1": [
+    1508.66,
+    1200.67
+   ],
+   "a25": [
+    1480.69,
+    470.28
+   ],
+   "j25": [
+    1145.36,
+    482.77
+   ]
+  },
+  "resized_from": [
+   2592,
+   1944
+  ]
+ },
+ "p5_multimeter": {
+  "ncols": 63,
+  "a_top": null,
+  "rails": {
+   "j:-": -3.9,
+   "j:+": -2.9,
+   "a:-": 13.9,
+   "a:+": 14.9
+  },
+  "source": "https://commons.wikimedia.org/wiki/File:Multimeter_probes_on_breadboard.jpg",
+  "license": "CC BY 4.0",
+  "file": "p5_multimeter.jpg",
+  "width": 2048,
+  "height": 1536,
+  "taps": {
+   "a30": [
+    734.63,
+    1011.05
+   ],
+   "a35": [
+    734.63,
+    1176.84
+   ],
+   "a40": [
+    741.59,
+    1368.38
+   ],
+   "j35": [
+    1277.92,
+    1135.09
+   ],
+   "j40": [
+    1318.96,
+    1319.52
+   ]
+  },
+  "resized_from": [
+   4032,
+   3024
+  ]
+ }
+}

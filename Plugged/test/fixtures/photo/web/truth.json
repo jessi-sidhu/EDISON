@@ -1,0 +1,1234 @@
+{
+ "p1_resistors": {
+  "notes": "Full 63-col board, photo near top-down but motion-blurred, board vertical in frame (col 1 at bottom). 7 resistors, no wires.",
+  "parts": [
+   {
+    "id": "RA",
+    "type": "resistor",
+    "value": "100",
+    "value_conf": "med",
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a17",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "a25",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "RB",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "j26",
+      "conf": "node"
+     },
+     {
+      "pin": "2",
+      "hole": "c25",
+      "conf": "med"
+     }
+    ],
+    "note": "top lead loops and shares j26 with RC"
+   },
+   {
+    "id": "RC",
+    "type": "resistor",
+    "value": "1k",
+    "value_conf": "med",
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "j26",
+      "conf": "med"
+     },
+     {
+      "pin": "2",
+      "hole": "i35",
+      "conf": "node"
+     }
+    ]
+   },
+   {
+    "id": "RD",
+    "type": "resistor",
+    "value": "100",
+    "value_conf": "low",
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "f25",
+      "conf": "med"
+     },
+     {
+      "pin": "2",
+      "hole": null,
+      "why": "f35 vs f36 ambiguous"
+     }
+    ]
+   },
+   {
+    "id": "RE",
+    "type": "resistor",
+    "value": "1k",
+    "value_conf": "med",
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "e25",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "e35",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "RF",
+    "type": "resistor",
+    "value": "100",
+    "value_conf": "low",
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "h35",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "c33",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "RG",
+    "type": "resistor",
+    "value": "100",
+    "value_conf": "med",
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a33",
+      "conf": "med"
+     },
+     {
+      "pin": "2",
+      "hole": "a43",
+      "conf": "high"
+     }
+    ]
+   }
+  ],
+  "wires": []
+ },
+ "p2_leds_buttons": {
+  "notes": "Full 63-col board, oblique ~35deg view, 3 leaning LEDs, 3 tactile buttons, resistor, 9V battery lying on the board. Many red jumper wire ends hidden behind LEDs.",
+  "parts": [
+   {
+    "id": "LG",
+    "type": "led",
+    "value": "green",
+    "leads": [
+     {
+      "pin": "?",
+      "hole": "e3",
+      "conf": "med"
+     },
+     {
+      "pin": "?",
+      "hole": "e4",
+      "conf": "med"
+     }
+    ],
+    "note": "polarity not visible"
+   },
+   {
+    "id": "LY",
+    "type": "led",
+    "value": "yellow",
+    "leads": [
+     {
+      "pin": "?",
+      "hole": "e7",
+      "conf": "med"
+     },
+     {
+      "pin": "?",
+      "hole": "e8",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "LR",
+    "type": "led",
+    "value": "red",
+    "leads": [
+     {
+      "pin": "?",
+      "hole": "e11",
+      "conf": "med"
+     },
+     {
+      "pin": "?",
+      "hole": "e12",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "rail:j:-:30",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "d12",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "B1",
+    "type": "button",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a1",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "a3",
+      "conf": "high"
+     },
+     {
+      "pin": "3",
+      "hole": null,
+      "why": "top legs hidden"
+     },
+     {
+      "pin": "4",
+      "hole": null,
+      "why": "top legs hidden"
+     }
+    ]
+   },
+   {
+    "id": "B2",
+    "type": "button",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a5",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "a7",
+      "conf": "high"
+     },
+     {
+      "pin": "3",
+      "hole": null,
+      "why": "top legs hidden"
+     },
+     {
+      "pin": "4",
+      "hole": null,
+      "why": "top legs hidden"
+     }
+    ]
+   },
+   {
+    "id": "B3",
+    "type": "button",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a9",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "a11",
+      "conf": "high"
+     },
+     {
+      "pin": "3",
+      "hole": null,
+      "why": "top legs hidden"
+     },
+     {
+      "pin": "4",
+      "hole": null,
+      "why": "top legs hidden"
+     }
+    ]
+   },
+   {
+    "id": "BAT",
+    "type": "battery",
+    "value": "9V",
+    "leads": [
+     {
+      "pin": "+",
+      "hole": "rail:j:+:21",
+      "conf": "high"
+     },
+     {
+      "pin": "-",
+      "hole": "rail:j:-:21",
+      "conf": "high"
+     }
+    ]
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "copper",
+    "ends": [
+     {
+      "hole": "e1",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "hidden behind LEDs"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "copper",
+    "ends": [
+     {
+      "hole": "e5",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "hidden behind LEDs"
+     }
+    ]
+   },
+   {
+    "id": "W3",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "e9",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "hidden behind LEDs"
+     }
+    ]
+   },
+   {
+    "id": "W4",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "rail:j:+:3",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "hidden behind LEDs"
+     }
+    ]
+   },
+   {
+    "id": "W5",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "rail:j:+:6",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "hidden behind LEDs"
+     }
+    ]
+   },
+   {
+    "id": "W6",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "rail:j:+:9",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "hidden behind LEDs"
+     }
+    ]
+   },
+   {
+    "id": "W7",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "a4",
+      "conf": "med"
+     },
+     {
+      "hole": "b12",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W8",
+    "color": "copper",
+    "ends": [
+     {
+      "hole": null,
+      "why": "a7 vs a8 ambiguous"
+     },
+     {
+      "hole": null,
+      "why": "end hidden"
+     }
+    ]
+   }
+  ]
+ },
+ "p3_bjornr": {
+  "notes": "Half-size two-piece board, col 1 at right in photo, a-e block at top; low front angle. Rails only on j side: inner +, outer -.",
+  "parts": [
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "c10",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "c15",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R2",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "i8",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "i9",
+      "conf": "high"
+     }
+    ],
+    "note": "standing vertical"
+   },
+   {
+    "id": "C1",
+    "type": "capacitor",
+    "value": "47uF",
+    "leads": [
+     {
+      "pin": "+",
+      "hole": "c9",
+      "conf": "high"
+     },
+     {
+      "pin": "-",
+      "hole": "c8",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "C2",
+    "type": "capacitor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "g11",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "g13",
+      "conf": "high"
+     }
+    ],
+    "note": "ceramic disc"
+   },
+   {
+    "id": "U1",
+    "type": "ic",
+    "value": "NE555",
+    "leads": [
+     {
+      "pin": "f8",
+      "hole": "f8",
+      "conf": "high"
+     },
+     {
+      "pin": "f9",
+      "hole": "f9",
+      "conf": "high"
+     },
+     {
+      "pin": "f10",
+      "hole": "f10",
+      "conf": "high"
+     },
+     {
+      "pin": "f11",
+      "hole": "f11",
+      "conf": "high"
+     },
+     {
+      "pin": "e8",
+      "hole": "e8",
+      "conf": "med"
+     },
+     {
+      "pin": "e9",
+      "hole": "e9",
+      "conf": "med"
+     },
+     {
+      "pin": "e10",
+      "hole": "e10",
+      "conf": "med"
+     },
+     {
+      "pin": "e11",
+      "hole": "e11",
+      "conf": "med"
+     }
+    ],
+    "note": "e-row pins hidden under body, set by DIP geometry"
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "green",
+    "ends": [
+     {
+      "hole": "a13",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "end hidden under electrolytic cap"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "h29",
+      "conf": "high"
+     },
+     {
+      "hole": "h9",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "W3",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "d7",
+      "conf": "med"
+     },
+     {
+      "hole": "d9",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W4",
+    "color": "bare",
+    "ends": [
+     {
+      "hole": "d11",
+      "conf": "high"
+     },
+     {
+      "hole": "d12",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W5",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "e7",
+      "conf": "high"
+     },
+     {
+      "hole": "f7",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W6",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "e12",
+      "conf": "high"
+     },
+     {
+      "hole": null,
+      "why": "f end hidden behind ceramic cap"
+     }
+    ]
+   },
+   {
+    "id": "W7",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "e13",
+      "conf": "high"
+     },
+     {
+      "hole": "f13",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W8",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "g7",
+      "conf": "med"
+     },
+     {
+      "hole": "g10",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W9",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "j8",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:j:+:7",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W10",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "j12",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:j:+:11",
+      "conf": "high"
+     }
+    ]
+   }
+  ]
+ },
+ "p4_io_leds": {
+  "notes": "Half-size 30-col board next to an Arduino, near top-down, warm light, board rotated 90deg (col 1 at bottom). 4 lit LEDs straddle the channel; polarity known because they are lit: f-leg goes to the Arduino pin, e-leg via resistor to the - rail. Cluster at cols 27-30 (regulator, bezel LED, power wires) is too occluded to label: ignored.",
+  "ignore_cols_from": 27,
+  "parts": [
+   {
+    "id": "LG",
+    "type": "led",
+    "value": "green",
+    "leads": [
+     {
+      "pin": "anode",
+      "hole": "f3",
+      "conf": "high"
+     },
+     {
+      "pin": "cathode",
+      "hole": "e3",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "LY",
+    "type": "led",
+    "value": "yellow",
+    "leads": [
+     {
+      "pin": "anode",
+      "hole": "f8",
+      "conf": "high"
+     },
+     {
+      "pin": "cathode",
+      "hole": "e8",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "LO",
+    "type": "led",
+    "value": "orange",
+    "leads": [
+     {
+      "pin": "anode",
+      "hole": "f13",
+      "conf": "high"
+     },
+     {
+      "pin": "cathode",
+      "hole": "e13",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "LR",
+    "type": "led",
+    "value": "red",
+    "leads": [
+     {
+      "pin": "anode",
+      "hole": "f18",
+      "conf": "high"
+     },
+     {
+      "pin": "cathode",
+      "hole": "e18",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "c3",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "rail:a:-:4",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "R2",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a8",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "rail:a:-:9",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "R3",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "b13",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "rail:a:-:14",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "R4",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "a18",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "rail:a:-:18",
+      "conf": "med"
+     }
+    ]
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "green",
+    "ends": [
+     {
+      "hole": "off",
+      "conf": "high"
+     },
+     {
+      "hole": "i3",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "yellow",
+    "ends": [
+     {
+      "hole": "off",
+      "conf": "high"
+     },
+     {
+      "hole": "j8",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W3",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "off",
+      "conf": "high"
+     },
+     {
+      "hole": "i13",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W4",
+    "color": "red",
+    "ends": [
+     {
+      "hole": "off",
+      "conf": "high"
+     },
+     {
+      "hole": "j18",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W5",
+    "color": "orange",
+    "ends": [
+     {
+      "hole": "off",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:a:-:26",
+      "conf": "med"
+     }
+    ]
+   }
+  ]
+ },
+ "p5_multimeter": {
+  "notes": "Full board seen at a steep angle (columns run away from camera), deep square wells, two multimeter probes and two white DuPont jumpers occlude; probes touch exposed pins/legs (not inserted). Taps only cover cols 30-40 (cols 1-20 drift ~1 col in the warp).",
+  "parts": [
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "e26",
+      "conf": "med"
+     },
+     {
+      "pin": "2",
+      "hole": "f26",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "L1",
+    "type": "led",
+    "value": "red",
+    "leads": [
+     {
+      "pin": "?",
+      "hole": "j25",
+      "conf": "med"
+     },
+     {
+      "pin": "?",
+      "hole": "j26",
+      "conf": "med"
+     }
+    ],
+    "note": "polarity not visible"
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "a26",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "f25",
+      "conf": "med"
+     },
+     {
+      "hole": "off",
+      "conf": "high"
+     }
+    ]
+   }
+  ]
+ },
+ "p6_piranha": {
+  "notes": "Near top-down, 1024px. Col 1 at right, A on top in photo. Left part of board covered by a power-supply PCB (cols 25+). Piranha LED pins hidden under packages; f-j LEDs show the package underside (may not be inserted).",
+  "parts": [
+   {
+    "id": "L1",
+    "type": "led",
+    "value": null,
+    "leads": [
+     {
+      "pin": "?",
+      "hole": null,
+      "why": "pins hidden under package"
+     }
+    ]
+   },
+   {
+    "id": "L2",
+    "type": "led",
+    "value": null,
+    "leads": [
+     {
+      "pin": "?",
+      "hole": null,
+      "why": "pins hidden under package"
+     }
+    ]
+   },
+   {
+    "id": "L3",
+    "type": "led",
+    "value": null,
+    "leads": [
+     {
+      "pin": "?",
+      "hole": null,
+      "why": "pins hidden under package"
+     }
+    ]
+   },
+   {
+    "id": "L4",
+    "type": "led",
+    "value": null,
+    "leads": [
+     {
+      "pin": "?",
+      "hole": null,
+      "why": "pins hidden under package"
+     }
+    ]
+   },
+   {
+    "id": "L5",
+    "type": "led",
+    "value": null,
+    "leads": [
+     {
+      "pin": "?",
+      "hole": null,
+      "why": "pins hidden under package"
+     }
+    ]
+   },
+   {
+    "id": "L6",
+    "type": "led",
+    "value": null,
+    "leads": [
+     {
+      "pin": "?",
+      "hole": null,
+      "why": "pins hidden under package"
+     }
+    ]
+   },
+   {
+    "id": "R1",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "rail:a:+:2",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "b1",
+      "conf": "med"
+     }
+    ]
+   },
+   {
+    "id": "R2",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "rail:a:+:8",
+      "conf": "med"
+     },
+     {
+      "pin": "2",
+      "hole": "b8",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R3",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": null,
+      "why": "rail lead: inner vs outer rail ambiguous"
+     },
+     {
+      "pin": "2",
+      "hole": "b15",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R4",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "j1",
+      "conf": "med"
+     },
+     {
+      "pin": "2",
+      "hole": "rail:j:+:1",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R5",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "j8",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "rail:j:+:8",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "R6",
+    "type": "resistor",
+    "value": null,
+    "leads": [
+     {
+      "pin": "1",
+      "hole": "j15",
+      "conf": "high"
+     },
+     {
+      "pin": "2",
+      "hole": "rail:j:+:15",
+      "conf": "high"
+     }
+    ]
+   }
+  ],
+  "wires": [
+   {
+    "id": "W1",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "a4",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:a:-:11",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W2",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "a11",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:a:-:18",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W3",
+    "color": "white",
+    "ends": [
+     {
+      "hole": "a18",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:a:-:24",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W4",
+    "color": "gray",
+    "ends": [
+     {
+      "hole": "j4",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:j:-:11",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W5",
+    "color": "gray",
+    "ends": [
+     {
+      "hole": "j11",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:j:-:18",
+      "conf": "high"
+     }
+    ]
+   },
+   {
+    "id": "W6",
+    "color": "gray",
+    "ends": [
+     {
+      "hole": "j18",
+      "conf": "high"
+     },
+     {
+      "hole": "rail:j:-:24",
+      "conf": "high"
+     }
+    ]
+   }
+  ]
+ }
+}

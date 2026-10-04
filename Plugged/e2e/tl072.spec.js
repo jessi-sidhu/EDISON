@@ -32,6 +32,19 @@
 //   in row j) sits below the default camera's line of sight to f30, so
 //   hovering OUT1's pin reaches the chip, not a resistor in front of it.
 //   Vout1 = −5.00038 V (hand-computed in test/tl072.test.js).
+//
+// The pin-out in the inspector, issue #132 (the second test). Selecting the
+// TL072 shows a top-view DIP-8 diagram under its rows; a resistor shows none.
+// Shapes it assumes (stated so the builder matches them):
+// - #inspector .inspector-pinout: the diagram, present only while the shown
+//   part's definition has a pinout (not rendered, or removed, otherwise).
+// - Inside it, one [data-pin="k"] per pin k = 1..8, holding the number k and
+//   the pin's name (pinout.labels[k − 1]): 1 OUT1, 4 V−, 8 V+ (U+2212).
+// - Layout, standard DIP numbering seen from the top: pins 1–4 down the left
+//   column, 8–5 down the right (8 top-right, opposite 1; 5 opposite 4).
+// - .pinout-notch: the notch / pin-1 marker, at the top of the body, above
+//   pin 1 and between the two columns.
+// - Every pin sits inside the inspector panel (readable at its width).
 const { test, expect } = require('@playwright/test');
 
 const MINUS_FIVE = /[−-]5\.0\d? ?V/;
@@ -203,6 +216,124 @@ test('by hand: pick the TL072, its ghost straddles the gap and a click places it
   await hoverAt(page, body);
   await expect(card, 'hovering the chip while simulating shows its card').toBeVisible();
   await expect.poll(() => cardText(page), { message: "the chip's card gives op-amp 1's Vout, −5.0 V (signed)" }).toMatch(MINUS_FIVE);
+
+  expect(errors).toEqual([]);
+});
+
+// ── The pin-out in the inspector (#132) ───────────────────────
+
+// Render on demand (#109): a part's world matrices update only when a frame
+// draws it, so aim only after one has (as bench-supply-two-channel.spec.js).
+async function drawn(page) {
+  const before = await page.evaluate(() => { App.requestRender(); return App.renderer.info.render.frame; });
+  await page.waitForFunction(f => App.renderer.info.render.frame > f, before);
+}
+
+// The top centre of a part's body on screen, and whether a click there hits
+// that part first (the first visible mesh under it is in its group).
+function aimPart(page, label) {
+  return page.evaluate(label => {
+    const c = App.state.components.find(x => x.label === label);
+    let box = null, most = -1;
+    c.group.traverse(o => {
+      if (!o.isMesh) return;
+      const b = new THREE.Box3().setFromObject(o), sz = b.getSize(new THREE.Vector3());
+      if (sz.x * sz.y * sz.z > most) { most = sz.x * sz.y * sz.z; box = b; }
+    });
+    const p = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y, (box.min.z + box.max.z) / 2);
+    App.camera.updateMatrixWorld();
+    const ndc = p.clone().project(App.camera);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera({ x: ndc.x, y: ndc.y }, App.camera);
+    const hit = ray.intersectObjects(App.scene.children, true).find(h => h.object.visible && h.object.isMesh);
+    let ours = false;
+    for (let x = hit && hit.object; x; x = x.parent) if (x === c.group) ours = true;
+    const r = App.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (ndc.x + 1) / 2 * r.width, y: r.top + (1 - ndc.y) / 2 * r.height, ours };
+  }, label);
+}
+
+async function clickPart(page, label) {
+  await page.mouse.move(2, 2);
+  await drawn(page);
+  const at = await aimPart(page, label);
+  expect(at.ours, `a click on ${label}'s body lands on ${label} first (nothing in front)`).toBe(true);
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => (App.state.selected ? App.state.selected.item.label : null)),
+    { message: `clicking ${label} selects it` }).toBe(label);
+}
+
+const PIN_NAMES = ['OUT1', 'IN1−', 'IN1+', 'V−', 'IN2+', 'IN2−', 'OUT2', 'V+'];
+
+test('pin-out: selecting the TL072 shows a top-view DIP-8 diagram in the inspector (OUT1 at 1 top-left, V− at 4, V+ at 8 top-right, notch on top); a resistor shows none', async ({ page }) => {
+  test.setTimeout(60_000);   // slow runner (software WebGL)
+  const errors = watchErrors(page);
+  await openEditor(page);
+
+  // The chip across the gap at column 30, and a resistor well away from it.
+  const { chip, res } = await page.evaluate(() => {
+    const hole = s => { const { col, row } = App.parseHole(s); return App.state.breadboard.getHole(col, row); };
+    let legs = null;
+    for (const anchor of ['f30', 'e30']) {
+      const ls = Parts.footprintLegs('tl072', anchor, 0);
+      if (ls && ls.every(l => l.row === 'e' || l.row === 'f')) { legs = ls; break; }
+    }
+    const c = App.placePart('tl072', legs.map(l => hole(l.hole)));
+    const r = App.placePart('resistor', [hole('b10'), hole('b14')], { resistance: 1000 });
+    return { chip: c && c.label, res: r && r.label };
+  });
+  expect(chip, 'the TL072 is placed').toBeTruthy();
+  expect(res, 'the resistor is placed').toBeTruthy();
+
+  await clickPart(page, chip);
+  const panel = page.locator('#inspector');
+  await expect(panel).toBeVisible();
+  const diagram = panel.locator('.inspector-pinout');
+  await expect(diagram, 'the TL072 shows a pin-out diagram').toHaveCount(1);
+  await expect(diagram).toBeVisible();
+  await expect(diagram.locator('[data-pin]'), 'one [data-pin] per pin').toHaveCount(8);
+
+  // Each pin holds its number and its name.
+  for (let k = 1; k <= 8; k++) {
+    const text = ((await diagram.locator(`[data-pin="${k}"]`).textContent()) || '').replace(/\s+/g, ' ');
+    const name = PIN_NAMES[k - 1];
+    expect(text, `pin ${k} names ${name}`).toContain(name);
+    expect(text.replace(name, ''), `pin ${k} shows its number ${k}`).toMatch(new RegExp(`(^|\\D)${k}(\\D|$)`));
+  }
+
+  // Top view: 1–4 down the left, 8–5 down the right, the notch on top.
+  const box = async sel => {
+    const b = await diagram.locator(sel).first().boundingBox();
+    expect(b, `${sel} is laid out on the page`).not.toBeNull();
+    return { ...b, cx: b.x + b.width / 2, cy: b.y + b.height / 2 };
+  };
+  const pin = [null];
+  for (let k = 1; k <= 8; k++) pin.push(await box(`[data-pin="${k}"]`));
+  const level = (a, b, what) => expect(Math.abs(a.cy - b.cy), `${what} at the same height (${a.cy} vs ${b.cy})`).toBeLessThanOrEqual(3);
+  expect(pin[1].cx, 'pin 1 is left of pin 8').toBeLessThan(pin[8].x);
+  level(pin[1], pin[8], 'pins 1 and 8');
+  expect(pin[5].cx, 'pin 5 is right of pin 4').toBeGreaterThan(pin[4].x + pin[4].width);
+  level(pin[4], pin[5], 'pins 4 and 5');
+  for (let k = 1; k < 4; k++) {
+    expect(pin[k + 1].cy, `pin ${k + 1} is below pin ${k} (left column, top to bottom)`).toBeGreaterThan(pin[k].cy);
+    expect(pin[8 - k].cy, `pin ${8 - k} is below pin ${9 - k} (right column, top to bottom)`).toBeGreaterThan(pin[9 - k].cy);
+    level(pin[k + 1], pin[8 - k], `pins ${k + 1} and ${8 - k}`);
+  }
+  const notch = await box('.pinout-notch');
+  expect(notch.cy, 'the notch is above pin 1 (top of the chip)').toBeLessThan(pin[1].cy);
+  expect(notch.cx > pin[1].cx && notch.cx < pin[8].cx, `the notch is between the columns (${pin[1].cx} < ${notch.cx} < ${pin[8].cx})`).toBe(true);
+
+  // Readable at the panel's width: every pin inside the inspector.
+  const pb = await panel.boundingBox();
+  for (let k = 1; k <= 8; k++) {
+    expect(pin[k].x >= pb.x - 1 && pin[k].x + pin[k].width <= pb.x + pb.width + 1,
+      `pin ${k} [${pin[k].x}, ${pin[k].x + pin[k].width}] sits inside the panel [${pb.x}, ${pb.x + pb.width}]`).toBe(true);
+  }
+
+  // Another part has no pin-out.
+  await clickPart(page, res);
+  await expect(page.locator('#inspector-label')).toHaveText(res);
+  await expect(page.locator('#inspector .inspector-pinout'), 'a resistor shows no pin-out').toHaveCount(0);
 
   expect(errors).toEqual([]);
 });

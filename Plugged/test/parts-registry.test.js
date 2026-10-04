@@ -91,6 +91,11 @@ const testModes = () => variant(testSpan, d => {
 });
 const when = aw => variant(testModes, d => { d.values.resistance.activeWhen = aw; });
 
+// A part with a pin-out diagram (#132): pinout { title, style: 'dip', labels }
+// on the 4-pin straddling chip, or on `base` with `change` applied to it.
+const DIP4 = () => ({ title: 'Test chip', style: 'dip', labels: ['A1', 'B2', 'C3', 'D4'] });
+const pinout = (change, base = testChip) => variant(base, d => { d.pinout = DIP4(); if (change) change(d.pinout, d); });
+
 // Inline <svg> markup of exactly `bytes` UTF-8 bytes, padded with `ch`.
 function svgOf(bytes, ch = 'a') {
   const shell = '<svg></svg>';
@@ -237,6 +242,22 @@ const BROKEN = [
   ['an activeWhen note that is empty', when({ mode: 'b', note: '' }),                                 [/values\.resistance\.activeWhen/, /note/]],
   ['an activeWhen note of 25 chars',  when({ mode: 'b', note: 'N'.repeat(25) }),                      [/values\.resistance\.activeWhen/, /note/, /24/]],
 
+  // pinout (#132): { title, style: 'dip', labels: one short name per pin }.
+  // A rule's message names its field (pinout.labels, pinout.style), as
+  // controls.mode above; today any pinout fails only as an unknown field.
+  ['a pinout that is not an object',  pinout((p, d) => { d.pinout = 'dip'; }),                       [/pinout/, /object/], 'test_chip'],
+  ['a pinout whose labels are not a list',
+                                      pinout(p => { p.labels = 'A1 B2 C3 D4'; }),                     [/pinout\.labels/, /list/], 'test_chip'],
+  ['a pinout with 3 labels for 4 pins', pinout(p => { p.labels = ['A1', 'B2', 'C3']; }),              [/pinout\.labels/, /\b3\b/, /\b4\b/], 'test_chip'],
+  ['a pinout with 5 labels for 4 pins', pinout(p => { p.labels.push('E5'); }),                        [/pinout\.labels/, /\b5\b/, /\b4\b/], 'test_chip'],
+  ['a pinout label of 7 chars',       pinout(p => { p.labels[1] = 'ABCDEFG'; }),                      [/pinout\.labels/, /ABCDEFG/, /\b6\b/], 'test_chip'],
+  ['an empty pinout label',           pinout(p => { p.labels[2] = ''; }),                             [/pinout\.labels/, /empty/], 'test_chip'],
+  ['a pinout label that is not a string', pinout(p => { p.labels[0] = 7; }),                          [/pinout\.labels/, /string/], 'test_chip'],
+  ['a pinout of unknown style',       pinout(p => { p.style = 'zif'; }),                              [/pinout\.style/, /zif/], 'test_chip'],
+  ['a dip pinout on an odd pin count (3)',
+                                      pinout(p => { p.labels = ['A1', 'B2', 'C3']; }, testThree),     [/pinout/, /dip/, /even/], 'test_three'],
+  ['a pinout with an unknown field',  pinout(p => { p.colour = 'red'; }),                             [/pinout\.colour/], 'test_chip'],
+
   // Examples and keywords
   ['no examples',                     variant(testSpan, d => { d.examples = []; }),                   [/example/]],
   ['9 keywords',                      variant(testSpan, d => { d.ai.keywords = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8', 'k9']; }), [/keyword/, /8/]],
@@ -288,6 +309,12 @@ const AT_LIMIT = [
                              when({ mode: 'b', note: 'N'.repeat(24) })],
   ['an activeWhen like the bench supply\'s (note "tracks CH1") on the default option',
                              when({ mode: 'a', note: 'tracks CH1' })],
+  // The valid twins of the #132 pinout rejections: a label at the 6-char
+  // limit (U+2212 counts as one), and the TL072's 8 on an 8-pin footprint.
+  ['a dip pinout of 4 labels on a 4-pin chip, one of 6 chars',
+                             pinout(p => { p.labels = ['OUT1', 'IN1\u2212', 'ABCDEF', 'V+']; })],
+  ['a dip pinout of 8 labels on an 8-pin part',
+                             pinout(p => { p.labels = ['OUT1', 'IN1\u2212', 'IN1+', 'V\u2212', 'IN2+', 'IN2\u2212', 'OUT2', 'V+']; }, () => nPins(8))],
 ];
 
 for (const [what, def] of AT_LIMIT) {

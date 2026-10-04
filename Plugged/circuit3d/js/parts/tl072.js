@@ -192,6 +192,9 @@
     prefix:   'U',
     pins:     PINS,
     place:    { kind: 'footprint', legs: LEGS, straddle: true, rotations: [0, 180] },
+    // The inspector's top-view diagram (#132), in pin order (U+2212 minus).
+    pinout:   { title: 'TL072 (top view)', style: 'dip',
+                labels: ['OUT1', 'IN1−', 'IN1+', 'V−', 'IN2+', 'IN2−', 'OUT2', 'V+'] },
 
     elements,
     measure,

@@ -12,6 +12,9 @@
 //               the simulation runs, like a click on the part.
 //  A value whose activeWhen doesn't hold (e.g. a supply's CH2 in series)
 //  is greyed: its input disabled, its note beside the name (#127).
+//  A part whose definition has a pinout shows its top-view DIP diagram
+//  under the rows (#132): pins 1..n/2 down the left, n..n/2+1 down the
+//  right, numbers inside the body, names outside, the notch on top.
 //  A value edit is App.setValues (one undo step, re-simulates while
 //  running); a control edit is App.controlEdit (the gesture dispatcher).
 //
@@ -267,6 +270,31 @@
     return unit ? `${v}${unit === '%' ? '' : ' '}${unit}` : String(v);
   }
 
+  // The pin-out diagram (#132), styled DOM: row k holds pin k+1 on the
+  // left and pin n−k on the right, so 1 sits opposite n under the notch.
+  function pinoutEl(p) {
+    const box  = el('div', 'inspector-pinout');
+    box.append(el('div', 'pinout-title', p.title));
+    const chip = el('div', 'pinout-chip');
+    chip.append(el('div', 'pinout-body'), el('div', 'pinout-notch'));
+    const n = p.labels.length;
+    const pin = (k, side) => {
+      const e = el('div', 'pinout-pin pinout-' + side);
+      e.dataset.pin = String(k);
+      const parts = [el('span', 'pinout-name', p.labels[k - 1]), el('span', 'pinout-leg'), el('span', 'pinout-num', String(k))];
+      e.append(...(side === 'left' ? parts : parts.reverse()));
+      return e;
+    };
+    for (let k = 1; k <= n / 2; k++) chip.append(pin(k, 'left'), pin(n + 1 - k, 'right'));
+    box.append(chip);
+    return box;
+  }
+
+  function dropPinout() {
+    const old = panel && panel.querySelector('.inspector-pinout');
+    if (old) old.remove();
+  }
+
   const BUILD = { number: numberRow, choice: choiceRow, option: optionRow, slider: sliderRow, toggle: checkRow, momentary: checkRow };
 
   function show(comp) {
@@ -296,6 +324,8 @@
       list.append(row);
     }
     if (!all.length) list.append(el('div', 'inspector-empty', 'Nothing to set on this part.'));
+    dropPinout();
+    if (def.pinout) list.after(pinoutEl(def.pinout));
     panel.hidden = false;
     sync();
   }
@@ -305,6 +335,7 @@
     if (!panel) return;
     panel.hidden = true;
     rowsEl().textContent = '';
+    dropPinout();
   }
 
   // A value row greyed (disabled, its note shown) or not, as rows() says:

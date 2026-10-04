@@ -71,7 +71,19 @@ function aim(page, name) {
   }, name);
 }
 
+// Render on demand (#109): a part's world matrices are brought up to date
+// only when a frame draws it, and aim's projection and the page's own pick
+// both read them. Aimed straight after App.placePart, before any frame, the
+// supply still sat at the origin for aim, and the click then missed it
+// (issue #131). So ask for a frame and wait until it is drawn: the screen,
+// aim and the page's pick then agree on where the supply is.
+async function drawn(page) {
+  const before = await page.evaluate(() => { App.requestRender(); return App.renderer.info.render.frame; });
+  await page.waitForFunction(f => App.renderer.info.render.frame > f, before);
+}
+
 async function clickOn(page, name) {
+  await drawn(page);
   const at = await aim(page, name);
   expect(at.missing, `PS1's group has an object named '${name}'`).toBeUndefined();
   expect(at.hits, `a click at '${name}' lands on it first (nothing in front)`).toContain(name);

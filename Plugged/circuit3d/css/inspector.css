@@ -134,3 +134,83 @@
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* A part's pin-out (#132): a top-view DIP diagram under the rows. The body
+   is drawn behind the pin numbers; the names and legs sit outside it. */
+.inspector-pinout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.pinout-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.pinout-chip {
+  --pin-name: 44px;
+  --pin-leg:  8px;
+  --pin-num:  22px;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 20px;
+  row-gap: 3px;
+  padding: 12px 0 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.pinout-body {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--pin-name) + var(--pin-leg));
+  right: calc(var(--pin-name) + var(--pin-leg));
+  background: #1f2937;
+  border-radius: 4px;
+}
+
+.pinout-notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 14px;
+  height: 7px;
+  transform: translateX(-50%);
+  background: #fff;
+  border-radius: 0 0 7px 7px;
+}
+
+.pinout-pin {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 16px;
+}
+
+.pinout-name {
+  box-sizing: border-box;
+  width: var(--pin-name);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.pinout-left  .pinout-name { text-align: right; padding-right: 4px; }
+.pinout-right .pinout-name { text-align: left;  padding-left: 4px; }
+
+.pinout-leg {
+  width: var(--pin-leg);
+  height: 4px;
+  background: #9ca3af;
+}
+
+.pinout-num {
+  width: var(--pin-num);
+  text-align: center;
+  color: #f9fafb;
+  font-weight: 600;
+}

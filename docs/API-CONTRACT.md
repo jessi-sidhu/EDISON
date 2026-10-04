@@ -49,6 +49,7 @@ Passed to `Parts.define()`. **Required** fields are marked ●. Anything not lis
 | `headline` | `(r, m) → { text, cls }` | One line at the top of the results panel, e.g. `Battery 1: 9V` (`sim-info`). Headlines are in board order, with sources (parts with `ref`) after the others. Before a solve (or when there is none) it gets `r` without readings and `m = {}`. |
 | `line` | `(r, m) → { text, cls } \| null` | Replaces the generic `💡 NAME ON (x.x mA)` line for this part, e.g. the buzzer's `🔔 BUZZER ON (x.x mA)`. `null`: no line. |
 | `reading` | `(r) → { V?, P?, channels? }` | Overrides what `Readings.part` gives for this part: `V` and `P` replace the defaults, and `channels` is added as is. The bench supply uses it so its V doesn't depend on pin order. |
+| `pinout` | `{ title, style: 'dip', labels: string[] }` | The inspector's top-view pin-out diagram (#132). `labels`: one name per pin in pin order, each 1–6 characters. `dip` needs an even pin count and lists 1..n/2 down the left, n..n/2+1 down the right. Not sent to the AI. |
 | ● `ai` | `AiSpec` | See below. |
 | ● `view` | `ViewSpec` | Browser only. See below. |
 | ● `examples` | `Example[]` | At least 1 known-answer circuit. See the testing contract. |

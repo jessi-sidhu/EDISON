@@ -236,6 +236,31 @@ test('parts/index.js lists tl072.js, the file exists, and both 3D pages load js/
   }
 });
 
+// The pin-out diagram the inspector draws (#132): pinout { title,
+// style: 'dip', labels } with one short name per pin, in pin order
+// (def.pins[k] is labels[k]); the registry checks the rules. The page side
+// is e2e/tl072.spec.js.
+const PINOUT = ['OUT1', 'IN1\u2212', 'IN1+', 'V\u2212', 'IN2+', 'IN2\u2212', 'OUT2', 'V+'];
+
+test('pinout (#132): a DIP diagram titled, with the datasheet names in pin order, one per pin (OUT1 … V− at 4 … V+ at 8)', () => {
+  const def = tl();
+  const p = def.pinout;
+  assert.ok(p && typeof p === 'object', `tl072 must declare a pinout { title, style, labels }; got ${JSON.stringify(p)}`);
+  assert.equal(p.style, 'dip');
+  assert.ok(typeof p.title === 'string' && p.title.length > 0, `pinout.title is a non-empty string; got ${JSON.stringify(p.title)}`);
+  assert.equal(p.labels.length, def.pins.length, 'one label per pin');
+  assert.deepEqual([...p.labels], PINOUT);
+  // Pin by pin against the datasheet indexes the circuits above use.
+  const at = { [OUT1]: 'OUT1', [IN1N]: 'IN1\u2212', [IN1P]: 'IN1+', [VNEG]: 'V\u2212', [IN2P]: 'IN2+', [IN2N]: 'IN2\u2212', [OUT2]: 'OUT2', [VPOS]: 'V+' };
+  for (const [k, name] of Object.entries(at)) assert.equal(p.labels[k], name, `pin ${Number(k) + 1} (${def.pins[k]}) is ${name}`);
+});
+
+test('pinout (#132): no other registered part has one (the field is new; only the TL072 uses it)', () => {
+  tl();
+  const others = Parts.all().filter(d => d.type !== 'tl072' && d.pinout !== undefined).map(d => d.type);
+  assert.deepEqual(others, []);
+});
+
 test('footprint: a DIP-8 straddling the gap — pins 1–4 along one row, 5–8 back along the other (5 opposite 4, 8 opposite 1); refused off the gap', () => {
   const def = tl();
   assert.strictEqual(def.pins.length, 8, `8 pins; got ${JSON.stringify(def.pins)}`);

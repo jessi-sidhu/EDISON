@@ -21,13 +21,15 @@
   const UNITS      = ['Ω', 'V', 'A', 'F', 'H', '%', '°C', 'lux', 'Hz'];
   const FIELDS     = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'ref', 'place', 'values',
                       'controls', 'gestures', 'elements', 'measure', 'warnings', 'report', 'headline', 'line',
-                      'reading', 'ai', 'view', 'examples'];
+                      'reading', 'ai', 'view', 'examples', 'pinout'];
   const REQUIRED   = ['type', 'name', 'sub', 'category', 'icon', 'prefix', 'pins', 'place',
                       'elements', 'report', 'ai', 'view', 'examples'];
   const TYPE_RE    = /^[a-z][a-z0-9_]*$/;
   const PREFIX_RE  = /^[A-Z]{1,3}$/;
   const PIN_RE     = /^[A-Za-z0-9]+$/;
   const ICON_BYTES = 2048;
+  const PINOUT_STYLES = ['dip'];
+  const PINOUT_LABEL  = 6;      // characters (U+2212 is one)
   const BODY_ROWS  = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
   const RAIL_ROWS  = ['tp', 'tn', 'bp', 'bn'];
 
@@ -400,6 +402,28 @@
     }
   }
 
+  // Optional pin-out diagram (#132): { title, style: 'dip', labels }, one
+  // short name per pin in pin order. A DIP lists 1..n/2 down the left and
+  // n/2+1..n up the right, so it needs an even pin count.
+  function checkPinout(p, pins, bad) {
+    if (!isObj(p)) return bad('pinout must be an object { title, style, labels }');
+    unknownFields(p, ['title', 'style', 'labels'], 'pinout', bad);
+    text(p, 'title', 32, 'pinout.title', bad, true);
+    if (p.style === undefined) bad(`pinout.style is required (${PINOUT_STYLES.join(', ')})`);
+    else if (!PINOUT_STYLES.includes(p.style)) bad(`pinout.style "${p.style}" must be one of ${PINOUT_STYLES.join(', ')}`);
+    else if (p.style === 'dip' && pins && pins.length % 2) bad(`pinout style "dip" needs an even number of pins; got ${pins.length}`);
+    if (!Array.isArray(p.labels)) return bad('pinout.labels must be a list of short pin names, one per pin');
+    if (pins && p.labels.length !== pins.length) {
+      bad(`pinout.labels has ${p.labels.length} labels; it needs one per pin (${pins.length})`);
+    }
+    p.labels.forEach((l, i) => {
+      const at = `pinout.labels[${i}]`;
+      if (typeof l !== 'string') bad(`${at} must be a string; got ${JSON.stringify(l)}`);
+      else if (!l.trim()) bad(`${at} must not be empty`);
+      else if ([...l].length > PINOUT_LABEL) bad(`${at} "${l}" must be at most ${PINOUT_LABEL} characters; got ${[...l].length}`);
+    });
+  }
+
   function problemsOf(def) {
     const problems = [];
     const bad = msg => problems.push(msg);
@@ -475,6 +499,7 @@
         if (def.view.update !== undefined && typeof def.view.update !== 'function') bad('view.update must be a function');
       }
     }
+    if (def.pinout !== undefined) checkPinout(def.pinout, pins, bad);
     if (def.examples !== undefined) {
       if (!Array.isArray(def.examples) || !def.examples.length) bad('examples must list at least 1 known-answer circuit');
       else def.examples.forEach((ex, i) => checkExample(ex, `examples[${i}]`, bad));
