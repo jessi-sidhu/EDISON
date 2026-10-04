@@ -162,7 +162,7 @@
 
   // ── The page (Edison only) ──
   const SVG = 'http://www.w3.org/2000/svg';
-  const AVOID = ['sim-results', 'mistakes-panel', 'scope', 'meter-display', 'lab-sheet', 'clear-all-btn', 'reset-cam-btn', 'inspector'];
+  const AVOID = ['sim-results', 'mistakes-panel', 'scope', 'meter-display', 'lab-sheet', 'lab-next', 'clear-all-btn', 'reset-cam-btn', 'inspector'];
 
   function boot(win) {
     const doc = win.document;

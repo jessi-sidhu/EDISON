@@ -2,7 +2,33 @@
 
 **Read this first when you pick the project up on any machine.** It's the shared memory: where things stand, what's next, what we learned, and how Aarmen likes to work. Claude Code's own memory lives on one laptop only, so anything worth keeping goes here. Update it at the end of each session (Claude: do it as part of wrapping up).
 
-*Last updated: 2026-10-03 night, Mac session.*
+*Last updated: 2026-10-04 ~5:45 am, Mac session.*
+
+## Morning of 2026-10-04: read this first (all on `dev` at eb44795; `main` NOT promoted yet)
+Overnight, all shipped to `dev`:
+- **#15** `leds-buttons` and **#16** `ensc-lab` (Aarmen's ENSC 220 bench): hard-coded photo samples. A sample shows its photo with "Reading your board…" for 1 s, then builds a fixed board, with no AI.
+- **#17 Thandi's upload (the demo's photo beat):**
+  - Upload `~/Downloads/thandi-board-1.jpg` (or `-2` / `-3`; the originals are IMG_2011–2013 in Messages), then tap the 4 corners and press Looks right.
+  - It builds the board **as photographed**: U1 turned around and 2 columns off, and pin 4 (V−) not wired.
+  - Edison's first answer names both mistakes. Type **"fix it"**: the canned fix moves U1 to e32 facing left and adds a29 → tn_29. Accept, and the LED blinks.
+  - The photo is recognised by its file's SHA-256, so it has to be **that exact file**, picked on localhost. A phone re-save or an http LAN address goes to Gemini instead.
+  - The fix triggers on "fix", "correct", "repair" or "solve". It's also a sample tile, as a fallback.
+- **#18 simulator:** an op-amp with positive feedback now snaps between its rails with hysteresis, so the blinker blinks (Thandi's board: period 1.23 s; 60 s with every step ok). Before, it stuck at about 0.5 s; then it froze at 5.4 s, which was fixed after review.
+- **Checked in the real browser (Mac Chrome)** on eb44795: upload → corners → broken board → Edison → "fix it" → Accept → LED on 5.1 mA / off, repeating, "CIRCUIT OK" throughout, no console errors.
+- **Screenshots for Aarmen** are in `~/Downloads/edison-morning/`:
+  - `1-side-by-side.jpg` (photo vs app);
+  - the broken, LED-on and LED-off shots;
+  - Thandi's photo with every lead marked, and the decode notes.
+- **Testing was lean, at Aarmen's call** (2026-10-04, "it just needs to run and be correct"): #16 and #17 shipped on lint, unit and the photo/chat specs, without a full browser run. **Run the full `npm run e2e` in `/promote`.**
+
+**For Aarmen to decide in the morning:**
+1. Look at `1-side-by-side.jpg` (does the app board match Thandi's photo?), then `/promote`.
+2. **Ask Thandi to check 4 hidden ends** on the real board: j32, j22, i26, g36 (`thandi-board-decode.md`). Also, R3 is 5.6 kΩ (green-blue-red), not 10 kΩ.
+3. **The app mirrors real breadboards:** a DIP's pins can't sit at a photo's printed holes, so Thandi's board is stored with its rows flipped (A↔J). The 3D view looks like IMG_2013, which is why that's the sample photo.
+4. **Polish:** after the fix, U1's callout says "clipped… fine for a comparator; in an amplifier lower the gain". Accurate, but off-message for a blinker.
+5. **The server checker's false alarm on `ensc-lab`:** R3 "not between power and ground" (a comparator input resistor).
+6. **Small things:** a stale comment in `test/tl072.test.js` section 4 (the 5.4 s freeze was at the lower threshold); `fingerprint()` hashes any picked file (cap it at, say, 50 MB).
+7. **Not done:** the course labs with hard-coded steps (Aarmen: a separate job, later).
 
 ## Where things are
 
@@ -10,7 +36,7 @@
 - **`dev`** is the workspace; promote it to `main` with `/promote` at natural points.
 - **One repo now: `github.com/jessi-sidhu/EDISON`** (`~/Desktop/EDISON`). The old `aarmens702-hub/myproject` checkout was removed; its GitHub repo still holds two small commits that aren't here (a Firebase-config comment and a docs line).
 - **The op-amp repair checks (`docs/TODO.md` task 5):** the old branch `aarmen/204-opamp-repair-checks` was lost with the old myproject checkout; the checks were rebuilt as #10 (on `dev` with the fixes merge).
-- **The lab paper (paused, local only):** branch `aarmen/lab-paper-design` in `.worktrees/lab-paper`, one WIP commit. In the Edison editor Lab 2's sheet becomes a white lab manual pulled from the board's left edge: it pushes the board over (the parts fold to icons), with objective, equipment, pre-lab checked as typed, a data table filled from the sim, questions, and Give me / Hint / Explain on the current step (Give me builds that step and says where each piece went). Aarmen approved the mock. Left: fix two unused constants in `e2e/edison-hud-lab.spec.js` (lint), run the full browser suite, add a Give me browser test, then `/ship`. Next after it: the ENSC 220 course page in black, then textbook and landing polish.
+- **The lab paper is on dev:** in the Edison editor a lab's sheet is a white lab manual pulled from the board's left edge (it pushes the board over; the parts fold to icons). Labs 1 and 2 are written out in full (objective, equipment, pre-lab checked as typed, procedure, a data table filled from the sim, questions), open from the ENSC 220 Labs menu with their paper, and start at step 1. Lab 1 starts from the bench supply alone and is built step by step. Lab 2 is the AI test set's case 11 (gain −10 on ±12 V, a 0.5 V sine, the multimeter on the output; about −5.0 V at the input's peak): its TL072 comes seated, and a step checks the meter's probes are on the output and ground. Every step confirms itself, with no ticking: a value set, parts placed, a loop closed and the ±12 V supply (read at U1's pins) confirm as they're built, between runs too; measurements and the peak on a Run; the last step from a written answer. The current step has Give me (builds that step, one undo step, and says where each piece went), Hint and Explain (asks Edison). Labs in Edison open on the whole board. Next: the ENSC 220 course page in black, then textbook and landing polish.
 - **The editor's EDISON (top left) goes to the Edison landing** in the Edison UI (it went to the classic dashboard).
 - **Reasoning is on by default** (#205, #4): 32 000 `max_tokens`, a 240 s server deadline and a 255 s page timeout. `DEEPSEEK_THINKING=0` turns it off (see "Running the AI test set" below).
 
@@ -19,7 +45,7 @@
 - **#198 one supply, wired the lab way:** CH1 + to the red rail, CH1 COM to the blue rail, CH2's white COM2 grounded, one wire per post. An op-amp's input comes from FG1 (its offset as the DC input), never a second supply.
 - **#199 whole or nothing:** a fix that names wires or parts not on the board is refused (the model hears why) or dropped whole. If Accept fails on any step, the whole build is undone and the chat names the failed steps. The model is told the build failed, not that the student declined it.
 - **Named pins:** the page now resolves `MM1.red` / `MM1.black` / `PS1.com2` like the server does. Before, AI meter probes never landed in the browser (the eval didn't notice, because it applies builds in Node).
-- **#200 photo samples:** only `demo-board` is offered; the button goes straight to it.
+- **#200 photo samples:** only `demo-board` was offered, and the button went straight to it. #15 adds `leds-buttons`, so the picker shows.
 - **#201:** the inspector sits inside the canvas frame, not over the chat. Result callouts never draw lines off the canvas.
 - **#202 the AI test set:** Aarmen's 16 prompts (`docs/AI-TEST-SET.md`) with a grader that checks the wiring as well as the readings.
 

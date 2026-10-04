@@ -41,7 +41,7 @@
 // unwired) with the student's finish from test/fixtures/lab2-finish.js, but
 // without the V− jumper bn_33 → j33. V+ is wired and V− isn't, so the TL072's
 // own warning says it has no supply; PS1 reads series ±12 V at 0.0 mA and FG1
-// a 1.00 Vp sine at 1.0 Hz (the mockup's three callouts). Loaded the way the
+// a 0.50 Vp sine at 1.0 Hz (the mockup's three callouts; Lab 2 is case 11). Loaded the way the
 // editor rebuilds a saved file (load(), copied from test/textbook-figures.test.js)
 // and time-stepped as the page's time run does. No mocks.
 
@@ -194,7 +194,7 @@ test('Lab 2 with U1\'s V− unwired: readings.lines() gives U1 a fault naming th
   expect(by.FG1, `an entry for FG1: ${seen}`).toBeTruthy();
   expect(by.FG1.level, 'FG1 works: ok').toBe('ok');
   expect(by.FG1.title, 'FG1\'s title names the function generator').toMatch(/function generator/i);
-  expect(by.FG1.sub.join(' '), 'FG1\'s sublines read its 1.00 Vp at 1.0 Hz').toMatch(/1\.00 Vp[\s\S]*1\.0 Hz/);
+  expect(by.FG1.sub.join(' '), 'FG1\'s sublines read its 0.50 Vp at 1.0 Hz (Lab 2 is case 11: a 0.5 V sine)').toMatch(/0\.50 Vp[\s\S]*1\.0 Hz/);
 
   // Faults first.
   const ranks = lines.map(l => RANK[l.level]);

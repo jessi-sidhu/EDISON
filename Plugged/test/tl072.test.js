@@ -518,3 +518,103 @@ test('hover card over the chip (cardLines of Readings.part): Vout1 signed (−5.
   const short = card(follower(1000, 1000, [[pinHole(OUT1, 3), tn(OUT1)]]));
   assert.match(short, /current-limited at 20 mA/, `OUT1 on COM: card ${short}`);
 });
+
+// ── 4. Positive feedback: the photoexample blinker (#18) ──────────
+//
+// docs/boards/README.md's board list for the op-amp blinker, with R4 moved to
+// i20–i23 and its ground wire j23 → bn_23 (the README's item 2: the sketch's
+// i18–i20 doesn't build), and pin 4 grounded by j17 → bn_17 (item 1).
+// U1 at f14: OUT1 f14, IN1− f15 (C1's + lead), IN1+ f16 (g16 → g20, the
+// thresholds); 9 V battery, so op-amp 1's rails are 7.5 V and 1.5 V.
+//   IN1+ = (9 V + 0 V + Vout1)/3 through R2, R4, R3 (10 kΩ each): 5.39 V with
+//   op1 high (7.17 V, its 50 Ω carrying ~6.5 mA into the LED and C1), 3.5 V low.
+//   C1 (100 µF) charges through RV1 (5 kΩ, half of 10 kΩ; the other half
+//   shorted by g10–g11) and R1 (1 kΩ): τ = 6 kΩ · 100 µF = 0.6 s.
+//   First edge (0 → 5.39 V toward 7.17 V): 0.6·ln(7.17/1.78) = 0.84 s.
+//   Up 3.5 → 5.39 V: 0.6·ln(3.67/1.78) = 0.43 s; down 5.39 → 3.5 V toward
+//   1.5 V: 0.6·ln(3.89/2.0) = 0.40 s; a period of ~0.83 s.
+//   So 10 s holds 1 + (10 − 0.84)/0.415 ≈ 23 edges (high↔low); 20 is the floor.
+// Today the step near t = 5.400 s, with C1 inside a ~30 µV band at the upper
+// threshold, comes back 'unsettled' (op1 flips high → linear → high until the
+// round cap), and with no state returned every step after it is the same.
+const BLINKER = [
+  { tool: 'place_battery' },
+  { tool: 'place_tl072', hole: 'f14', direction: 'right' },
+  { tool: 'place_potentiometer', hole: 'f9', direction: 'right', resistance: 10000 },
+  { tool: 'place_capacitor', holeA: 'g15', holeB: 'g13', capacitance: '100µF' },
+  { tool: 'place_resistor', holeA: 'i11', holeB: 'i15', resistance: 1000 },
+  { tool: 'place_resistor', holeA: 'e20', holeB: 'f20', resistance: 10000 },
+  { tool: 'place_resistor', holeA: 'h20', holeB: 'h24', resistance: 10000 },
+  { tool: 'place_resistor', holeA: 'i20', holeB: 'i23', resistance: 10000 },      // R4, moved (README item 2)
+  { tool: 'place_resistor', holeA: 'g24', holeB: 'g27', resistance: 1000 },
+  { tool: 'place_led', holeA: 'h28', holeB: 'h27', color: 'red' },
+  { tool: 'add_wire', from: 'BAT1.0', to: 'tp_1', color: 'red' },
+  { tool: 'add_wire', from: 'BAT1.1', to: 'tn_2', color: 'black' },
+  { tool: 'add_wire', from: 'tp_13', to: 'a14', color: 'red' },
+  { tool: 'add_wire', from: 'tn_18', to: 'a17', color: 'black' },
+  { tool: 'add_wire', from: 'tp_21', to: 'a20', color: 'red' },
+  { tool: 'add_wire', from: 'b15', to: 'b16', color: 'green' },
+  { tool: 'add_wire', from: 'tp_30', to: 'bp_30', color: 'red' },
+  { tool: 'add_wire', from: 'tn_29', to: 'bn_29', color: 'black' },
+  { tool: 'add_wire', from: 'g10', to: 'g11', color: 'green' },
+  { tool: 'add_wire', from: 'h9', to: 'h14', color: 'blue' },
+  { tool: 'add_wire', from: 'g16', to: 'g20' },
+  { tool: 'add_wire', from: 'j14', to: 'j24', color: 'blue' },
+  { tool: 'add_wire', from: 'j13', to: 'bn_14', color: 'black' },
+  { tool: 'add_wire', from: 'j23', to: 'bn_23', color: 'black' },                 // R4's ground (README item 2)
+  { tool: 'add_wire', from: 'j28', to: 'bn_27', color: 'black' },
+  { tool: 'add_wire', from: 'j17', to: 'bn_17', color: 'black' },                 // pin 4 to ground (README item 1)
+];
+const BLINK_DT = 0.002;                                            // 2 ms, the step the reviewer found it freezing at
+const C1_KEY = 'C1.c', OP1_KEY = 'U1.op1', OP2_KEY = 'U1.op2';    // result.state's keys on this board
+
+function blinker() {
+  const { board, errors } = Board.apply(Board.empty(), BLINKER);
+  assert.deepStrictEqual(errors, [], 'the blinker builds');
+  return Board.toSim(board);
+}
+
+// One step as the page's timedStep does it: the wave clock at the step's end,
+// and an early return (no state) keeps the state it had.
+function timedStep(sim, run) {
+  const r = Sim.analyze(sim.components, sim.wires, { dt: run.dt, state: run.state, t: run.t + run.dt });
+  if (r.state) run.state = r.state;
+  run.t += run.dt;
+  return r;
+}
+
+const railOf = mode => (mode === 'high' || mode === 'isrc+' ? 'high' : mode === 'low' || mode === 'isrc−' ? 'low' : null);
+
+test('the README blinker stepped 10 s at dt = 2 ms (state carried as the page does): every step ok, and op1 snaps high↔low at least 20 times', () => {
+  const sim = blinker();
+  const run = { dt: BLINK_DT, t: 0, state: {} };
+  const steps = Math.round(10 / BLINK_DT);
+  let firstBad = null, bad = 0, edges = 0, rail = null;
+  for (let i = 0; i < steps; i++) {
+    const r = timedStep(sim, run);
+    if (r.status !== 'ok') {
+      bad++;
+      if (!firstBad) firstBad = `step ${i + 1} (t = ${run.t.toFixed(3)} s) is ${r.status}: ${text(r)}`;
+      continue;
+    }
+    const now = railOf(chipResult(r).m.mode1);
+    if (now && rail && now !== rail) edges++;
+    if (now) rail = now;
+  }
+  assert.strictEqual(firstBad, null, `every step should be ok; ${bad} of ${steps} are not, the first: ${firstBad}`);
+  assert.ok(edges >= 20, `op1 should snap high↔low ≥ 20 times in 10 s (≈ 23 by hand); got ${edges}`);
+});
+
+test('the README blinker, one 2 ms step from C1 at 5.39899 V (inside the upper threshold\'s band) with op1 remembered high: ok, and op1 snaps low', () => {
+  const sim = blinker();
+  // The keys this board's own state carries (the state below is one the page could hold).
+  const first = timedStep(sim, { dt: BLINK_DT, t: 0, state: {} });
+  assert.deepStrictEqual(Object.keys(first.state || {}).sort(), [C1_KEY, OP1_KEY, OP2_KEY].sort(), 'the blinker\'s state keys');
+
+  // C1 has crossed IN1+ (5.39 V with op1 high), so high no longer holds: it runs to the low rail.
+  const run = { dt: BLINK_DT, t: 5.398, state: { [C1_KEY]: 5.39899, [OP1_KEY]: 'high', [OP2_KEY]: 'low' } };
+  const r = timedStep(sim, run);
+  assert.strictEqual(r.status, 'ok', `status ${r.status}: ${text(r)}`);
+  assert.strictEqual(chipResult(r).m.mode1, 'low', 'op1 after the step');
+  assert.strictEqual(r.state[OP1_KEY], 'low', 'the state remembers op1 on the low rail');
+});

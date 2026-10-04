@@ -6,11 +6,13 @@
 // with the real simulator) and e2e/lab-sheet.spec.js (added through
 // App.placePart and App.finishWire).
 //
-// The circuit (issue #152): FG1 1 Vp at 1 Hz → Rin R1 10 kΩ → IN1− (pin 2);
+// The circuit (issue #152; case 11 of the AI test set): FG1 0.5 Vp at 1 Hz
+// → Rin R1 10 kΩ → IN1− (pin 2);
 // Rf R2 100 kΩ from OUT1 (pin 1) to IN1−; IN1+ (pin 3) to COM; PS1 in
 // series at ±12 V, + to V+ (pin 8) and − to V− (pin 4). The generator is
 // 50 Ω behind its EMF and IN1− is a virtual ground, so the output peak is
-// 1 V × 100 kΩ / (10 kΩ + 50 Ω) = 9.950 V (gain −10, under the ±10.5 V clip).
+// 0.5 V × 100 kΩ / (10 kΩ + 50 Ω) = 4.975 V (gain −10, well under the ±10.5 V
+// clip): −4.975 V at the input's crest, +4.975 V at its trough.
 //
 // Layout, by the chip's own columns. With U1 at f30 (OUT1 f30, IN1− f31,
 // IN1+ f32, V− f33 along row f; V+ e30 across the gap) it is the layout of

@@ -12,16 +12,18 @@
 //  Browser: window.CameraFrame
 //  Node:    module.exports = CameraFrame
 //
-//  CameraFrame.frameParts(items, { home, fov, aspect, minDistance })
+//  CameraFrame.frameParts(items, { home, fov, aspect, minDistance, maxDistance })
 //    → { target: [x,y,z], pos: [x,y,z] }
 //    items        points [x,y,z] and/or boxes { min: [x,y,z], max: [x,y,z] }
 //    home         { pos, target } (App.CAMERA.home)
 //    fov          the camera's vertical fov, degrees
 //    aspect       canvas width / height
 //    minDistance  the closest the camera may come
+//    maxDistance  the furthest (default: home's distance). A lab's whole
+//                 board on a narrow canvas needs more (tools/labs.js).
 //  target is the centre of the items' bounding box; pos is back along home's
 //  view direction, far enough to fit them all (clamped to minDistance and
-//  home's distance). No items → the home view.
+//  maxDistance). No items → the home view.
 // ─────────────────────────────────────────────────────────────
 
 (function (root, factory) {
@@ -43,7 +45,7 @@
     return out;
   }
 
-  function frameParts(items, { home, fov, aspect, minDistance }) {
+  function frameParts(items, { home, fov, aspect, minDistance, maxDistance }) {
     const pts = pointsOf(items);
     if (!pts.length) return { target: home.target.slice(), pos: home.pos.slice() };
 
@@ -59,7 +61,7 @@
 
     const dir   = [0, 1, 2].map(i => home.pos[i] - home.target[i]);
     const homeD = Math.hypot(dir[0], dir[1], dir[2]);
-    const d     = Math.min(Math.max(fit, minDistance), homeD);
+    const d     = Math.min(Math.max(fit, minDistance), maxDistance === undefined ? homeD : maxDistance);
     const pos   = [0, 1, 2].map(i => target[i] + dir[i] / homeD * d);
     return { target, pos };
   }

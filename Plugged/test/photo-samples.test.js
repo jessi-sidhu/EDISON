@@ -45,6 +45,9 @@
 //   circuit: Build it enabled with nothing edited, every part and wire it
 //   read on the board, a source, a closed loop from the source back to
 //   itself through the other parts, and no "Circuit open".
+// - #15: an entry with a hard-coded `board` (leds-buttons) is built from that
+//   board, never from a Reading, so it needs no taps and no recording and is
+//   not replayed here; test/sample-boards.test.js checks its board.
 
 const assert = require('node:assert');
 const fs     = require('node:fs');
@@ -251,6 +254,9 @@ test.each(Object.keys(SOURCES))('the %s recording replays with no AI call: its R
 // photo.js's rule: every sample but those marked offered: false.
 const offeredIds = samples => Object.keys(samples).filter(id => samples[id].offered !== false);
 const OFFERED    = offeredIds(loadSamples());
+// The offered samples built from a recorded Reading: a hard-coded board
+// (#15) is built as it is, with no recording to replay.
+const REPLAYED   = OFFERED.filter(id => !loadSamples()[id].board);
 
 // fn() with ENV_KEYS unset (the live defaults), then put back.
 async function withDefaultEnv(fn) {
@@ -341,7 +347,7 @@ test('demo-board is offered, and an entry that sets offered sets it true or fals
   }
 });
 
-test.each(OFFERED)('%s, offered on the picker, replays to a working circuit: Build it enabled, everything it read built, a source, a closed loop, no "Circuit open"', async id => {
+test.each(REPLAYED)('%s, offered on the picker, replays to a working circuit: Build it enabled, everything it read built, a source, a closed loop, no "Circuit open"', async id => {
   const built = await replay(id);
   assert.deepStrictEqual(trouble(built), [], `${id} builds ${built.board.parts.map(p => p.label).join(', ')}`);
 });

@@ -133,6 +133,13 @@ test('a circuit too wide to fit a narrow canvas stops at the home distance', () 
   assert.ok(Math.abs(d - HOME_D) < 1e-6, `expected the home distance ${HOME_D.toFixed(2)}, got ${d.toFixed(2)}`);
 });
 
+test('maxDistance lifts the home cap: the full board fits a narrow canvas (a lab beside its paper), every corner in view', () => {
+  const { target, pos } = load().frameParts(FULL, { ...OPTS, aspect: 0.4, maxDistance: Infinity });
+  const d = len(sub(pos, target));
+  assert.ok(d > HOME_D, `expected past home (${HOME_D.toFixed(2)}) to fit, got ${d.toFixed(2)}`);
+  assertAllInView(FULL, { pos, target }, FOV, 0.4);
+});
+
 test('a single point: the target is the point and the distance is the minimum, not closer', () => {
   const p = hole(30, 'c');
   const { target, pos } = load().frameParts([p], OPTS);

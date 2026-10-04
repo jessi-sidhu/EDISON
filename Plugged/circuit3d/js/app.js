@@ -707,16 +707,20 @@
   // animation. Called after an AI build and when a circuit is opened; hand
   // placement never calls it. minDistance is the closest the camera comes:
   // 6 by default, further back for a lab (tools/labs.js, issue #194).
-  App.frameCircuit = function ({ minDistance = 6 } = {}) {
+  // whole frames the breadboard and the bench instruments too, as far back as
+  // that takes (a lab beside the Edison lab paper).
+  App.frameCircuit = function ({ minDistance = 6, whole = false } = {}) {
     const boxes = [];
+    const add = g => { const b = new THREE.Box3().setFromObject(g); if (!b.isEmpty()) boxes.push({ min: b.min.toArray(), max: b.max.toArray() }); };
     for (const c of state.components) {
       const def = Parts.get(c.type);
-      if (!def || def.place.kind === 'offboard' || !c.group) continue;
-      const b = new THREE.Box3().setFromObject(c.group);
-      if (!b.isEmpty()) boxes.push({ min: b.min.toArray(), max: b.max.toArray() });
+      if (!def || (def.place.kind === 'offboard' && !whole) || !c.group) continue;
+      add(c.group);
     }
+    if (whole && state.breadboard && state.breadboard.group) add(state.breadboard.group);
     const { target, pos } = CameraFrame.frameParts(boxes, {
       home: App.CAMERA.home, fov: App.camera.fov, aspect: App.camera.aspect, minDistance,
+      maxDistance: whole ? Number.POSITIVE_INFINITY : undefined,
     });
     App.controls.target.set(...target);
     App.camera.position.set(...pos);

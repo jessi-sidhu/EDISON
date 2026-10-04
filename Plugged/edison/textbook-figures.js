@@ -16,7 +16,8 @@
 //  formats and the "Check yourself" answers.
 //
 //  figureSvg(id, state) and plotSvg(id, state) return SVG markup;
-//  plotGeometry() is the transfer plot as numbers. mount(doc) is the thin
+//  plotGeometry() is the transfer plot as numbers; labHref(id, state) is a
+//  page's "Test in lab +" link with its current values. mount(doc) is the thin
 //  browser layer: it draws both figures and plots, and wires the
 //  scrubbable values, the linked hover and the check inputs.
 //
@@ -124,6 +125,7 @@
       title: 'Inverting amplifier',
       circuit: 'edison/figures/inverting.sparky',
       defaults: { r1: 10000, r2: 100000, vin: 0.5 },
+      set: { r1: 'R1.resistance', r2: 'R2.resistance', vin: 'PS2.voltage' },   // where each value lives in the circuit
       viewBox: [0, 0, 400, 200],
       opamp: OPAMP,
       resistors: [
@@ -147,6 +149,7 @@
       title: 'Non-inverting amplifier',
       circuit: 'edison/figures/non-inverting.sparky',
       defaults: { r1: 10000, r2: 10000, vin: 0.5 },
+      set: { r1: 'R1.resistance', r2: 'R2.resistance', vin: 'PS2.voltage' },
       viewBox: [0, 0, 400, 200],
       opamp: OPAMP,
       resistors: [
@@ -327,6 +330,18 @@
   }
 
   // ── The browser layer ───────────────────────────────────────
+  // "Test in lab +" opens the figure's circuit, already simulating, with the
+  // values the page shows (tools/labs.js setsFromSearch applies ?set=). PS2
+  // can't go below 0 V, so a negative Vin keeps the circuit's own.
+  function labHref(id, state) {
+    const f = FIGURES[id];
+    const s = state || f.defaults;
+    const pairs = Object.entries(f.set)
+      .filter(([k]) => !(k === 'vin' && s.vin < 0))
+      .map(([k, at]) => `${at}:${Number(s[k].toFixed(k === 'vin' ? 2 : 0))}`);
+    return `../circuit3d/index.html?ui=edison&open=${f.circuit}&run=1&set=${pairs.join(',')}`;
+  }
+
   //  Each page (article[data-fig]) keeps its own { r1, r2, vin }. Values
   //  update in place, never by redrawing, so a drag keeps its pointer.
 
@@ -358,6 +373,7 @@
       page.querySelectorAll('[data-show="vout"]').forEach(el => { el.textContent = voutText(r); });
       page.querySelectorAll('[data-show="worked"]').forEach(el => { el.textContent = r.clipped ? voutText(r) : fmtVolts(r.vout) + ' out'; });
       page.classList.toggle('is-clipped', r.clipped);
+      page.querySelectorAll('a.tb-lab').forEach(a => a.setAttribute('href', labHref(id, s)));
       const svg = page.querySelector('.tb-plot');
       if (svg) {
         const g = plotGeometry(r.gain, s.vin);
@@ -438,6 +454,6 @@
     RAIL, RES_STEPS, VIN, CHECKS, FIGURES, PLOT,
     gainInv, gainNon, vout, clipped, solve,
     stepOhms, stepVin, snapVin, fmtOhms, fmtVolts, fmtGain, parseVolts, parseOhms, check,
-    zigzag, figureSvg, plotSvg, plotGeometry, mount,
+    zigzag, figureSvg, plotSvg, plotGeometry, labHref, mount,
   };
 });

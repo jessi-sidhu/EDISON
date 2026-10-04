@@ -1,55 +1,232 @@
 /* ─────────────────────────────────────────────
-   edison-hud-lab.css — the lab sheet in the Lab HUD (issue #194). The pad
-   sheet becomes a black panel like the parts sidebar, reading edison-hud.css's
-   --hud-* properties: DM Mono, hairline rules, a caps code row over a
-   sentence-case title, square status tags. Not yet is a grey outline,
-   Passed the HUD blue, Check failed the pink; dark text on both for
-   contrast. Caps from CSS only: the DOM text stays as labs/sheets.js writes
-   it. Every rule is scoped to html[data-ui="edison"], so classic keeps
-   lab-sheet.css as it is.
+   edison-hud-lab.css — the lab paper in the Lab HUD (issue #194; the paper
+   since 2026-10-03). In Edison a lab's sheet (tools/lab-sheet.js) is a white
+   page docked left of the canvas, with a black grip on its right edge that
+   pulls it out or tucks it away. The page reads like a printed lab manual:
+   DM Mono, hairline rules, a caps code row over a sentence-case title,
+   square status tags (Not yet a grey outline, Passed the bus blue, Check
+   failed the bus red, white text on both). The grip, the next-step card on
+   the board and the folded parts rail stay in the HUD's black. Caps from CSS
+   only: the DOM text stays as labs/sheets.js writes it. Every rule is scoped
+   to html[data-ui="edison"], so classic keeps lab-sheet.css as it is.
 ───────────────────────────────────────────── */
 
-/* ── The panel ─────────────────────────────── */
+/* ── The white page's colours ──────────────── */
 html[data-ui="edison"] #lab-sheet {
-  background: var(--hud-k); color: var(--hud-ink); border-color: var(--hud-rule); box-shadow: none;
-  font: 400 12px/1.6 var(--hud-mono);
+  --pp-bg:    #FFFFFF;
+  --pp-ink:   #111111;   /* headings, the numbers you type */
+  --pp-text:  #2B2B2B;   /* body text */
+  --pp-grey:  #666666;   /* labels, captions: 5.7:1 on white */
+  --pp-rule:  #E6E6E6;   /* hairlines between rows */
+  --pp-line:  #BDBDBD;   /* outlines */
+  --pp-hover: #F3F3F3;
+  --pp-blue:  #2C5CC0;   /* the bus blue: Passed, on the board, correct */
+  --pp-red:   #C4333B;   /* the bus red: Check failed */
 }
 
-/* ── Head: LAB-02  WEEK 4  [×], then the title ── */
-html[data-ui="edison"] .lab-sheet-head { gap: 8px 12px; padding: 12px 16px 16px; border-bottom-color: var(--hud-rule); }
-html[data-ui="edison"] .lab-sheet-code, html[data-ui="edison"] .lab-sheet-week {
+/* ── The paper: the page and its grip, docked so it pushes the canvas ── */
+html[data-ui="edison"] #lab-sheet {
+  background: var(--hud-k); color: var(--pp-ink); border-color: var(--hud-rule); box-shadow: none;
+  font: 400 13px/1.7 var(--hud-mono);
+}
+html[data-ui="edison"] #lab-sheet.lab-paper { width: calc(var(--paper-w, 480px) + 30px); flex-direction: row; border-right: 0; }
+html[data-ui="edison"] .lab-paper-sheet {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--pp-bg); color: var(--pp-text);
+}
+html[data-ui="edison"] #lab-sheet[data-paper="tucked"] .lab-paper-sheet { display: none; }
+html[data-ui="edison"] .lab-paper-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-color: var(--pp-line) var(--pp-bg);
+}
+html[data-ui="edison"] .lab-paper .lab-steps { flex: none; overflow: visible; padding: 0; }
+html[data-ui="edison"] .lab-paper-drag, html[data-ui="edison"] .lab-paper-drag * { cursor: ew-resize; user-select: none; }
+
+/* ── Head: LAB-02  WEEK 4  DUE OCT 9  [TUCK] [×], then the title ── */
+html[data-ui="edison"] .lab-sheet-head { gap: 8px 12px; padding: 14px 20px 14px; border-bottom: 1px solid var(--pp-rule); }
+html[data-ui="edison"] .lab-sheet-code, html[data-ui="edison"] .lab-sheet-week, html[data-ui="edison"] .lab-sheet-due {
   font: 400 11px/1.4 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase;
 }
-html[data-ui="edison"] .lab-sheet-code  { color: var(--hud-ink); }
-html[data-ui="edison"] .lab-sheet-week  { color: var(--hud-grey); }
-html[data-ui="edison"] .lab-sheet-title { font: 400 17px/1.35 var(--hud-mono); letter-spacing: 0; color: var(--hud-ink); }
-html[data-ui="edison"] .lab-sheet-close {
-  width: 24px; height: 24px; background: transparent; border: 1px solid var(--hud-line); border-radius: 0;
-  color: var(--hud-ink); font: 400 14px/1 var(--hud-mono);
+html[data-ui="edison"] .lab-sheet-code  { color: var(--pp-ink); }
+html[data-ui="edison"] .lab-sheet-week, html[data-ui="edison"] .lab-sheet-due { color: var(--pp-grey); }
+html[data-ui="edison"] .lab-sheet-title { font: 400 22px/1.3 var(--hud-mono); letter-spacing: 0; color: var(--pp-ink); }
+html[data-ui="edison"] .lab-sheet-close, html[data-ui="edison"] .lab-paper-tuck {
+  height: 24px; background: transparent; border: 1px solid var(--pp-line); border-radius: 0; color: var(--pp-ink); cursor: pointer;
 }
-html[data-ui="edison"] .lab-sheet-close:hover { background: var(--hud-hover); border-color: var(--hud-ink); color: var(--hud-ink); }
-html[data-ui="edison"] .lab-sheet-close:focus-visible { outline: 1px solid var(--hud-ink); outline-offset: 1px; }
+html[data-ui="edison"] .lab-sheet-close { width: 24px; margin-left: 0; font: 400 14px/1 var(--hud-mono); }
+html[data-ui="edison"] .lab-paper-tuck { margin-left: auto; padding: 0 8px; font: 400 11px/1 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase; }
+html[data-ui="edison"] .lab-sheet-close:hover, html[data-ui="edison"] .lab-paper-tuck:hover { background: var(--pp-hover); border-color: var(--pp-ink); color: var(--pp-ink); }
+html[data-ui="edison"] .lab-sheet-close:focus-visible, html[data-ui="edison"] .lab-paper-tuck:focus-visible { outline: 1px solid var(--pp-ink); outline-offset: 1px; }
+
+/* ── The current step, pinned under the head: what's next, and its three buttons ── */
+html[data-ui="edison"] .lab-paper-now {
+  flex: none; padding: 12px 20px 14px; background: var(--pp-hover); border-bottom: 1px solid var(--pp-line); border-left: 3px solid var(--pp-ink);
+}
+html[data-ui="edison"] .lab-now-top { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pp-grey); }
+html[data-ui="edison"] .lab-now-step { color: var(--pp-ink); }
+html[data-ui="edison"] .lab-now-text { margin: 6px 0 10px; font-size: 15px; line-height: 1.45; color: var(--pp-ink); }
+html[data-ui="edison"] .lab-now-tools { display: flex; gap: 6px; }
+html[data-ui="edison"] .lab-now-tools[hidden], html[data-ui="edison"] .lab-now-tools [hidden] { display: none; }
+html[data-ui="edison"] .lab-now-tools button {
+  height: 28px; padding: 0 10px; background: var(--pp-bg); border: 1px solid var(--pp-line); border-radius: 0; color: var(--pp-ink); cursor: pointer;
+  font: 400 11px/1 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase;
+}
+html[data-ui="edison"] .lab-now-tools .lab-now-give { background: var(--pp-ink); border-color: var(--pp-ink); color: var(--pp-bg); }
+html[data-ui="edison"] .lab-now-tools button:hover { border-color: var(--pp-ink); }
+html[data-ui="edison"] .lab-now-tools .lab-now-give:hover { background: #333333; }
+html[data-ui="edison"] .lab-now-tools button:focus-visible { outline: 1px solid var(--pp-ink); outline-offset: 1px; }
+html[data-ui="edison"] .lab-now-hint { margin-top: 10px; font-size: 12px; line-height: 1.55; color: var(--pp-text); }
+html[data-ui="edison"] .lab-now-last {
+  margin-top: 10px; padding: 8px 10px; max-height: 140px; overflow-y: auto; background: var(--pp-bg); border: 1px solid var(--pp-rule);
+  font-size: 12px; line-height: 1.5; color: var(--pp-text);
+}
+html[data-ui="edison"] .lab-now-hint[hidden], html[data-ui="edison"] .lab-now-last[hidden] { display: none; }
+html[data-ui="edison"] .lab-now-last-head { color: var(--pp-grey); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
+html[data-ui="edison"] .lab-now-last ul { margin: 0; padding-left: 16px; list-style: square; }
+
+/* ── Sections: a numbered heading over hairline-ruled content ── */
+html[data-ui="edison"] .lab-paper-sec { padding: 18px 20px 10px; border-bottom: 1px solid var(--pp-rule); }
+html[data-ui="edison"] .lab-paper-sec p { margin: 0 0 10px; }
+html[data-ui="edison"] .lab-paper-h { display: flex; gap: 14px; margin: 0 0 10px; font: 400 15px/1.4 var(--hud-mono); color: var(--pp-ink); }
+html[data-ui="edison"] .lab-paper-h-n { color: var(--pp-grey); }
+html[data-ui="edison"] .lab-paper-dim { color: var(--pp-grey); font-size: 12px; }
+html[data-ui="edison"] .lab-paper-reading { color: var(--pp-ink); text-decoration: none; border-bottom: 1px solid var(--pp-line); }
+html[data-ui="edison"] .lab-paper-reading:hover { border-bottom-color: var(--pp-ink); }
+
+/* Equipment */
+html[data-ui="edison"] .lab-paper-equip, html[data-ui="edison"] .lab-paper-data { width: 100%; border-collapse: collapse; font-size: 12px; }
+html[data-ui="edison"] .lab-paper-equip td { padding: 6px 0; border-bottom: 1px solid var(--pp-rule); vertical-align: top; }
+html[data-ui="edison"] .lab-paper-label { width: 48px; color: var(--pp-ink); }
+html[data-ui="edison"] .lab-paper-have {
+  padding-left: 10px; text-align: right; white-space: nowrap; color: var(--pp-grey);
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+}
+html[data-ui="edison"] .lab-paper-equip tr[data-have="yes"] .lab-paper-have { color: var(--pp-blue); }
+
+/* Pre-lab and questions: a number, the question, an answer */
+html[data-ui="edison"] .lab-paper-q { display: grid; grid-template-columns: 34px 1fr; margin-bottom: 12px; }
+html[data-ui="edison"] .lab-paper-q-n { color: var(--pp-grey); }
+html[data-ui="edison"] .lab-paper-ans { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+html[data-ui="edison"] .lab-paper-answer {
+  width: 120px; padding: 2px 0; background: transparent; border: 0; border-bottom: 1px dotted var(--pp-grey); border-radius: 0;
+  color: var(--pp-ink); font: 400 13px/1.5 var(--hud-mono); outline: none;
+}
+html[data-ui="edison"] .lab-paper-answer:focus { border-bottom: 1px solid var(--pp-ink); }
+html[data-ui="edison"] .lab-paper-answer::placeholder, html[data-ui="edison"] .lab-paper-written::placeholder { color: #8A8A8A; }
+html[data-ui="edison"] .lab-paper-tick { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pp-grey); }
+html[data-ui="edison"] .lab-paper-tick[data-result="correct"] { color: var(--pp-blue); }
+html[data-ui="edison"] .lab-paper-written {
+  display: block; width: 100%; min-height: 52px; margin-top: 6px; padding: 6px 8px; resize: vertical;
+  background: transparent; border: 1px solid var(--pp-line); border-radius: 0; color: var(--pp-ink); font: 400 13px/1.5 var(--hud-mono);
+}
+html[data-ui="edison"] .lab-paper-written:focus { border-color: var(--pp-ink); outline: none; }
 
 /* ── Steps: hairline rows, a square tag on the right ── */
-html[data-ui="edison"] .lab-steps { padding: 0; scrollbar-color: #333333 var(--hud-k); }
-html[data-ui="edison"] .lab-steps::-webkit-scrollbar-thumb { background: #333333; }
-html[data-ui="edison"] .lab-step { gap: 6px 10px; padding: 12px 16px; border-bottom-color: var(--hud-rule); }
-html[data-ui="edison"] .lab-step-manual:hover { background: var(--hud-hover); }
-html[data-ui="edison"] .lab-step-manual:focus-visible { outline: 1px solid var(--hud-ink); outline-offset: -1px; }
-html[data-ui="edison"] .lab-step-n    { font-weight: 400; color: var(--hud-grey); }
-html[data-ui="edison"] .lab-step-text { color: var(--hud-ink); }
-html[data-ui="edison"] .lab-step-hint { color: var(--hud-pink); font-size: 11px; }
+html[data-ui="edison"] .lab-paper-sec .lab-steps { margin: 0 -20px; }
+html[data-ui="edison"] .lab-step { gap: 6px 10px; padding: 12px 20px; border-bottom: 1px solid var(--pp-rule); }
+html[data-ui="edison"] .lab-paper-sec .lab-step:last-child { border-bottom: 0; }
+html[data-ui="edison"] .lab-step-manual:hover { background: var(--pp-hover); }
+html[data-ui="edison"] .lab-step-manual:focus-visible { outline: 1px solid var(--pp-ink); outline-offset: -1px; }
+html[data-ui="edison"] .lab-step-n    { font-weight: 400; color: var(--pp-grey); }
+html[data-ui="edison"] .lab-step-text { color: var(--pp-ink); }
+html[data-ui="edison"] .lab-step-hint { color: var(--pp-red); font-size: 12px; line-height: 1.55; }
 html[data-ui="edison"] .lab-step-status {
-  padding: 1px 6px; background: transparent; border: 1px solid var(--hud-line); border-radius: 0;
-  color: var(--hud-grey); font: 400 11px/1.4 var(--hud-mono);
+  padding: 1px 6px; background: transparent; border: 1px solid var(--pp-line); border-radius: 0;
+  color: var(--pp-grey); font: 400 11px/1.4 var(--hud-mono); letter-spacing: 0.08em; text-transform: uppercase;
 }
-html[data-ui="edison"] .lab-step[data-status="passed"] .lab-step-status { background: var(--hud-blue); border-color: var(--hud-blue); color: var(--hud-k); }
-html[data-ui="edison"] .lab-step[data-status="failed"] .lab-step-status { background: var(--hud-pink); border-color: var(--hud-pink); color: var(--hud-k); }
+html[data-ui="edison"] .lab-step[data-status="passed"] .lab-step-status { background: var(--pp-blue); border-color: var(--pp-blue); color: #FFFFFF; }
+html[data-ui="edison"] .lab-step[data-status="failed"] .lab-step-status { background: var(--pp-red); border-color: var(--pp-red); color: #FFFFFF; }
 
-/* ── Foot: square stepper dots and the count ── */
-html[data-ui="edison"] .lab-sheet-foot {
-  gap: 12px; padding: 12px 16px; border-top-color: var(--hud-rule); color: var(--hud-grey); font: 400 11px/1.4 var(--hud-mono);
+/* The current step: lifted, with Give me, Hint and Explain; the hint on request */
+html[data-ui="edison"] .lab-paper .lab-step[data-current] { background: var(--pp-hover); border-left: 2px solid var(--pp-ink); padding-left: 18px; }
+html[data-ui="edison"] .lab-paper .lab-step[data-hint="open"] .lab-step-hint { display: block; }
+html[data-ui="edison"] .lab-paper .lab-step[data-hint="open"]:not([data-status="failed"]) .lab-step-hint { color: var(--pp-grey); }
+html[data-ui="edison"] .lab-step-tools { display: none; grid-column: 2 / -1; gap: 6px; margin-top: 4px; }
+html[data-ui="edison"] .lab-paper .lab-step[data-current] .lab-step-tools { display: flex; }
+html[data-ui="edison"] .lab-step-tools button {
+  height: 24px; padding: 0 8px; background: var(--pp-bg); border: 1px solid var(--pp-line); border-radius: 0; color: var(--pp-ink); cursor: pointer;
+  font: 400 11px/1 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase;
 }
-html[data-ui="edison"] .lab-stepper-dot { background: transparent; border: 1px solid var(--hud-line); border-radius: 0; }
-html[data-ui="edison"] .lab-stepper-dot[data-status="passed"] { background: var(--hud-blue); border-color: var(--hud-blue); }
-html[data-ui="edison"] .lab-stepper-dot[data-status="failed"] { background: var(--hud-pink); border-color: var(--hud-pink); }
+html[data-ui="edison"] .lab-step-tools .lab-step-give { background: var(--pp-ink); border-color: var(--pp-ink); color: var(--pp-bg); }
+html[data-ui="edison"] .lab-step-tools button:hover { border-color: var(--pp-ink); }
+html[data-ui="edison"] .lab-step-tools .lab-step-give:hover { background: #333333; }
+html[data-ui="edison"] .lab-step-tools button:focus-visible { outline: 1px solid var(--pp-ink); outline-offset: 1px; }
+html[data-ui="edison"] .lab-step-given {
+  grid-column: 2 / -1; margin: 4px 0 0; padding: 8px 10px 8px 26px; list-style: square;
+  border: 1px solid var(--pp-rule); background: var(--pp-bg); color: var(--pp-text); font-size: 12px; line-height: 1.55;
+}
+html[data-ui="edison"] .lab-step-given[hidden] { display: none; }
+
+/* ── Data: Quantity, Expected (your pre-lab answer), Simulated (live) ── */
+html[data-ui="edison"] .lab-paper-data th {
+  padding: 0 0 6px; border-bottom: 1px solid var(--pp-ink); text-align: left; font-weight: 400;
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pp-grey);
+}
+html[data-ui="edison"] .lab-paper-data td { padding: 7px 0; border-bottom: 1px solid var(--pp-rule); }
+html[data-ui="edison"] .lab-paper-data th + th, html[data-ui="edison"] .lab-paper-data td + td { text-align: right; }
+html[data-ui="edison"] .lab-paper-exp { color: var(--pp-ink); }
+html[data-ui="edison"] .lab-paper-sim { color: #8A8A8A; }
+html[data-ui="edison"] .lab-paper-sim[data-ok] { color: var(--pp-ink); }
+html[data-ui="edison"] .lab-paper-sim[data-ok="yes"] { color: var(--pp-blue); }
+html[data-ui="edison"] .lab-paper-data .lab-paper-wait { color: var(--pp-grey); }
+
+/* ── Foot: square stepper dots and the count; complete in blue ── */
+html[data-ui="edison"] .lab-sheet-foot {
+  gap: 12px; padding: 12px 20px; border-top: 1px solid var(--pp-rule); color: var(--pp-grey); font: 400 11px/1.4 var(--hud-mono);
+}
+html[data-ui="edison"] #lab-sheet[data-complete] .lab-sheet-foot { color: var(--pp-blue); }
+html[data-ui="edison"] .lab-stepper-dot { background: transparent; border: 1px solid var(--pp-line); border-radius: 0; }
+html[data-ui="edison"] .lab-stepper-dot[data-status="passed"] { background: var(--pp-blue); border-color: var(--pp-blue); }
+html[data-ui="edison"] .lab-stepper-dot[data-status="failed"] { background: var(--pp-red); border-color: var(--pp-red); }
+
+/* ── The grip: the paper's edge you pull, in the HUD's black ── */
+html[data-ui="edison"] .lab-paper-grip {
+  flex: 0 0 30px; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 16px 0;
+  background: var(--hud-k); border-left: 1px solid var(--hud-rule); border-right: 1px solid var(--hud-line);
+  cursor: ew-resize; user-select: none; touch-action: none;
+}
+html[data-ui="edison"] .lab-paper-grip:hover, html[data-ui="edison"] .lab-paper-drag .lab-paper-grip { background: var(--hud-hover); border-right-color: var(--hud-ink); }
+html[data-ui="edison"] .lab-paper-grip:focus-visible { outline: 1px solid var(--hud-ink); outline-offset: -2px; }
+html[data-ui="edison"] .lab-paper-glabel {
+  writing-mode: vertical-rl; font: 400 11px/1 var(--hud-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--hud-ink);
+}
+html[data-ui="edison"] .lab-paper-gdots { display: flex; flex-direction: column; gap: 4px; }
+html[data-ui="edison"] .lab-paper-gdots i { display: block; width: 8px; height: 8px; border: 1px solid var(--hud-line); }
+html[data-ui="edison"] .lab-paper-gdots i[data-status="passed"] { background: var(--hud-blue); border-color: var(--hud-blue); }
+html[data-ui="edison"] .lab-paper-gdots i[data-status="failed"] { background: var(--hud-pink); border-color: var(--hud-pink); }
+html[data-ui="edison"] .lab-paper-ridges { margin: auto 0; width: 7px; height: 36px; border-left: 1px solid var(--hud-line); border-right: 1px solid var(--hud-line); }
+html[data-ui="edison"] .lab-paper-gcount { writing-mode: vertical-rl; font: 400 11px/1 var(--hud-mono); letter-spacing: 0.1em; color: var(--hud-grey); }
+
+/* ── The next-step card on the board, while the paper is tucked ── */
+html[data-ui="edison"] #lab-next {
+  position: absolute; bottom: 64px; left: 42px; z-index: 6; display: flex; flex-direction: column; gap: 4px; width: 340px; padding: 10px 12px 12px;
+  background: var(--hud-k); border: 1px solid var(--hud-line); border-radius: 0; color: var(--hud-ink); text-align: left; cursor: pointer;
+  font: 400 12px/1.6 var(--hud-mono);
+}
+html[data-ui="edison"] #lab-next[hidden] { display: none; }
+/* The multimeter's screen shares the bottom-left corner: while it shows, the card moves top-right, under Clear all. */
+html[data-ui="edison"] #canvas-wrap:has(> #meter-display:not([hidden])) #lab-next { top: 96px; right: 42px; bottom: auto; left: auto; }
+html[data-ui="edison"] #lab-next:hover { border-color: var(--hud-ink); }
+html[data-ui="edison"] #lab-next:focus-visible { outline: 1px solid var(--hud-ink); outline-offset: 1px; }
+html[data-ui="edison"] .lab-next-top { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--hud-grey); }
+html[data-ui="edison"] .lab-next-text { font-size: 13px; }
+html[data-ui="edison"] .lab-next-hint { font-size: 11px; line-height: 1.5; color: var(--hud-grey); }
+
+/* ── The parts sidebar folded to its icons while the paper is out; a part's name beside it on hover ── */
+html[data-ui="edison"][data-lab-paper="out"] #sidebar { width: 56px; min-width: 56px; overflow-x: hidden; }
+html[data-ui="edison"][data-lab-paper="out"] #part-search,
+html[data-ui="edison"][data-lab-paper="out"] #sidebar .comp-group-label,
+html[data-ui="edison"][data-lab-paper="out"] #sidebar .sidebar-section-label,
+html[data-ui="edison"][data-lab-paper="out"] #sidebar .sidebar-help,
+html[data-ui="edison"][data-lab-paper="out"] #sidebar .comp-group::after { display: none; }
+html[data-ui="edison"][data-lab-paper="out"] #wire-color-row { max-height: 0; overflow: hidden; }
+html[data-ui="edison"][data-lab-paper="out"] #sidebar .comp-group { padding: 6px 0; }
+html[data-ui="edison"][data-lab-paper="out"] #sidebar .comp-item { justify-content: center; padding: 4px 0; }
+html[data-ui="edison"][data-lab-paper="out"] #sidebar .comp-item-text {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+html[data-ui="edison"] #lab-rail-tip {
+  position: fixed; z-index: 60; transform: translateY(-50%); padding: 4px 8px; pointer-events: none;
+  background: var(--hud-k); border: 1px solid var(--hud-line); color: var(--hud-ink);
+  font: 400 11px/1.4 var(--hud-mono); letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap;
+}
+html[data-ui="edison"] #lab-rail-tip[hidden] { display: none; }

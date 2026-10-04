@@ -142,6 +142,10 @@ test('Edison, Lab 2 with U1\'s V− unwired: a fault callout on U1 says it has n
   expect(typeof cap, 'the page has window.ResultCallouts.MAX').toBe('number');
   expect(await page.locator('.result-callout').count(), `at most ResultCallouts.MAX (${cap}) callouts`).toBeLessThanOrEqual(cap);
 
+  // A lab opens on the whole board beside the lab paper, far back; frame
+  // the parts close (as a saved circuit opens) so an orbit visibly moves U1.
+  await page.evaluate(() => App.frameCircuit());
+
   // Its dot sits on U1's projected anchor.
   await drawn(page);
   let at = null;

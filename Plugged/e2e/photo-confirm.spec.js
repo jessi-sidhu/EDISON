@@ -127,6 +127,7 @@
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
+const { chooseSample } = require('./fixtures/photo-sample');
 
 // The contract's mock Reading (docs/API-CONTRACT.md → "Mock Reading"): R1 from
 // the + rail to a14, LED1 backwards (cathode c14, anode c17), W1 b17 → − rail.
@@ -182,12 +183,12 @@ async function openEditor(page) {
   await page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
 }
 
-// 📷 → Use sample photo → straight to demo-board, the one offered sample
-// (#200: no picker), /api/photo answering `reading` → the confirm screen.
+// 📷 → Use sample photo → the demo-board tile when the picker shows (#15: 2
+// samples offered; with one, no picker, #200), /api/photo answering
+// `reading` → the confirm screen.
 async function openConfirm(page, reading) {
   await page.route('**/api/photo', route => route.fulfill({ json: { reading, provider: 'fixture', model: 'deepseek-flash', ms: 12 } }));
-  await page.locator('#photo-btn').click();
-  await page.locator('#photo-sample').click();
+  await chooseSample(page, 'demo-board');
   await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen').toBeVisible();
 }
 

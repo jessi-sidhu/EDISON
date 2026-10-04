@@ -3,7 +3,8 @@
 //
 //  #labs-menu-btn in the top bar opens (on a click, never a hover) a
 //  list of lab starter circuits, one per lab sheet (labs/sheets.js), as
-//  "Lab <n>: <title>". Picking one fetches the sheet's starter .sparky
+//  "Lab <n>: <title>". Picking one opens its lab sheet (as ?lab= does) and
+//  fetches the sheet's starter .sparky
 //  and loads it with App.loadCircuitData, the same path as opening a
 //  file, so it is one undo step, then frames it from FRAME_DISTANCE back
 //  so the board and the mat show around a lone starter part (#194). The
@@ -13,7 +14,8 @@
 //  Plugged/, e.g. edison/figures/ohm.sparky) loads that circuit, but only
 //  if UiFlag.allowedCircuit passes it. Anything else is never fetched.
 //  With &run=1 too (the textbook's "Test in lab +"), the loaded circuit
-//  starts simulating, as if Simulate were pressed.
+//  starts simulating, as if Simulate were pressed; &set= first puts the
+//  textbook's values on it (setsFromSearch).
 //
 //  EXPORTS
 //  ───────
@@ -24,8 +26,18 @@
 //  urlFor(id)  → the lab sheet's starter, relative to circuit3d/index.html
 //                (null for an id with no sheet)
 //  labFromSearch(search) → the ?lab= id in a location.search, or null
+//  setsFromSearch(search) → [{ label, key, value }] from ?set= (an ?open=
+//                link's values: a resistance or a voltage per part label)
 //  FRAME_DISTANCE  the closest the camera comes when a lab opens
 //                (App.frameCircuit's minDistance; a saved circuit gets 6)
+//  paperWidth(w, room) → the lab paper's width once a pull ends (Edison,
+//                tools/lab-sheet.js): 0 (tucked) under PAPER_SNAP, else
+//                w kept between PAPER_MIN and room − PAPER_MIN_BOARD, so
+//                the board keeps its room. room: the px between the folded
+//                parts rail and the chat, less the grip.
+//  PAPER_WIDTH   the paper's width when it opens
+//  frame()       frames a lab: FRAME_DISTANCE back, and in Edison (beside
+//                the lab paper) the whole board and the bench instruments
 // ─────────────────────────────────────────────────────────────
 
 (function (root, factory) {
@@ -48,10 +60,35 @@
 
   const labFromSearch = search => new URLSearchParams(search || '').get('lab') || null;
 
+  // ?set= on an ?open= link (the textbook's "Test in lab +"): the values the
+  // page shows, as LABEL.key:number pairs, e.g. R2.resistance:47000,PS2.voltage:0.5.
+  // Only a resistance (1 Ω to 10 MΩ) or a voltage (0 to 30 V) on a part
+  // label; anything else is dropped.
+  const SET_RANGE = { resistance: [1, 1e7], voltage: [0, 30] };
+  function setsFromSearch(search) {
+    const raw = new URLSearchParams(search || '').get('set');
+    if (!raw) return [];
+    return raw.split(',').map(pair => {
+      const m = /^([A-Z]{1,3}\d{1,2})\.(resistance|voltage):(-?\d+(?:\.\d+)?)$/.exec(pair.trim());
+      if (!m) return null;
+      const value = Number(m[3]), [lo, hi] = SET_RANGE[m[2]];
+      return Number.isFinite(value) && value >= lo && value <= hi ? { label: m[1], key: m[2], value } : null;
+    }).filter(Boolean);
+  }
+
   // Picked from 1440×900 screenshots of Lab 2 with the sheet and chat open
   // (a 608 px canvas): at 12, U1, all four supply rails and a strip of mat
   // beyond each long edge of the board; at 6, U1 filled the view.
   const FRAME_DISTANCE = 12;
+
+  // The lab paper, from the approved mock (1440 × 900): it opens at 480, a
+  // pull narrower than 200 tucks it, and the board always keeps 260.
+  const PAPER_WIDTH = 480, PAPER_SNAP = 200, PAPER_MIN = 380, PAPER_MIN_BOARD = 260;
+  function paperWidth(w, room) {
+    if (!(w >= PAPER_SNAP)) return 0;
+    const max = Math.max(PAPER_MIN, room - PAPER_MIN_BOARD);
+    return Math.round(Math.min(Math.max(w, PAPER_MIN), max));
+  }
 
   if (typeof document !== 'undefined') {
     wire();
@@ -78,7 +115,15 @@
       App.setHint(`Can't open ${path}: only Edison figures and lab circuits can be opened this way.`, 5000);
       return;
     }
-    load({ id: path, title: path }, `../${path}`).then(ok => { if (ok && run && !App.simRunning) App.runSimulation(); });
+    load({ id: path, title: path }, `../${path}`).then(ok => {
+      if (!ok) return;
+      // The textbook's values (?set=), on the parts they name, before the run.
+      for (const s of setsFromSearch(location.search)) {
+        const c = App.state.components.find(x => x.label === s.label);
+        if (c && c.values && s.key in c.values) App.setValues(c, { [s.key]: s.value });
+      }
+      if (run && !App.simRunning) App.runSimulation();
+    });
   }
 
   function wire() {
@@ -92,7 +137,8 @@
       item.className = 'labs-menu-item';
       item.setAttribute('role', 'menuitem');
       item.textContent = lab.title;
-      item.addEventListener('click', () => { close(); load(lab, urlFor(lab.id), FRAME_DISTANCE); });
+      // A lab picked here opens with its sheet (the lab paper in Edison), as ?lab= does.
+      item.addEventListener('click', () => { close(); if (window.LabSheet) LabSheet.open(lab.id); load(lab, urlFor(lab.id), FRAME_DISTANCE); });
       menu.appendChild(item);
     }
 
@@ -125,9 +171,15 @@
       return false;
     }
     App.loadCircuitData(data);
-    if (frameDistance) App.frameCircuit({ minDistance: frameDistance });
+    if (frameDistance) frame();
     return true;
   }
 
-  return { LABS, urlFor, labFromSearch, FRAME_DISTANCE };
+  // Browser only: App and the page exist.
+  function frame() {
+    const whole = typeof document !== 'undefined' && document.documentElement.dataset.ui === 'edison';
+    App.frameCircuit({ minDistance: FRAME_DISTANCE, whole });
+  }
+
+  return { LABS, urlFor, labFromSearch, setsFromSearch, FRAME_DISTANCE, frame, PAPER_WIDTH, PAPER_MIN_BOARD, paperWidth };
 });

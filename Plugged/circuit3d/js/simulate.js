@@ -400,13 +400,43 @@
     return by > MODE_EPS ? { by, to } : null;
   }
 
+  // An E resting linear can still be the unstable middle answer of a loop
+  // with positive feedback (a Schmitt trigger, the blinker's relaxation
+  // oscillator, #18): a real op-amp runs to a rail. With every other block
+  // held, the drive u is a straight line in the output's source level
+  // s = V(out+) + rout·I, and linear sits where u = s. Solve once more with
+  // the output on the rail farther away: when u climbs faster than s
+  // (du/ds > 1) the loop gain is above 1 and nothing holds it there. A
+  // follower or amplifier (du/ds < 0) and a comparator (≈ 0) stay linear.
+  // Returns the rail to run to: `was`, its rail on the last time step
+  // (hysteresis), else the rail nearer s; null when linear holds.
+  function runaway(e, i, sol, modes, solveFor, was) {
+    if (modes[i] !== 'linear' || !e.rails) return null;
+    const drive = s => s.v(e.nodes[1]) + e.el.gain * (s.v(e.ctrl[0]) - s.v(e.ctrl[1]));
+    const level = s => s.v(e.nodes[0]) + (e.el.rout || 0) * s.eCurrent.get(e);
+    const hr = e.el.headroom || 0;
+    const hi = sol.v(e.rails[1]) - hr, lo = sol.v(e.rails[0]) + hr;
+    const s0 = level(sol);
+    const near = hi - s0 <= s0 - lo ? 'high' : 'low';
+    modes[i] = near === 'high' ? 'low' : 'high';
+    const probe = solveFor(modes);
+    if (!probe) return null;
+    const ds = level(probe) - s0;
+    if (!(Math.abs(ds) > MODE_EPS) || (drive(probe) - drive(sol)) / ds <= 1) return null;
+    return was === 'high' || was === 'low' ? was : near;
+  }
+
   // ── Pure: settleModes, the one loop for every mode block ────
   //
-  //  blocks[i] = { initial, check(sol, mode) → null | { by > 0, to } }
+  //  blocks[i] = { initial, check(sol, mode) → null | { by > 0, to },
+  //                unstable?(sol, modes) → null | mode }
   //  solveFor(modes) → sol, or null when the circuit can't be solved.
   //  Each round: solve; if every block is consistent, stop; else flip the
   //  block with the largest `by`. If a set of modes comes round again, flip
   //  the lowest-index inconsistent block instead, which breaks the cycle.
+  //  A block with `unstable` is asked only once every block is consistent
+  //  (modes is a copy it may change): the first that names a mode is
+  //  flipped to it and the loop goes on (#18, an op-amp's runaway).
   //  After 4·n + 10 rounds give up: settled false. `sol` is always the solve
   //  for the returned modes. Returns { modes, sol, settled } or null.
   function settleModes(blocks, solveFor) {
@@ -418,7 +448,13 @@
       if (!sol) return null;
       const bad = blocks.map((b, i) => b.check(sol, modes[i]));
       const first = bad.findIndex(Boolean);
-      if (first < 0) return { modes, sol, settled: true };
+      if (first < 0) {
+        let at = -1, to = null;
+        while (!to && ++at < blocks.length) to = blocks[at].unstable ? blocks[at].unstable(sol, modes.slice()) : null;
+        if (!to) return { modes, sol, settled: true };
+        modes[at] = to;
+        continue;
+      }
       let worst = first;
       bad.forEach((x, i) => { if (x && x.by > bad[worst].by) worst = i; });
       const key = modes.join('|');
@@ -676,6 +712,9 @@
   //  solved result also has state, each C's volts after the step. Without
   //  dt a C is open. step.t (optional) is the step's time in seconds: a V
   //  with a wave reads offset + amp·sin(2π·freq·t), and its offset without t.
+  //  The state also holds each clipped op-amp's rail, 'high' or 'low' at
+  //  `${label}.${id}` (#18): one under positive feedback stays on it while
+  //  it can, which is the hysteresis a Schmitt trigger needs.
   function analyze(components, wires, step) {
     return run(components, wires, step).r;
   }
@@ -729,15 +768,19 @@
       return done({ status: 'ok', lines: withHeads(null), shorted: true });
     }
 
-    // A time step: each C gets its companion (e.cap) and a state key.
+    // A time step: each C gets its companion (e.cap) and a state key. Each
+    // op-amp (an E with rails or ilim) gets one too, for the rail it was on
+    // ('high' | 'low', #18): under positive feedback it stays there.
     const timed = !!(step && step.dt > 0);
-    const caps  = [];
+    const caps  = [], held = new Map();   // held: E entry → { key, was }
     if (timed) {
       graph.forEach((g, i) => {
         if (!g.part) return;
+        const label = bareResult(graph, i).label;
         g.part.els.forEach((e, k) => {
+          const key = label + '.' + (e.el.id !== undefined ? e.el.id : k);
+          if (isModeE(e)) held.set(e, { key, was: step.state && step.state[key] });
           if (e.el.kind !== 'C') return;
-          const key  = bareResult(graph, i).label + '.' + (e.el.id !== undefined ? e.el.id : k);
           const prev = step.state && Number.isFinite(step.state[key]) ? step.state[key] : 0;
           e.cap = { G: e.el.farads / step.dt, vPrev: prev };
           caps.push({ e, key });
@@ -760,12 +803,31 @@
     const waveT    = timed && Number.isFinite(step.t) ? step.t : undefined;
     const settle   = open => {
       const blockEls = els.filter(e => e.el.kind === 'D' || (isModeE(e) && !open.has(e)));
-      const blocks   = blockEls.map(e => (e.el.kind === 'E'
-        ? { initial: 'linear', check: (sol, mode) => checkE(e, sol, mode) }
-        : { initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
       const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]).concat([...open].map(e => [e, 'open'])));
+      let curModes = [];
       const solveFor = modes => solveMNA(graph, grounds, modesOf(modes), parallel.skip, waveT);
-      return { blockEls, modesOf, solveFor, solved: settleModes(blocks, solveFor) };
+      const solveTrack = modes => { curModes = modes.slice(); return solveFor(modes); };
+      // An E on a rail that asks for 'linear' under positive feedback (du/ds > 1
+      // against the opposite rail) flips to that rail instead: in the ~30 µV band
+      // at a threshold, rail and linear both fail and would ping-pong to the round
+      // cap (#18, the blinker froze at 5.4 s).
+      const blocks   = blockEls.map((e, i) => (e.el.kind === 'E'
+        ? { initial: 'linear', check: (sol, mode) => {
+              const x = checkE(e, sol, mode);
+              if (!x || x.to !== 'linear' || (mode !== 'high' && mode !== 'low') || !e.rails) return x;
+              const other = mode === 'high' ? 'low' : 'high';
+              const cur = curModes.slice(); cur[i] = other;
+              const probe = solveFor(cur);
+              if (!probe) return x;
+              const drive = s => s.v(e.nodes[1]) + e.el.gain * (s.v(e.ctrl[0]) - s.v(e.ctrl[1]));
+              const level = s => s.v(e.nodes[0]) + (e.el.rout || 0) * s.eCurrent.get(e);
+              const ds = level(probe) - level(sol);
+              if (Math.abs(ds) > MODE_EPS && (drive(probe) - drive(sol)) / ds > 1) x.to = other;
+              return x;
+            },
+            unstable: (sol, modes) => runaway(e, i, sol, modes, solveFor, (held.get(e) || {}).was) }
+        : { initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
+      return { blockEls, modesOf, solveFor, solved: settleModes(blocks, solveTrack) };
     };
 
     // No solve: an op-amp with a floating input and a driven output can
@@ -832,6 +894,11 @@
     const extra = { graph, results, live };
     const after = {};
     caps.forEach(({ e, key }) => { after[key] = sol.v(e.nodes[0]) - sol.v(e.nodes[1]); });
+    held.forEach(({ key }, e) => {
+      const m = modeOf.get(e);
+      if (m === 'high' || m === 'isrc+') after[key] = 'high';
+      else if (m === 'low' || m === 'isrc−') after[key] = 'low';
+    });
     const timedState = timed ? { state: after } : {};
 
     // A source shorted through a part's mode block: that part's warnings

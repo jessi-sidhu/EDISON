@@ -10,11 +10,18 @@
 //  ────
 //    📷 → Choose photo / drop on the chat → corner step (a1, aN, jN, j1,
 //         a live labelled grid) → Looks right
+//    A chosen photo whose SHA-256 is in a sample's `match` (#17): the same
+//         corner step (the sample's own file if it won't decode, a HEIC),
+//         then Looks right builds that sample's board as its tile does, and
+//         window.PhotoCanned = its canned answers for chat.js (no /api/photo)
 //    📷 → Use sample photo (or the error card's) → the sample picker
 //         (#photo-samples, #182): a tile per offered window.PhotoSamples
 //         entry (all but offered: false, #200), its photo, title and credit
 //         → its stored taps, sent as `sample: <id>`; Escape or Cancel closes
-//         it, nothing sent. One offered sample: no picker, straight to it
+//         it, nothing sent. One offered sample: no picker, straight to it.
+//         A sample with a `board` (#15): its photo as it is, under
+//         "Reading your board…" for SAMPLE_READ_MS, then that board straight
+//         to Build it's path below (no /api/photo, no confirm screen)
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
 //    → the Reading opens the confirm screen (PhotoConfirm.open) at once, on
 //      the same flattened image, with the box round's placeholders (#173),
@@ -33,8 +40,9 @@
 //      (SparkyChat.applyBuild), window.PhotoFlags, the simulation, then her
 //      question to Edison with the photo's context (#143). Or the reply's
 //      friendly text with Use sample photo.
-//  window.PhotoFlags (the labels of parts read unsure) is emptied when a
-//  photo opens and whenever App.clearAll empties the board.
+//  window.PhotoFlags (the labels of parts read unsure) is emptied, and
+//  window.PhotoCanned set to null, when a photo opens and whenever
+//  App.clearAll empties the board.
 //  While the overlay is open, keydown stops at the window (capture
 //  phase), so Backspace and Ctrl+Z never reach the board. Escape cancels
 //  a confirm-screen move first, else closes.
@@ -50,6 +58,7 @@
   const PHOTO_PAGE_TIMEOUT_MS = 60000;   // above the server's 45 s PHOTO_TIMEOUT_MS
   const PHOTO_LEADS_PAGE_TIMEOUT_MS = 45000;   // the server's 40 s PHOTO_LEADS_TIMEOUT_MS plus the upload
   const MAX_SIDE  = 3000;                // the original is resized to this before flattening
+  const SAMPLE_READ_MS = 1000;           // a board sample's photo under READING, then its board (#15)
   const READING   = 'Reading your board…';
   const DEFAULT_Q = "What's wrong with my circuit?";       // Build it with nothing typed
   // docs/API-CONTRACT.md → "POST /api/photo" → Errors
@@ -67,11 +76,13 @@
   const colsEl  = $('photo-cols'),    okBtn  = $('photo-ok'),     status = $('photo-status');
   const errBtn  = $('photo-error-sample'), confirm = $('photo-confirm');
   const picker  = $('photo-samples'),      credit  = $('photo-credit');
+  const cornerBtns = corners.querySelector('.photo-btns');
 
   let img  = null;   // the photo being tapped
   let taps = [];     // its tapped corners, photo pixels, in corner order
   let job  = 0;      // bumped by every open, send and close: a stale reply is dropped
   let ctrl = null;   // the request in flight
+  let rehearsed = null;   // the sample id a chosen photo's bytes match (#17), or null
 
   const cols    = () => Number(colsEl.value);
   const names   = () => ['a1', 'a' + cols(), 'j' + cols(), 'j1'];
@@ -81,9 +92,11 @@
 
   function open() {
     clearFlags();                                          // a new photo: the last one's flags are done
+    rehearsed = null;
     menu.hidden = true;
     picker.hidden = true;
     corners.hidden = true;
+    prompt.hidden = cornerBtns.hidden = false;            // showPhoto hides them
     confirm.hidden = true;
     showStatus('', false);
     modal.style.display = 'flex';
@@ -109,30 +122,46 @@
     });
   }
 
+  // A file's SHA-256 as hex, or null (no crypto.subtle off localhost/https, or a read error).
+  async function fingerprint(file) {
+    try {
+      const hash = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+      return Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('');
+    } catch { return null; }
+  }
+
+  // The sample whose `match` lists this fingerprint (#17), or null.
+  const matchOf = hex => (hex && Object.keys(window.PhotoSamples)
+    .find(id => (window.PhotoSamples[id].match || []).includes(hex))) || null;
+
   // ── Corner step ────────────────────────────────────────────
 
   async function startPhoto(file) {
     const my = nextJob();
     open();
     Capture.grid = null;
+    const match = matchOf(await fingerprint(file));        // a rehearsed photo (#17)?
+    if (my !== job) return;
     let im = null;
     if (/^image\//.test(file.type)) {
       const url = URL.createObjectURL(file);
       im = await loadImage(url).catch(() => null);
       URL.revokeObjectURL(url);
     }
+    if (!im && match) im = await loadImage(window.PhotoSamples[match].file).catch(() => null);   // a HEIC: its sample's own photo
     if (my !== job) return;
     if (!im) return showStatus(BAD_IMAGE, true);
+    rehearsed = match;
     img = im;
     taps = [];
     corners.hidden = false;
-    sizeCanvas();
+    sizeCanvas(img);
     update();
   }
 
   // The photo fills the canvas box exactly, scaled to fit the window.
-  function sizeCanvas() {
-    const w = img.naturalWidth, h = img.naturalHeight;
+  function sizeCanvas(im) {
+    const w = im.naturalWidth, h = im.naturalHeight;
     const fit = Math.min((window.innerWidth - 96) / w, (window.innerHeight - 200) / h);
     const cw  = Math.round(w * fit), ch = Math.round(h * fit), dpr = window.devicePixelRatio || 1;
     canvas.style.width  = cw + 'px';
@@ -344,7 +373,7 @@
     }
   }
 
-  // Build it on the confirm screen: { actions, flags, labels, skipped }.
+  // Build it on the confirm screen, or a board sample (#15): { actions, flags, labels, skipped, sample? }.
   // The board, the simulation, then Edison answers her question (#143).
   function built(result) {
     const typed    = $('sparky-input').value.trim();
@@ -352,13 +381,21 @@
     close();
     SparkyChat.applyBuild(result.actions);                 // may clear the board, and the flags with it
     window.PhotoFlags = new Set(result.flags.map(f => result.labels[f.id]).filter(Boolean));
+    window.PhotoCanned = cannedOf(result.sample);          // after applyBuild: its clearAll drops the last ones
     App.runSimulation();
     // The default question wants an answer, not an edit (#169); her own may want one.
     sparkyAsk(question, { context: SparkyChat.photoContext(result), explain: !typed });   // clears the input
   }
 
-  // The flagged parts' labels go with the board they were read for.
-  const clearFlags = () => { window.PhotoFlags = new Set(); };
+  // A sample's canned answers (#17) for chat.js's askSparky: { explain, fix },
+  // each set to null once used; null when it has none.
+  function cannedOf(id) {
+    const s = id && window.PhotoSamples[id];
+    return s && (s.explain || s.fix) ? { explain: s.explain || null, fix: s.fix || null } : null;
+  }
+
+  // The flagged parts' labels, and the canned answers, go with the board they were read for.
+  const clearFlags = () => { window.PhotoFlags = new Set(); window.PhotoCanned = null; };
   const _clearAll  = App.clearAll;
   App.clearAll = function (opts) { clearFlags(); return _clearAll.call(this, opts); };
 
@@ -400,8 +437,31 @@
     const im = await loadImage(s.file).catch(() => null);
     if (my !== job) return;
     if (!im) return showStatus(AI_FAILED, true);
+    if (s.board) return buildBoard(my, im, id);
     Capture.grid = PhotoGrid.homography(s.taps, s.cols);
     send(im, Capture.grid, id);
+  }
+
+  // A hard-coded board (#15): its photo as it is under READING for
+  // SAMPLE_READ_MS, then the board exactly. No /api/photo, no confirm screen;
+  // Escape or Cancel meanwhile (a new job) builds nothing.
+  async function buildBoard(my, im, id) {
+    showPhoto(im);
+    await new Promise(r => setTimeout(r, SAMPLE_READ_MS));
+    if (my !== job) return;
+    built({ actions: window.PhotoSamples[id].board, flags: [], labels: {}, skipped: [], sample: id });
+  }
+
+  // The corner step's canvas alone, showing the photo: no prompt, no
+  // buttons, and no image to tap (img stays null).
+  function showPhoto(im) {
+    img = null;
+    taps = [];
+    Capture.grid = null;
+    prompt.hidden = cornerBtns.hidden = true;
+    corners.hidden = false;
+    sizeCanvas(im);
+    canvas.getContext('2d').drawImage(im, 0, 0, canvas.width, canvas.height);
   }
 
   // ── Wiring ─────────────────────────────────────────────────
@@ -419,7 +479,12 @@
   $('photo-sample').addEventListener('click', showSamples);
   errBtn.addEventListener('click', showSamples);
   $('photo-redo').addEventListener('click', () => { taps = []; update(); });
-  okBtn.addEventListener('click', () => { if (Capture.grid) send(img, Capture.grid, null); });
+  okBtn.addEventListener('click', () => {
+    if (!Capture.grid) return;
+    if (!rehearsed) return send(img, Capture.grid, null);
+    showStatus(READING, false);                            // a rehearsed photo (#17): its sample's board, as its tile builds it
+    buildBoard(nextJob(), img, rehearsed);
+  });
   colsEl.addEventListener('change', () => { if (img) update(); });
   $('photo-cancel').addEventListener('click', close);
 
