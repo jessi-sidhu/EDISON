@@ -9,11 +9,28 @@ These are the prompts we send to Edison's AI to check that it builds circuits th
 **Baseline, 2026-10-03** (DeepSeek `deepseek-flash`, with #197–#199, 3 runs each): **11 of 48 runs pass**.
 - Pass 3/3: 01, 13, 14. Pass 2/3: 08 (one dangling wire).
 - Fail 3/3: 02, 03, 05, 06, 07, 09, 10, 11 (TL072 pins mixed up: + and − inputs swapped, probes on the wrong column, a wire across the feedback resistor; idle legs and dangling wires), 04 (built without the TL072 or the supply), 12 (LED current outside 5–20 mA), 15 and 16 (logic).
-**Reasoning on (#205), deepseek-flash, `DEEPSEEK_THINKING=1`, 2026-10-03 (run in progress, first 27 of 48 runs): 17/27 pass**, against 5/27 for the same cases with reasoning off.
-- 01 3/3, 02 3/3 (was 0/3), 03 3/3 (was 0/3), 04 2/3, 05 1/3, 06 0/3, 07 0/3, 08 3/3, 09 2/3.
-- Seconds per build: 9–29 for simple circuits, 30–100 for the harder op-amp ones. The server's 60 s deadline and the page's 75 s timeout would cut the slow ones off in the app (#207).
-- 06: all three runs placed nothing in about 70 s, most likely all reasoning and no tool calls before `max_tokens` (16000). The server now logs `[ask] DeepSeek stopped at max_tokens` when that happens.
-- About 1¢ a build. The deepseek-v4-pro run is next (#205).
+**Reasoning on (#205), deepseek-flash, `DEEPSEEK_THINKING=1`, 2026-10-03: 24/48 runs pass** (11/48 with reasoning off). Median 36.6 s per build (8–195 s); about 0.6¢ a build.
+
+| Case | Off | On | Seconds | What failed (reasoning on) |
+|---|---|---|---|---|
+| 01 | 3/3 | 3/3 | 9–29 | |
+| 02 | 0/3 | **3/3** | 30–76 | |
+| 03 | 0/3 | **3/3** | 18–25 | |
+| 04 | 0/3 | 2/3 | 29–65 | one run: LED never on, an idle leg |
+| 05 | 0/3 | 1/3 | 48–71 | one run built no op-amp; one wrong at the trough |
+| 06 | 0/3 | 0/3 | ~70 | no build at all: reasoning used the whole `max_tokens` (16000), reply "(no response)" |
+| 07 | 0/3 | 0/3 | 61–101 | the diode's output wrong; the checker's false positive too |
+| 08 | 2/3 | 3/3 | 25–28 | |
+| 09 | 0/3 | 2/3 | 40–43 | |
+| 10 | 0/3 | 1/3 | 39–195 | meter reading wrong |
+| 11 | 0/3 | 0/3 | 14–26 | amplifier right (−4.98 V, meter agrees) but FG1 set to DC 0.5 V, not a sine: our guide's "offset = DC in" |
+| 12 | 0/3 | 0/3 | 10–18 | works, LED at 4.9 mA vs the 5 mA floor |
+| 13 | 3/3 | 3/3 | 15–19 | |
+| 14 | 3/3 | 3/3 | 8–11 | |
+| 15 | 0/3 | 0/3 | 45–164 | second LED never lit at the trough; one run failed only on the checker's false positive |
+| 16 | 0/3 | 0/3 | ~76 | no build at all (as 06) |
+
+Next steps are in `docs/TODO.md` (tasks 1–4).
 
 - Known grader limits: the circuit checker puts a Heads up on correct builds of 07 and 15 (a false positive, pinned in `test/prompt-bank.test.js`), and 05, 06 and 10 need a stiff divider at these tolerances.
 
