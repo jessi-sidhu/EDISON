@@ -449,3 +449,188 @@ test('a second battery in series is reached through the first and reads 18 V (#4
   nearV(vAt(r, h(20, 'c')), 18, 'column 20, the top of the stacked battery');
   nearV(vAt(r, h(5, 'd')),   9, 'the + rail column');
 });
+
+// ── Simulation summary for the AI, issue #5 ───────────────────
+// simulationSummary(components, wires, labelOf) runs analyze() and returns
+// markdown lines (strings) the AI reads under "## Simulation": the status,
+// each part's pin voltages, each part's current, LEDs lit or dark, buzzers
+// on or off, and the analysis messages. Voltages to 2 decimals, currents to
+// 0.1 mA. Board pins are named by hole exactly as the app writes them
+// (col is 0-based, so h(10, 'a') is "a11" and h(1, 'tp') is "tp_2"); the
+// off-board battery's pins use the label form BAT1.0 / BAT1.1.
+
+// App.componentId in miniature: the label, else "<type>_<n>" per type.
+const labelOf = (comps, c) => c.label || `${c.type}_${comps.filter(x => x.type === c.type).indexOf(c)}`;
+
+// Fails on an assertion (not a TypeError) while simulationSummary is missing.
+function summary(components, wires) {
+  assert.equal(typeof Sim.simulationSummary, 'function', 'simulate.js should export simulationSummary');
+  const lines = Sim.simulationSummary(components, wires || [], labelOf);
+  assert.ok(Array.isArray(lines), `simulationSummary should return an array of lines, got ${typeof lines}`);
+  lines.forEach(l => assert.equal(typeof l, 'string', `every line should be a string, got ${JSON.stringify(l)}`));
+  return lines;
+}
+
+const show = lines => '\n' + lines.join('\n');
+const lineWith = (lines, re) => lines.find(l => re.test(l));
+function assertLine(lines, re, why) {
+  assert.ok(lineWith(lines, re), `${why}: no line matches ${re}${show(lines)}`);
+}
+
+// The real board: the battery is off-board (holeRefs null) and wired from
+// its pins to the rails, as App.placeBattery + finishWire leave it.
+function offBoardBattery(label, values) {
+  return Object.assign({ type: 'battery', label, pins: pins(2), holeRefs: null }, values ? { values } : {});
+}
+function batWire(bat, k, hole) { return { startComp: bat, startPinIdx: k, endHole: hole }; }
+
+// The line-44 series circuit with labels: 9 V - 470R - red LED.
+// R1 a6-a11, LED1 cathode a16, anode a11. I = (9 - 2) / 470 = 14.9 mA.
+function labelledSeries(opts) {
+  const bat = offBoardBattery(opts && opts.unlabelled ? undefined : 'BAT1');
+  if (opts && opts.unlabelled) delete bat.label;
+  const components = [
+    bat,
+    comp('resistor', [h(5, 'a'),  h(10, 'a')], { label: 'R1' }),
+    comp('led',      [h(15, 'a'), h(10, 'a')], { label: 'LED1' }), // pin0 cathode, pin1 anode
+  ];
+  const wires = [
+    batWire(bat, 0, h(1, 'tp')), batWire(bat, 1, h(1, 'tn')),
+    wire(h(2, 'tp'), h(5, 'a')), wire(h(15, 'a'), h(2, 'tn')),
+  ];
+  return { components, wires };
+}
+
+test('summary of the series circuit: LED1 ON at 14.9 mA, anode about 2.0 V (#5)', () => {
+  const { components, wires } = labelledSeries();
+  const lines = summary(components, wires);
+
+  assertLine(lines, /\bLED1\b.*(\bON\b|\blit\b)/, 'LED1 should be reported ON');
+  assertLine(lines, /\bLED1\b.*\b14\.9 mA\b/, 'LED1 current');
+  assertLine(lines, /\bR1\b.*\b14\.9 mA\b/, 'R1 current');
+  assertLine(lines, /LED1 pin 1 \(a11\b[^)]*\): 2\.0\d V/, 'LED1 anode voltage on a11');
+  assertLine(lines, /LED1 pin 0 \(a16\b[^)]*\): 0\.00 V/, 'LED1 cathode voltage on a16');
+  assertLine(lines, /R1 pin 0 \(a6\b[^)]*\): 9\.00 V/, 'R1 top voltage on a6');
+  assertLine(lines, /\bBAT1\.0\b.*\b9\.00 V/, 'battery + pin in label form');
+  assertLine(lines, /\bBAT1\.1\b.*\b0\.00 V/, 'battery − pin in label form');
+  assert.ok(!/-\s*14\.9 mA/.test(lines.join('\n')), `LED current should be positive${show(lines)}`);
+});
+
+test('summary of an empty board is one line saying so (#5)', () => {
+  const lines = summary([], []);
+  assert.equal(lines.length, 1, `expected one line${show(lines)}`);
+  assert.match(lines[0], /empty|no components|nothing on the board|no parts/i);
+});
+
+test('summary of a board with no battery is one line: No battery on the board. (#5)', () => {
+  const lines = summary([comp('resistor', [h(5, 'a'), h(10, 'a')], { label: 'R1' })], []);
+  assert.equal(lines.length, 1, `expected one line${show(lines)}`);
+  assert.match(lines[0], /No battery on the board\./);
+});
+
+test('summary of an unsolvable circuit says so and reports no pin readings (#5)', () => {
+  const a = comp('battery', [h(1, 'tp'), h(1, 'tn')], { label: 'BAT1' });
+  const b = comp('battery', [h(9, 'tp'), h(9, 'tn')], { label: 'BAT2', values: { voltage: 6 } });
+  const lines = summary([a, b], []);
+
+  assertLine(lines, /unsolvable|cannot be solved|can't be solved|could not be solved/i, 'unsolvable');
+  assert.ok(!lineWith(lines, /pin \d.*:\s*(-?\d+\.\d+ V|floating)/i), `nothing was solved, so no pin readings${show(lines)}`);
+});
+
+test('summary rounds voltages to 2 decimals and currents to 0.1 mA (#5)', () => {
+  const { components, wires } = labelledSeries();
+  const lines = summary(components, wires);
+  const text = lines.join('\n');
+
+  // Readings are "<number> V" / "<number> mA". analyze's own "Battery 1: 9V"
+  // message has no space and is not a reading.
+  const volts = [...text.matchAll(/(-?\d+(?:\.\d+)?) V\b/g)].map(m => m[1]);
+  const amps  = [...text.matchAll(/(-?\d+(?:\.\d+)?) mA\b/g)].map(m => m[1]);
+  assert.ok(volts.length >= 6, `expected a voltage per pin${show(lines)}`);
+  assert.ok(amps.length >= 2, `expected a current per part${show(lines)}`);
+  volts.forEach(v => assert.match(v, /^-?\d+\.\d{2}$/, `voltage ${v} should have 2 decimals${show(lines)}`));
+  amps.forEach(i => assert.match(i, /^-?\d+\.\d$/, `current ${i} should have 1 decimal${show(lines)}`));
+  assert.ok(!/\d\.\d{3,}/.test(text), `no long floats${show(lines)}`);
+});
+
+test('summary reports a loose resistor’s pins as floating, not 0 V (#5)', () => {
+  const { components, wires } = labelledSeries();
+  components.push(comp('resistor', [h(20, 'a'), h(25, 'a')], { label: 'R2' }));
+  const lines = summary(components, wires);
+
+  for (const re of [/R2 pin 0 \(a21\b/, /R2 pin 1 \(a26\b/]) {
+    const line = lineWith(lines, re);
+    assert.ok(line, `no line for ${re}${show(lines)}`);
+    assert.match(line, /floating/i, `loose pin should read floating${show(lines)}`);
+    assert.doesNotMatch(line, /\d+\.\d+ V/, `loose pin should not read a voltage${show(lines)}`);
+  }
+  assertLine(lines, /\bLED1\b.*\b14\.9 mA\b/, 'the main circuit is unchanged');
+});
+
+test('summary uses the button’s pressed state: released → LED dark, pressed → LED ON (#5)', () => {
+  const build = pressed => {
+    const bat = offBoardBattery('BAT1');
+    const components = [
+      bat,
+      comp('button',   [h(3, 'a'),  h(6, 'a')],  { label: 'SW1', pressed }),
+      comp('resistor', [h(6, 'a'),  h(10, 'a')], { label: 'R1' }),
+      comp('led',      [h(15, 'a'), h(10, 'a')], { label: 'LED1' }),
+    ];
+    const wires = [
+      batWire(bat, 0, h(1, 'tp')), batWire(bat, 1, h(1, 'tn')),
+      wire(h(2, 'tp'), h(3, 'a')), wire(h(15, 'a'), h(2, 'tn')),
+    ];
+    return summary(components, wires);
+  };
+
+  // A part's state lines: lines naming it that are not "pin k" readings.
+  const stateOf = (lines, label) => lines.filter(l => new RegExp(`\\b${label}\\b`).test(l) && !/\bpin \d/.test(l));
+  const isOn  = l => /\bON\b|\blit\b/.test(l) && !/not lit/.test(l);
+  const isOff = l => /\bOFF\b|\bdark\b|not lit/i.test(l);
+
+  const released = build(false);
+  assert.ok(stateOf(released, 'SW1').some(l => /released|\bopen\b|not pressed/i.test(l)),
+    `SW1 should read released/open${show(released)}`);
+  assert.ok(stateOf(released, 'LED1').some(isOff), `LED1 should read dark/OFF with the button released${show(released)}`);
+  assert.ok(!stateOf(released, 'LED1').some(isOn), `LED1 must not read ON with the button released${show(released)}`);
+
+  const pressed = build(true);
+  assert.ok(stateOf(pressed, 'SW1').some(l => /pressed|closed/i.test(l) && !/not pressed|released|\bopen\b/i.test(l)),
+    `SW1 should read pressed/closed${show(pressed)}`);
+  assert.ok(stateOf(pressed, 'LED1').some(isOn), `LED1 should read ON with the button pressed${show(pressed)}`);
+  assert.ok(!/NaN|undefined|null/.test(pressed.join('\n')), `a pressed button has no current; no NaN/null${show(pressed)}`);
+});
+
+test('summary carries the analysis messages: open circuit and short circuit (#5)', () => {
+  const bat = offBoardBattery('BAT1');
+  const open = summary([
+    bat,
+    comp('resistor', [h(5, 'a'),  h(10, 'a')], { label: 'R1' }),
+    comp('led',      [h(15, 'a'), h(10, 'a')], { label: 'LED1' }),
+  ], [batWire(bat, 0, h(1, 'tp')), batWire(bat, 1, h(1, 'tn'))]);
+  assertLine(open, /Circuit open/i, 'open-circuit warning');
+
+  const short = summary([
+    comp('battery', [h(1, 'tp'), h(1, 'tn')], { label: 'BAT1' }),
+    comp('led',     [h(1, 'tn'), h(1, 'tp')], { label: 'LED1' }),
+  ], []);
+  assertLine(short, /Short circuit/i, 'short-circuit warning');
+});
+
+test('summary never names a pin in the old _pin form, labelled or not (#5)', () => {
+  for (const unlabelled of [false, true]) {
+    const { components, wires } = labelledSeries({ unlabelled });
+    const lines = summary(components, wires);
+    assert.ok(lines.length > 1, `expected a full summary${show(lines)}`);
+    assert.ok(!/_pin/.test(lines.join('\n')), `no "_pin" in the summary${show(lines)}`);
+  }
+});
+
+test('summary is pure: same input, same lines, and the parts are not changed (#5)', () => {
+  const { components, wires } = labelledSeries();
+  const before = JSON.stringify(components.map(c => ({ ...c, pins: c.pins.length })));
+  const first  = summary(components, wires);
+  const second = summary(components, wires);
+  assert.deepEqual(second, first);
+  assert.equal(JSON.stringify(components.map(c => ({ ...c, pins: c.pins.length }))), before);
+});

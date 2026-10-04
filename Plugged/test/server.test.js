@@ -419,3 +419,91 @@ test('the system prompt has a rule that rail wires land in row a', () => {
   assert.ok(lines.some(l => /\brow a\b/i.test(l) && /rail/i.test(l)),
     'a rule line says rail wires land in row a, nearest the rails');
 });
+
+// ── Partial replies (no delete_all), issue #14 ─────────────────────────────
+// findCircuitProblems sees only the reply's actions, not the board on screen.
+// A reply with no delete_all adds to that board, so the LED checks (backwards /
+// not connected) can't be judged and are skipped. A reply with any delete_all
+// is a full rebuild and is checked as before. The checks that are sound on the
+// reply alone (stacked holes, battery short, battery placed but not wired,
+// part values) run on every reply.
+
+test('a partial reply of one place_led (d8/d6) comes back unchanged, with no "Heads up"', () => {
+  const out = Server.finishAIReply({ reply: 'Added it.', actions: [
+    { tool: 'place_led', holeA: 'd8', holeB: 'd6' },
+  ] });
+  assert.equal(out.reply, 'Added it.');
+});
+
+test('a partial reply adding a second LED and a wire has no LED "not connected" line', () => {
+  const out = Server.finishAIReply({ reply: 'Added it.', actions: [
+    { tool: 'place_led', holeA: 'd8', holeB: 'd6' },
+    { tool: 'add_wire', from: 'a10', to: 'tn_10', color: 'black' },
+  ] });
+  assert.doesNotMatch(out.reply, /LED at d8\/d6 is (not connected|backwards)/);
+  assert.doesNotMatch(out.reply, /Heads up/);
+});
+
+// Guard: stacking is judged within the reply's own actions.
+test('a partial reply that puts two leads in d8 is still flagged', () => {
+  const out = Server.finishAIReply({ reply: 'Added it.', actions: [
+    { tool: 'place_led', holeA: 'd8', holeB: 'd6' },
+    { tool: 'place_resistor', holeA: 'd8', holeB: 'e12' },
+  ] });
+  assert.match(out.reply, /Heads up/);
+  assert.match(out.reply, /Hole d8 holds 2 leads/);
+});
+
+// Guard: wires alone joining + to − is a short whatever else is on the board.
+test('a partial reply wiring BAT1.0 to BAT1.1 is still flagged as a short', () => {
+  const out = Server.finishAIReply({ reply: 'Added it.', actions: [
+    { tool: 'add_wire', from: 'BAT1.0', to: 'BAT1.1', color: 'red' },
+  ] });
+  assert.match(out.reply, /Heads up/);
+  assert.match(out.reply, /short/i);
+});
+
+// Guard: a battery placed in this reply can't have been wired before it existed.
+test('a partial reply placing a battery with no wires still flags both pins as not wired', () => {
+  const out = Server.finishAIReply({ reply: 'Added it.', actions: [
+    { tool: 'place_battery' },
+  ] });
+  assert.match(out.reply, /Heads up/);
+  assert.match(out.reply, /BAT1\.0 is not wired/);
+  assert.match(out.reply, /BAT1\.1 is not wired/);
+});
+
+// Guard: value checks run on every reply.
+test('a partial reply placing a resistor with resistance -5 still gets the value note', () => {
+  const out = Server.finishAIReply({ reply: 'Added it.', actions: [
+    { tool: 'place_resistor', holeA: 'e12', holeB: 'e16', resistance: -5 },
+  ] });
+  assert.deepStrictEqual(find(out, 'place_resistor'), { tool: 'place_resistor', holeA: 'e12', holeB: 'e16' });
+  assert.match(out.reply, /resistance/i);
+  assert.match(out.reply, /default/i);
+});
+
+// The ONE_LED build with its LED's holeA and holeB swapped.
+const backwardsLedBuild = () => Recipes.ONE_LED.map(a =>
+  a.tool === 'place_led' ? { ...a, holeA: a.holeB, holeB: a.holeA } : { ...a });
+
+// Guard: a full rebuild keeps its LED checks.
+test('a full rebuild with a backwards LED is still flagged', () => {
+  const actions = backwardsLedBuild();
+  assert.ok(actions.some(a => a.tool === 'delete_all'), 'ONE_LED should be a full rebuild');
+  const led = actions.find(a => a.tool === 'place_led');
+  const out = Server.finishAIReply({ reply: 'Built it.', actions });
+  assert.match(out.reply, /Heads up/);
+  assert.match(out.reply, new RegExp(`LED at ${led.holeA}/${led.holeB} is backwards`));
+});
+
+// Guard: "full rebuild" means any delete_all in the reply, not only a first one.
+test('a reply whose delete_all is not the first action is a full rebuild and keeps its LED checks', () => {
+  const actions = [{ tool: 'place_led', holeA: 'j20', holeB: 'j18' }, ...backwardsLedBuild()];
+  assert.notEqual(actions[0].tool, 'delete_all');
+  assert.ok(actions.some(a => a.tool === 'delete_all'));
+  const led = backwardsLedBuild().find(a => a.tool === 'place_led');
+  const out = Server.finishAIReply({ reply: 'Built it.', actions });
+  assert.match(out.reply, /Heads up/);
+  assert.match(out.reply, new RegExp(`LED at ${led.holeA}/${led.holeB} is backwards`));
+});

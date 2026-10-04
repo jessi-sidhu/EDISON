@@ -410,8 +410,13 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
   }
 
+  // These checks see only this reply, not the board on screen. Without a
+  // delete_all the LED may sit on a battery already placed, so judging it
+  // here would be a false alarm (#14). Only a full rebuild is checked.
+  const fullRebuild = actions.some(a => a.tool === 'delete_all');
+
   // holeA is the cathode (-), holeB is the anode (+).
-  for (const led of leds) {
+  for (const led of fullRebuild ? leds : []) {
     const cathode = nodeKey(led.holeA), anode = nodeKey(led.holeB);
     const forward  = pos.has(anode) && neg.has(cathode);
     const reversed = pos.has(cathode) && neg.has(anode);

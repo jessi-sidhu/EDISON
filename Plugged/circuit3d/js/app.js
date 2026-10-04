@@ -749,6 +749,9 @@
       });
     }
 
+    // ── Simulation ── (solved fresh on every export, running or not)
+    md += '\n## Simulation\n' + App.simulationSummary(comps, wires, App.componentId).join('\n') + '\n';
+
     // ── Topology ── (generated from App.BOARD_GEOMETRY, never typed by hand)
     md += '\n' + App.boardTopologyText() + '\n';
     return md;

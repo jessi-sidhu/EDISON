@@ -32,7 +32,8 @@
 //  ───────
 //  Browser: window.App.runSimulation() / App.stopSimulation(), unchanged.
 //  Node:    module.exports = the pure solver (PROPS, UnionFind, bbNodeId,
-//           buildGraph, solveLinear, analyze) so a test runner can call it.
+//           buildGraph, solveLinear, analyze, simulationSummary) so a test
+//           runner can call it.
 //  Everything above the "Presentation" divider is pure: no document,
 //  no THREE, no AudioContext.
 // ─────────────────────────────────────────────────────────────
@@ -300,6 +301,22 @@
     return { minR, stock: stockResistor(minR) };
   }
 
+  // Nodes reachable from the first battery through parts. Wires and pressed
+  // buttons are already merged into one root; a released button is open.
+  // Anything else only reads a GMIN leak, so it is floating, not 0 V.
+  function liveNodes(graph, bats) {
+    const live = new Set(bats[0].nodes);
+    for (let grew = true; grew;) {
+      grew = false;
+      graph.forEach(({ comp, nodes }) => {
+        if (comp.type === 'button' && !comp.pressed) return;
+        if (!nodes.some(n => live.has(n))) return;
+        nodes.forEach(n => { if (!live.has(n)) { live.add(n); grew = true; } });
+      });
+    }
+    return live;
+  }
+
   // ── Pure: analyze ────────────────────────────────────────────
   //
   //  components + wires in, numbers and report lines out. Returns:
@@ -362,18 +379,7 @@
 
     const nodeVoltages = {};
     graph.forEach(g => g.nodes.forEach(n => { nodeVoltages[n] = sol.v(n); }));
-    // Nodes reachable from the first battery through parts. Wires and pressed
-    // buttons are already merged into one root; a released button is open.
-    // Anything else only reads a GMIN leak, so it is floating, not 0 V.
-    const live = new Set(bats[0].nodes);
-    for (let grew = true; grew;) {
-      grew = false;
-      graph.forEach(({ comp, nodes }) => {
-        if (comp.type === 'button' && !comp.pressed) return;
-        if (!nodes.some(n => live.has(n))) return;
-        nodes.forEach(n => { if (!live.has(n)) { live.add(n); grew = true; } });
-      });
-    }
+    const live = liveNodes(graph, bats);
     const voltageAt = hole => {
       const n = graph.nodeOf(hole);
       return live.has(n) ? nodeVoltages[n] : null;
@@ -444,6 +450,77 @@
     }
 
     return { status: 'ok', lines, ledsOn, buzzersOn, nodeVoltages, currents, shorted: false, voltageAt };
+  }
+
+  // ── Pure: simulationSummary ──────────────────────────────────
+  //
+  //  analyze() as markdown lines for the AI's "## Simulation" section: the
+  //  status, each part's state and current, each pin's voltage, then the
+  //  analysis messages. Volts to 2 decimals, currents to 0.1 mA, so the
+  //  prompt stays short. labelOf(components, comp) names a part ("R1").
+
+  // Hole address as App.formatHole writes it: "a11", "tp_2" (1-based column).
+  function holeName(ref) {
+    const rail = !TOP_BODY.has(ref.row) && !BOT_BODY.has(ref.row);
+    return ref.row + (rail ? '_' : '') + (ref.col + 1);
+  }
+
+  const volts = v => (Math.abs(v) < 0.005 ? 0 : v).toFixed(2) + ' V';
+  const milliamps = a => (Math.abs(a) < 0.00005 ? 0 : a * 1000).toFixed(1) + ' mA';
+  // analyze's messages, minus the per-part ones the summary already states.
+  const partMessage = l => l.cls === 'sim-on' || /^(Button|Battery) \d/.test(l.text);
+  const plain = t => t.replace(/[⚠💡🔔🟢⭕]/gu, '').replace(/\s+/g, ' ').trim();
+
+  function simulationSummary(components, wires, labelOf) {
+    const r = analyze(components, wires);
+    if (r.status === 'empty')      return ['The board is empty: no components placed.'];
+    if (r.status === 'no-battery') return ['No battery on the board.'];
+
+    const messages = r.lines.filter(l => !partMessage(l)).map(l => '- ' + plain(l.text));
+    if (r.status === 'unsolvable') {
+      return ['Status: unsolvable. The simulator cannot solve this circuit.'].concat(messages);
+    }
+
+    const bat0  = components.find(c => c.type === 'battery');
+    const out   = [`Status: ${r.shorted ? 'short circuit' : 'solved'}. Voltages are measured from ${labelOf(components, bat0)}.1 (the first battery's − terminal).`];
+    const solved = r.currents.length === components.length;   // a battery shorted by a wire solves nothing
+    if (solved) {
+      // Off-board pins have no hole for voltageAt, so read every pin by node.
+      const graph = buildGraph(components, wires);
+      const live  = liveNodes(graph, graph.filter(g => g.comp.type === 'battery'));
+      const pinVoltage = (i, k) => {
+        const n = graph[i].nodes[k];
+        return live.has(n) ? r.nodeVoltages[n] : null;
+      };
+      components.forEach((c, i) => {
+        const label = labelOf(components, c);
+        const p = propsOf(c), I = r.currents[i];
+        if (c.type === 'battery') {
+          out.push(`- ${label}: ${volts(p.voltage || 0)} battery, supplying ${milliamps(Math.abs(I || 0))}`);
+        } else if (c.type === 'resistor') {
+          out.push(`- ${label}: ${p.resistance} ohm resistor, ${milliamps(Math.abs(I))}`);
+        } else if (c.type === 'led') {
+          const state = r.ledsOn.includes(c) ? 'ON (lit)' : 'OFF (dark)';
+          out.push(`- ${label}: LED ${state}, ${milliamps(Math.max(0, -I))}`);
+        } else if (c.type === 'buzzer') {
+          const state = r.buzzersOn.includes(c) ? 'ON (sounding)' : 'OFF (silent)';
+          out.push(`- ${label}: buzzer ${state}, ${milliamps(Math.abs(I))}`);
+        } else if (c.type === 'button') {
+          out.push(`- ${label}: button ${c.pressed ? 'pressed (closed)' : 'released (open), 0.0 mA'}`);
+        } else {
+          out.push(`- ${label}: ${c.type}` + (typeof I === 'number' ? `, ${milliamps(Math.abs(I))}` : ''));
+        }
+        c.pins.forEach((_, k) => {
+          const v = pinVoltage(i, k);
+          const reading = v == null ? 'floating (not connected to the battery)' : volts(v);
+          const hole = c.holeRefs?.[k];
+          if (!hole) { out.push(`  - ${label}.${k} (off-board): ${reading}`); return; }
+          const role = c.type === 'led' ? (k === LED_ANODE_PIN ? ', anode' : ', cathode') : '';
+          out.push(`  - ${label} pin ${k} (${holeName(hole)}${role}): ${reading}`);
+        });
+      });
+    }
+    return out.concat(messages);
   }
 
   // ── Presentation ─────────────────────────────────────────────
@@ -667,7 +744,8 @@
     App.PROPS          = PROPS;
     App.runSimulation  = runSimulation;
     App.stopSimulation = stopSimulation;
+    App.simulationSummary = simulationSummary;
   }
 
-  return { PROPS, UnionFind, bbNodeId, buildGraph, solveLinear, analyze, install };
+  return { PROPS, UnionFind, bbNodeId, buildGraph, solveLinear, analyze, simulationSummary, install };
 });
