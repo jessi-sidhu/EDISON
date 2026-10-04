@@ -1,9 +1,9 @@
 // ─────────────────────────────────────────────────────────────
 //  breadboard.js — Realistic 3D breadboard
 //
-//  Rail polarity (+ − + − reading near-viewer → far-viewer):
+//  Rail polarity (board-geometry.js's RAIL_IS_POS), + outermost on both halves:
 //    tp = + (red)   tn = − (blue)
-//    bn = + (red)   bp = − (blue)
+//    bp = + (red)   bn = − (blue)
 // ─────────────────────────────────────────────────────────────
 
 (function (App) {
@@ -26,7 +26,7 @@
 - Same rule for every column: ${t0}-${t1} connected together, ${b0}-${b1} connected together.
 - To connect top half (${t0}-${t1}) to bottom half (${b0}-${b1}) of the SAME column, you MUST add a wire.
 - tp = positive top rail (+9V), tn = negative top rail (GND).
-- bn = positive bottom rail (+9V), bp = negative bottom rail (GND).
+- bp = positive bottom rail (+9V), bn = negative bottom rail (GND).
 - Rails are NOT connected to body rows — you must wire from rail to a body hole explicitly.
 - ${GEOMETRY.TOTAL_HOLES} holes total: ${COLS} columns × ${ALL_ROWS.length} rows.`;
   };
@@ -266,10 +266,7 @@
       m.position.set(0, 0.003, zPos);
       bbGroup.add(m);
     }
-    addRailStrip(ROW_Z.tp, true);    // + red
-    addRailStrip(ROW_Z.tn, false);   // − blue
-    addRailStrip(ROW_Z.bn, true);    // + red   ← CORRECTED
-    addRailStrip(ROW_Z.bp, false);   // − blue  ← CORRECTED
+    for (const rail of RAIL_ROWS) addRailStrip(ROW_Z[rail], RAIL_IS_POS[rail]);   // + red, − blue
 
     // ── 4. Centre DIP channel groove ─────────────────────────
     const chan = new THREE.Mesh(

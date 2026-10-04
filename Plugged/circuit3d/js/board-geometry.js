@@ -36,8 +36,9 @@
       bn:  2.95, bp:  3.35,                                    // bottom rails
     },
 
-    // + − + −  (near-to-far):  tp=+  tn=−  bn=+  bp=−
-    RAIL_IS_POS: { tp: true, tn: false, bn: true, bp: false },
+    // + (red) is the outer rail on both halves:  tp=+  tn=−  bn=−  bp=+
+    // (#61). The names are what the AI prompt and saved files use.
+    RAIL_IS_POS: { tp: true, tn: false, bn: false, bp: true },
 
     ALL_ROWS:  ['tp','tn','a','b','c','d','e','f','g','h','i','j','bn','bp'],
     BODY_ROWS: ['a','b','c','d','e','f','g','h','i','j'],

@@ -959,10 +959,13 @@
     state.unknownWires = [];   // unknown parts go with the rest of the board
   }
 
-  App.clearAll = function () {
+  // Clear All starts a new blank circuit, with a fresh ID and name.
+  // keepCircuit: empty the board but stay on the same circuit, as an AI
+  // build's delete_all does, so its autosave updates the same record.
+  App.clearAll = function ({ keepCircuit = false } = {}) {
     pushHistory();
     clearBoard();
-    // New blank circuit — get a fresh ID and name
+    if (keepCircuit) { refreshCounts(); return; }
     state.circuitId   = null;
     const newName = nextUntitledName();
     state.circuitName = newName;
@@ -1088,7 +1091,11 @@
   App.scheduleAutoSave = scheduleAutoSave;
 
   function _doAutoSave() {
-    if (!state.components.length && !state.wires.length) return; // nothing to save
+    const projects = lsProjects();
+    const idx = state.circuitId ? projects.findIndex(p => p.id === state.circuitId) : -1;
+    // An empty board is saved only over its own record (an undo or delete
+    // back to nothing); a new circuit isn't filed until it has something.
+    if (!state.components.length && !state.wires.length && idx < 0) return;
 
     if (!state.circuitId) {
       state.circuitId = newCircuitId();
@@ -1115,8 +1122,6 @@
       wires:      board.wires,
     };
 
-    const projects = lsProjects();
-    const idx = projects.findIndex(p => p.id === state.circuitId);
     if (idx >= 0) projects[idx] = entry; else projects.unshift(entry);
     lsSave(projects);
   }

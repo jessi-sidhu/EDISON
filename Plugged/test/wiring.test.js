@@ -44,6 +44,14 @@ test('the Clear All confirmation says it can be undone, because it can', () => {
   assert.match(src, /You can undo this with Ctrl\+Z/);
 });
 
+// Issue #60: an AI build's delete_all empties the board of the circuit being
+// worked on. Only the Clear All button starts a new circuit (id and name), so
+// accepting an AI build doesn't file a second saved record.
+test("the AI's delete_all clears the board but keeps the circuit's id and name", () => {
+  assert.match(read('circuit3d/js/chat.js'), /clearAll:\s*\(\) => App\.clearAll\(\{ keepCircuit: true \}\)/);
+  assert.match(read('circuit3d/js/app.js'), /App\.clearAll = function \(\{ keepCircuit = false \} = \{\}\)/);
+});
+
 // Issue #23: the viewer builds a saved resistor through the registry helper
 // App.buildPart (the resistor's view.build), not the old App.buildResistor.
 // Issue #25: a saved LED goes the same way, its colour in c.values; the old

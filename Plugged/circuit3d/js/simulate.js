@@ -10,8 +10,8 @@
 //    bb_bot_<col>  →  any hole in col <col>, rows f–j
 //    bb_rail_tp    →  all holes in the top + rail row    (positive)
 //    bb_rail_tn    →  all holes in the top − rail row    (negative)
-//    bb_rail_bn    →  all holes in the bottom + rail row (positive)
-//    bb_rail_bp    →  all holes in the bottom − rail row (negative)
+//    bb_rail_bn    →  all holes in the bottom − rail row (negative)
+//    bb_rail_bp    →  all holes in the bottom + rail row (positive)
 //
 //  Wires (drawn by the user) additionally merge nodes. Every part is a
 //  registry part (parts/*.js) and simulates from its elements().

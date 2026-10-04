@@ -41,7 +41,7 @@ test('BOARD_W is derived from COLS: (COLS - 1) * HS + 2 * MARGIN_X, 26.6 at 63 c
   assert.ok(Math.abs(G.BOARD_W - 26.6) < 1e-9, `expected BOARD_W 26.6, got ${G.BOARD_W}`);
 });
 
-test('the rows, their Z positions and the rail polarity move over unchanged', () => {
+test('the rows, their Z positions and the rail polarity (#61: bp is +) are as expected', () => {
   const G = load();
   assert.deepStrictEqual(G.ALL_ROWS,  ['tp', 'tn', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'bn', 'bp']);
   assert.deepStrictEqual(G.BODY_ROWS, ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']);
@@ -52,7 +52,41 @@ test('the rows, their Z positions and the rail polarity move over unchanged', ()
     f:  0.55, g:  0.95, h:  1.35, i:  1.75, j:  2.15,
     bn: 2.95, bp: 3.35,
   });
-  assert.deepStrictEqual(G.RAIL_IS_POS, { tp: true, tn: false, bn: true, bp: false });
+  assert.deepStrictEqual(G.RAIL_IS_POS, { tp: true, tn: false, bn: false, bp: true });
+});
+
+// Issue #61: the bottom rails were drawn backwards, red on bn. The names are
+// what the AI prompt and saved files use (bp_N = +, bn_N = GND), so the
+// colours follow the names: the bottom red rail is bp and the blue one is bn,
+// in the same order as the top (the + rail is the outer one, by the edge).
+test('the bottom rail drawn red is bp and the blue one is bn, in the top\'s order', () => {
+  const G = load();
+  const red  = side => G.RAIL_ROWS.filter(r => G.RAIL_IS_POS[r]  && Math.sign(G.ROW_Z[r]) === side);
+  const blue = side => G.RAIL_ROWS.filter(r => !G.RAIL_IS_POS[r] && Math.sign(G.ROW_Z[r]) === side);
+  assert.deepStrictEqual(red(-1),  ['tp'], 'top red rail');
+  assert.deepStrictEqual(blue(-1), ['tn'], 'top blue rail');
+  assert.deepStrictEqual(red(1),   ['bp'], 'bottom red rail');
+  assert.deepStrictEqual(blue(1),  ['bn'], 'bottom blue rail');
+  // Same order on both halves: the red (+) rail is the one nearer the board edge.
+  for (const [pos, neg] of [['tp', 'tn'], ['bp', 'bn']]) {
+    assert.ok(Math.abs(G.ROW_Z[pos]) > Math.abs(G.ROW_Z[neg]),
+      `${pos} (+, red) should be outside ${neg} (−, blue)`);
+  }
+});
+
+// The board description sent with every AI question (breadboard.js's
+// App.boardTopologyText) must agree with the colours and with the server's
+// second-battery recipe, which puts + on bp_N and GND on bn_N.
+test('the AI board description calls bp the + bottom rail and bn GND, like the server prompt', () => {
+  const G = load();
+  const src = fs.readFileSync(path.join(__dirname, '..', 'circuit3d', 'js', 'breadboard.js'), 'utf8');
+  const window = { App: { BOARD_GEOMETRY: G } };
+  new Function('window', src)(window);
+  const text = window.App.boardTopologyText();
+  assert.match(text, /bp = positive bottom rail \(\+9V\), bn = negative bottom rail \(GND\)/);
+  assert.doesNotMatch(text, /bn = positive/);
+  const server = fs.readFileSync(path.join(__dirname, '..', 'backend', 'server.js'), 'utf8');
+  assert.match(server, /bp_N \(\+\) and bn_N \(GND\)/, 'the server prompt should still put + on bp and GND on bn');
 });
 
 test('TOTAL_HOLES is COLS x rows: 882 at 63 columns', () => {

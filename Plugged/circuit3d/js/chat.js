@@ -252,7 +252,7 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     setValues:     (comp, v) => App.setValues(comp, v),
     setControls:   (comp, c) => App.setControls(comp, c),
     deletePart:    comp => App.deletePart(comp),
-    clearAll:      () => App.clearAll(),
+    clearAll:      () => App.clearAll({ keepCircuit: true }),   // same circuit, same saved record
     batch:         fn => App.history.batch(fn),
     holeMap:       () => App.holeMap(),
     note:          text => sparkyAddMsg(text, 'system'),
