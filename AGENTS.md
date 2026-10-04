@@ -26,7 +26,7 @@ If you are an agent: your job is the issue in front of you, nothing more. When t
 
 ## Branches: dev is the workspace, main is tested
 - **`dev`** is the workspace.
-  - Work on a local branch off `dev` (`/start-task` makes one).
+  - Work on a local branch off `dev`, in its own worktree at `.worktrees/<n>` (`/start-task` makes both). The main checkout stays on `dev`.
   - `/ship` runs the checks, rebases onto the latest `dev`, and pushes straight to `dev`. No PR, and no waiting on a person.
   - CI runs on every push to `dev`. If it goes red, whoever broke it fixes it first.
 - **`main`** is tested and demo-ready.
@@ -57,7 +57,7 @@ The app is `Plugged/`. Its commands, code rules and gotchas are in `Plugged/AGEN
 
 ## Task loop (every task)
 1. Start from an issue: `/start-task <number>`. No issue means no work, so write one with `/new-task`.
-2. One issue, one local branch off `dev`, one small change. Keep it under about 300 changed lines, and split the issue if it's bigger. `/start-task` runs the issue through the specialist agents (see CLAUDE.md).
+2. One issue, one local branch off `dev` in its own worktree at `.worktrees/<n>` (the main checkout stays on `dev`), one small change. Keep it under about 300 changed lines, and split the issue if it's bigger. `/start-task` runs the issue through the specialist agents (see CLAUDE.md).
 3. Verify: run the check/test commands. For anything visible, open it in the browser.
 4. Finish with `/ship`. It runs the checks, rebases onto `dev`, pushes to `dev`, and closes the issue.
 

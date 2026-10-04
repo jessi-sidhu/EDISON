@@ -96,7 +96,21 @@ const recipeBlock = def => [`RECIPE FOR THE ${def.name.toUpperCase()} (${toolNam
 const recipeLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(def => def && def.ai.recipe)
   .flatMap(def => ['', ...recipeBlock(def)]);
 
-// The prompt for a request that sends `tools`: only their guides go in.
+// The parts in play: those whose place_ tool is in `tools`, in registry order.
+const inPlay = (tools, defs = PARTS) => {
+  const names = new Set(tools.map(t => t.name));
+  return defs.filter(def => names.has(toolName(def)));
+};
+// A hand-written pack goes when every part its steps place is in play (the
+// LED pack with the LED and resistor, the button pack with the button too),
+// so it never shows a recipe the model has no tools for.
+const packFits = (pack, tools) => {
+  const names = new Set(tools.map(t => t.name));
+  return pack.join('\n').match(/[a-z][a-z0-9_]*/g).filter(w => PART_BY_TOOL.has(w)).every(w => names.has(w));
+};
+
+// The prompt for a request that sends `tools`: the core, plus the pin roles,
+// values, sizing, guides, controls and recipes of the parts in play only.
 const buildPrompt = tools => [
   `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
   '',
@@ -130,16 +144,16 @@ const buildPrompt = tools => [
   '- A second battery (two separate circuits) goes on the bottom rails, bp_N (+) and bn_N (−), nearest row j: BAT2.0 -> bp_{N} (red) and BAT2.1 -> bn_{N} (black). Its parts go in rows f–j, with its rail wires in row j. Never wire a second battery to the tp/tn rails.',
   '',
   'COMPONENT RULES:',
-  ...GENERATED.pinRoles,
+  ...GENERATED.pinRoles(tools),
   ...guideLines(tools),
   ...controlLines(tools),
   '- When the user names a value, pass it: "a 1 kΩ resistor" → place_resistor with resistance: 1000 (ohms), "a green LED" → place_led with color: "green", "a 5 V battery" → place_battery with voltage: 5. Leave it out otherwise.',
   '',
   'PART VALUES (a plain number in the unit shown, or one of the names):',
-  ...GENERATED.values,
+  ...GENERATED.values(tools),
   '',
   'SIZING (columns apart, same row):',
-  ...GENERATED.sizing,
+  ...GENERATED.sizing(tools),
   '- No column overlap between components on the same row.',
   '',
   'HOLE NAMES:',
@@ -178,6 +192,16 @@ const buildPrompt = tools => [
   '  8. add_wire: a{C+6} -> tn_{C+6} (black)         ← LED cathode\'s column, row a, to rail (REQUIRED!)',
   'Steps 7 and 8 are REQUIRED for EVERY LED group. Without them the LED will not light up.',
   'At C=2: resistor b2-b6, LED cathode c8 and anode c6, wires tp_3 -> a2 and a8 -> tn_8. No hole is used twice, and no wire passes under a part.',
+  ...(packFits(LED_PACK, tools) ? LED_PACK : []),
+  ...(packFits(BUTTON_PACK, tools) ? BUTTON_PACK : []),
+  ...recipeLines(tools),
+  '',
+  'Reply style: 2-5 sentences max. Be specific with hole names. Be encouraging.',
+  'For pure questions (no building), just respond with helpful text. Do not call any tools.',
+].join('\n');
+
+// The LED pack: series vs parallel, and the multi-LED recipes.
+const LED_PACK = [
   '',
   'SERIES vs PARALLEL:',
   '- Parallel: the parts share BOTH nodes. Every LED\'s anode sits in the same column as the other anodes, and every cathode in the same column as the other cathodes, each in a free row. One resistor can feed them all.',
@@ -207,6 +231,10 @@ const buildPrompt = tools => [
   '  Each group is steps 5-8 of the one-LED recipe at its own C.',
   '  Total calls: 1 delete_all + 1 place_battery + 2 battery wires + 3*(place_resistor + place_led + 2 rail wires) = 16 calls.',
   '  Every LED group needs its own pair of rail-to-body wires: tp_{C+1}->a{C} and a{C+6}->tn_{C+6}.',
+];
+
+// The button pack: one button switching LED branches.
+const BUTTON_PACK = [
   '',
   'RECIPE FOR ONE BUTTON SWITCHING SEPARATE BRANCHES (e.g. "a red and a green LED, each with its own resistor, both switched by one button", at C=2):',
   '  1. delete_all',
@@ -224,11 +252,7 @@ const buildPrompt = tools => [
   '  13. place_led: holeA=c22 (cathode), holeB=c20 (anode)',
   '  14. add_wire: a22 -> tn_22 (black)',
   '  More branches: repeat steps 11-14 at the next C (+8 columns), feeding each from another free hole (d5, e5) in column 5.',
-  ...recipeLines(tools),
-  '',
-  'Reply style: 2-5 sentences max. Be specific with hole names. Be encouraging.',
-  'For pure questions (no building), just respond with helpful text. Do not call any tools.',
-].join('\n');
+];
 
 // ── Tools, generated from the parts registry ─────────────────
 // One place_<type> tool per part (its ai.tool when it sets one), plus the
@@ -328,50 +352,59 @@ const USE_PARTS = {
 };
 
 // The edit tools change a part already on the board, found by its label.
-// Their params are every part's AI values (typed as in its place_ tool) or
-// every part's controls; only `part` is required.
+// Their params are the AI values (typed as in its place_ tool) or the controls
+// of the parts given: every part for Gemini and claude, the parts in play for
+// a DeepSeek request. Only `part` is required.
 const PART_PARAM = { type: 'STRING', description: 'The part\'s label from the Components table, e.g. "R1"' };
 function editTool(name, description, params) {
   return { name, description, parameters: { type: 'OBJECT', properties: { part: PART_PARAM, ...params }, required: ['part'] } };
 }
 // A key several parts share, with different choices or ranges, lists each
 // part's: "New model. diode: 1N4148, 1N4001; zener diode: 3.3V, 5.1V, 12V."
-const owners = key => PARTS.filter(d => d.values && aiValues(d).includes(key));
+const owners = (key, defs) => defs.filter(d => d.values && aiValues(d).includes(key));
 const plainText = p => p.description.replace(/^Optional\. /, '').replace(/ Only when the user names one\.$/, '');
 const choicesOrRange = spec => (spec.choices ? Object.keys(spec.choices).join(', ') : rangeOf(spec));
-function valueDescription(key) {
-  const defs = owners(key);
+function valueDescription(key, parts) {
+  const defs = owners(key, parts);
   const texts = defs.map(d => plainText(valueParam(key, d.values[key])));
   if (texts.every(t => t === texts[0])) return `New ${key} (${defs.map(partName).join(', ')}). ${texts[0]}`;
   const units = [...new Set(defs.map(d => d.values[key].choices ? null : d.values[key].unit))];
   const unit  = units.length === 1 && units[0] ? ` in ${UNIT_WORDS[units[0]] || units[0]}` : '';
   return `New ${key}${unit}. ${defs.map(d => `${partName(d)}: ${choicesOrRange(d.values[key])}`).join('; ')}.`;
 }
-const valueParams = {};
-for (const def of PARTS) {
-  for (const key of aiValues(def)) {
-    const p = valueParam(key, def.values[key]);
-    const had = valueParams[key];
-    if (had && had.enum && p.enum) had.enum = [...new Set([...had.enum, ...p.enum])];
-    if (had) continue;
-    valueParams[key] = { ...p, description: valueDescription(key) };
+function valueParamsOf(defs) {
+  const params = {};
+  for (const def of defs) {
+    for (const key of aiValues(def)) {
+      const p = valueParam(key, def.values[key]);
+      const had = params[key];
+      if (had && had.enum && p.enum) had.enum = [...new Set([...had.enum, ...p.enum])];
+      if (had) continue;
+      params[key] = { ...p, description: valueDescription(key, defs) };
+    }
   }
+  return params;
 }
-const controlParams = {};
-for (const def of PARTS) {
-  for (const [key, c] of Object.entries(def.controls || {})) {
-    if (controlParams[key]) continue;
-    controlParams[key] = c.type === 'slider'
-      ? { type: 'NUMBER', description: `${key}, ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}` }
-      : { type: 'BOOLEAN', description: `${key}: true or false` };
+function controlParamsOf(defs) {
+  const params = {};
+  for (const def of defs) {
+    for (const [key, c] of Object.entries(def.controls || {})) {
+      if (params[key]) continue;
+      params[key] = c.type === 'slider'
+        ? { type: 'NUMBER', description: `${key}, ${c.min}–${c.max}${c.unit ? ' ' + c.unit : ''}` }
+        : { type: 'BOOLEAN', description: `${key}: true or false` };
+    }
   }
+  return params;
 }
-const SET_VALUE = editTool('set_value',
+const setValueTool = defs => editTool('set_value',
   'Change a value of one part already on the board, e.g. "make the resistor 1k" → part: "R1", resistance: 1000. Pass only the values that change; the part keeps its holes and wires.',
-  valueParams);
-const SET_CONTROL = editTool('set_control',
+  valueParamsOf(defs));
+const setControlTool = defs => editTool('set_control',
   'Set a control of one part already on the board, e.g. press a button: part: "SW1", pressed: true.',
-  controlParams);
+  controlParamsOf(defs));
+const SET_VALUE   = setValueTool(PARTS);
+const SET_CONTROL = setControlTool(PARTS);
 const DELETE_PART = editTool('delete_part',
   'Remove one part from the board by its label, with the wires on its pins. The rest of the circuit stays.',
   {});
@@ -403,23 +436,26 @@ const namedIn = (def, text) => def.ai.keywords.some(k => new RegExp(`(^|[^a-z0-9
 
 // The tools one request sends, in order: the always-sent tools, the tools of
 // the parts on the board, keyword matches, and the everyday set when nothing
-// else matched. Each tool brings the tools its guide names. At most 12.
+// else matched. Each tool brings the tools its guide names. At most 12 part
+// tools; the always-sent tools don't count. set_value and set_control carry
+// the values and controls of the parts in play only.
 function selectTools(message, boardTypes) {
+  const always = ALWAYS_SENT.map(n => TOOL_BY_NAME.get(n));
   const out = [];
   const add = decl => {
-    if (!decl || out.includes(decl)) return;
+    if (!decl || out.includes(decl) || always.includes(decl)) return;
     out.push(decl);
     relatedTools(decl).forEach(add);
   };
   const partDecl = def => def && TOOL_BY_NAME.get(toolName(def));
 
-  ALWAYS_SENT.forEach(n => add(TOOL_BY_NAME.get(n)));
-  const before = out.length;
   for (const t of boardTypes || []) add(partDecl(Parts.get(String(t))));
   const text = String(message || '').toLowerCase();
   for (const def of PARTS) if (namedIn(def, text)) add(partDecl(def));
-  if (out.length === before) EVERYDAY.forEach(def => add(partDecl(def)));
-  return out.slice(0, MAX_TOOLS);
+  if (out.length === 0) EVERYDAY.forEach(def => add(partDecl(def)));
+  const tools = always.concat(out.slice(0, MAX_TOOLS));
+  const defs  = inPlay(tools);
+  return tools.map(d => (d === SET_VALUE ? setValueTool(defs) : d === SET_CONTROL ? setControlTool(defs) : d));
 }
 
 // The part types in the board markdown's Components table ("| BZ1 | buzzer | ...").
@@ -456,6 +492,8 @@ function partTools(types, sentNames) {
   const said = [added.length ? `Added ${added.map(d => d.name).join(', ')}. You can call them now.` : 'You already have those tools.'];
   for (const d of added) {
     const def = PART_BY_TOOL.get(d.name);
+    const pack = def ? [...pinRoleLines(def), ...valueLines(def), ...sizingLines(def)] : [];
+    if (pack.length) said.push(`\n${pack.join('\n')}\n`);
     if (def && def.ai.guide) said.push(`${d.name}: ${def.ai.guide}`);
     if (def && def.ai.recipe) said.push(`\n${recipeBlock(def).join('\n')}\n`);
   }
@@ -473,22 +511,30 @@ function directional(def) {
   return elementsOf(def).some(el => !['R', 'SW'].includes(el.kind));
 }
 
+// One part's pack lines: its pin roles, its PART VALUES lines, its SIZING line.
+const onBoardSpan = d => d.place.kind === 'span';
+const pinRoleLines = d => (onBoardSpan(d) && directional(d) ? [`- ${toolName(d)}: holeA = ${d.pins[0]}, holeB = ${d.pins[1]}`] : []);
+const sizingLines  = d => {
+  if (!onBoardSpan(d)) return [];
+  const s = d.place.span;
+  return [`- ${toolName(d)}: ${spanText(s)} columns apart on one row${s.min === s.max ? '' : ` (${s.default} is typical)`}`];
+};
+const valueLines   = d => aiValues(d).map(key => {
+  const spec = d.values[key];
+  return spec.choices
+    ? `- ${toolName(d)} ${key}: ${Object.keys(spec.choices).join(', ')} (default ${spec.default})`
+    : `- ${toolName(d)} ${key}: ${rangeOf(spec)}, in ${UNIT_WORDS[spec.unit] || spec.unit} (default ${Parts.withUnit(spec.default, spec.unit)})`;
+});
+
+// The catalogue, labels and wiredBy lines name every part. The pin roles,
+// values and sizing are the packs of the parts in play (the tools sent).
 const GENERATED = {
   labels:     `- Every part has a label that never changes: its prefix and a number, e.g. R1, R2. Prefixes: ${PARTS.map(d => `${d.prefix} = ${partName(d)}`).join(', ')}.`,
   wiredBy:    `- Parts on the board (${onBoard.map(d => d.prefix).join(', ')}) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.`,
   catalogue:  `- Every part (type: name): ${PARTS.map(d => `${d.type}: ${d.name}`).join(', ')}.`,
-  pinRoles:   onBoard.filter(d => d.place.kind === 'span' && directional(d))
-                .map(d => `- ${toolName(d)}: holeA = ${d.pins[0]}, holeB = ${d.pins[1]}`),
-  sizing:     onBoard.filter(d => d.place.kind === 'span').map(d => {
-                const s = d.place.span;
-                return `- ${toolName(d)}: ${spanText(s)} columns apart on one row${s.min === s.max ? '' : ` (${s.default} is typical)`}`;
-              }),
-  values:     PARTS.flatMap(d => aiValues(d).map(key => {
-                const spec = d.values[key];
-                return spec.choices
-                  ? `- ${toolName(d)} ${key}: ${Object.keys(spec.choices).join(', ')} (default ${spec.default})`
-                  : `- ${toolName(d)} ${key}: ${rangeOf(spec)}, in ${UNIT_WORDS[spec.unit] || spec.unit} (default ${Parts.withUnit(spec.default, spec.unit)})`;
-              })),
+  pinRoles:   tools => inPlay(tools).flatMap(pinRoleLines),
+  sizing:     tools => inPlay(tools).flatMap(sizingLines),
+  values:     tools => inPlay(tools).flatMap(valueLines),
 };
 
 // ── Placement: Parts.checkPlacement on the actions so far ────

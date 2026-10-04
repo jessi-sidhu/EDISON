@@ -16,8 +16,14 @@ The issue is an approved design, so don't brainstorm or write a spec. You are th
 3. **Claim it.** `gh issue edit <n> --add-assignee @me`.
 4. **Branch.**
    - Don't commit or stash anyone else's work.
-   - Run `git switch dev && git pull`, then `git switch -c <first name>/<n>-<short-slug>`. Take the first name from `git config user.name`, in lowercase.
-   - Branches always come off `dev`, and stay local: `/ship` pushes the finished work straight to `dev`.
+   - Never switch branches in the main checkout. It stays on `dev`, and parallel sessions share it.
+   - Find the main checkout's root, which works from any subfolder or worktree: `root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")`.
+   - Run `git -C "$root" fetch origin dev && git -C "$root" worktree add "$root/.worktrees/<n>" -b <first name>/<n>-<short-slug> origin/dev`. Take the first name from `git config user.name`, in lowercase. Always use these absolute paths: a relative `.worktrees/<n>` lands in `Plugged/.worktrees/` when the cwd is `Plugged/`.
+   - Move this session into it: the EnterWorktree tool with `path: "$root/.worktrees/<n>"`, otherwise `cd` to that absolute path. Never call EnterWorktree with `name` or no arguments: that makes its own worktree under `.claude/worktrees/` off `origin/main`, the wrong tree and base.
+   - Then `cd Plugged && npm ci`.
+   - Pass the worktree's absolute path to every specialist agent, and tell each to work only there.
+   - Browser tests in a worktree use `E2E_PORT=$((5100 + <n> % 800))`, so parallel worktrees don't collide on 5090.
+   - Branches always come off `dev`, and stay local: `/ship` pushes the finished work straight to `dev`, then removes the worktree.
 
 ## 2. Size it (say which path and why, in one line)
 **Full path: scout → test-writer → builder → reviewer.** Use it if **any** of these is true:

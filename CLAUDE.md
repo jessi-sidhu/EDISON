@@ -21,4 +21,4 @@
   - Claude can't finish while `Plugged/` unit tests fail.
 - Verify UI changes in a real browser (Claude in Chrome, or the Playwright MCP) before saying they work. Check the console for errors.
 - Look up library APIs with context7 instead of relying on memory.
-- Running several agents in parallel on one machine: give each its own git worktree, **inside the repo** at `.worktrees/<issue#>` (e.g. `git worktree add .worktrees/14 -b aarmen/14-slug origin/dev`). `.worktrees/` is git-ignored. Never create worktrees, copies or scratch files next to the repo or on the Desktop; temporary files go in your scratchpad or `/tmp`.
+- Every task gets its own git worktree, **inside the repo** at `.worktrees/<issue#>`; `/start-task` makes it (e.g. `git worktree add .worktrees/14 -b aarmen/14-slug origin/dev`). The main checkout stays on `dev`, and nobody edits in it. `.worktrees/` is git-ignored. Never create worktrees, copies or scratch files next to the repo or on the Desktop; temporary files go in your scratchpad or `/tmp`.

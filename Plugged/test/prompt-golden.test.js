@@ -34,10 +34,18 @@ const CASES = {
   bench: { file: 'bench-supply.txt', request: 'Power an LED from the bench supply at 5 V with a series resistor.' },
 };
 
-// The demo request's system prompt + JSON tools, in characters. Today's size
-// is 14,934 (10,066 prompt + 4,868 tools; × 1.15 = 17,174.1, rounded up).
-// Raise it only on purpose.
-const DEMO_BUDGET = 17175;
+// Size budgets, in characters of system prompt + JSON tools as sent (#76).
+// Part packs (issue #76) send only the rule lines of the parts in play, so
+// each budget is that request's size after packs, × 1.1, rounded up. Raise
+// them only on purpose.
+// Measured 2026-09-30 after #76: demo 13,253 and heavy 19,724 characters
+// (the demo was 16,900 before #76, with a budget of 17,175).
+const DEMO_BUDGET  = 14579;   // the demo request
+const HEAVY_BUDGET = 21697;   // HEAVY_REQUEST, below
+
+// A heavy mixed request: LEDs, a button, a motor and a diode, so the LED and
+// button packs and two more parts' packs all go.
+const HEAVY_REQUEST = 'Build two LEDs in parallel, a button, a motor and a diode.';
 
 const CHANGED = 'The AI prompt changed. If this is intended, run UPDATE_GOLDEN=1 npm test, '
   + 'review the diff in the commit, and run the real-AI demo check (3 runs) before /ship.';
@@ -90,6 +98,7 @@ beforeAll(async () => {
     vi.spyOn(console, 'info').mockImplementation(() => {})];
   try {
     for (const [key, c] of Object.entries(CASES)) sent[key] = await capture(c.request);
+    sent.heavy = await capture(HEAVY_REQUEST);
   } finally {
     for (const s of quiet) s.mockRestore();
   }
@@ -177,14 +186,29 @@ test('the bench supply request sends exactly the golden prompt and tools (bench-
   checkGolden('bench');
 });
 
+const sizeOf = body => systemOf(body).length + JSON.stringify(toolsOf(body)).length;
+
+// The budget must be set (a number), and the request must fit it.
+function checkBudget(name, budget, constName, size) {
+  assert.ok(typeof budget === 'number',
+    `${constName} is not set. The ${name} request is now ${size} characters; after the #76 packs land, `
+    + `set ${constName} = ${Math.ceil(size * 1.1)} (its size × 1.1, rounded up).`);
+  assert.ok(size <= budget,
+    `The ${name} request's system prompt + tools is ${size} characters, over the budget of ${budget}. `
+    + 'Growth here makes every request slower and costlier and gives the model more to get wrong. Trim it, '
+    + `or raise ${constName} on purpose (agreed on the issue) and run the real-AI demo check (3 runs) before /ship.`);
+}
+
 test('the demo request stays inside its size budget (system prompt + tools)', () => {
-  const body = sent.demo;
-  const size = systemOf(body).length + JSON.stringify(toolsOf(body)).length;
-  assert.ok(size <= DEMO_BUDGET,
-    `The demo request's system prompt + tools is ${size} characters, over the budget of ${DEMO_BUDGET}. `
-    + 'Every part of the prompt and every tool is sent with every request, so growth here makes every '
-    + 'request slower and costlier and gives the model more to get wrong. Trim it, or raise DEMO_BUDGET '
-    + 'on purpose (agreed on the issue) and run the real-AI demo check (3 runs) before /ship.');
+  checkBudget('demo', DEMO_BUDGET, 'DEMO_BUDGET', sizeOf(sent.demo));
+});
+
+test('the heavy mixed request (LEDs, a button, a motor and a diode) stays inside its own size budget', () => {
+  const names = toolNames(sent.heavy);
+  for (const n of ['place_led', 'place_button', 'place_motor', 'place_diode']) {
+    assert.ok(names.includes(n), `the heavy request sends ${n}: ${JSON.stringify(names)}`);
+  }
+  checkBudget('heavy', HEAVY_BUDGET, 'HEAVY_BUDGET', sizeOf(sent.heavy));
 });
 
 test('the demo sends place_led and place_resistor but not place_bench_supply; the bench request sends place_bench_supply', () => {

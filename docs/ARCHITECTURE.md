@@ -22,3 +22,4 @@
 
 ## Key decisions
 <!-- Decision, alternatives, why. Append as you go so nobody re-argues settled choices. -->
+- **2026-09-30: the capacitor and time-stepping join Phase 3** (Aarmen). The alternatives were a separate spec after Phase 3, or a steady-state-only capacitor, which is just an open circuit and never visibly charges. The model is backward Euler (a companion `G = C/h` plus a current source), stepped by the page while simulating. A board with no capacitor keeps today's code path exactly. It lands after Phase 3's #1–#5 are promoted, so the Oct 3 set isn't at risk. Details: `docs/superpowers/specs/2026-09-30-phase-3-see-the-circuit-design.md`, "Time and the capacitor". Thandi checks the physics.

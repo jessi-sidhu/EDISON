@@ -7,11 +7,13 @@
 // - It returns a list of tool declarations in Gemini's function_declarations
 //   shape ({ name, description, parameters? }), the same objects
 //   CIRCUIT_TOOLS holds. These tests read each tool's `name`.
-// - Order: the always-sent tools (delete_all, add_wire, place_battery,
-//   use_parts), then the tools for parts on the board, then keyword matches,
-//   then the everyday set (resistor, LED, button, buzzer) if nothing matched.
+// - Order: the 7 always-sent tools (delete_all, add_wire, place_battery,
+//   use_parts, set_value, set_control, delete_part), then the tools for parts
+//   on the board, then keyword matches, then the everyday set (resistor, LED,
+//   button, buzzer) if nothing matched.
 // - Keywords match whole words, case-insensitive, with a simple plural "s".
-// - At most 12 tools, never a name twice.
+// - At most 12 part tools, plus the 7 always-sent tools, which don't count
+//   toward the 12 (issue #76). Never a name twice.
 
 const assert = require('node:assert');
 process.env.AI_PROVIDER = 'fixture';   // no key needed, never calls out
@@ -20,6 +22,10 @@ const { withGizmos } = require('./fixtures/gizmos.js');
 
 const ALWAYS   = ['delete_all', 'add_wire', 'place_battery', 'use_parts'];
 const EVERYDAY = ['place_resistor', 'place_led', 'place_button', 'place_buzzer'];
+// All 7 tools sent with every request (#27 D2 added the edit tools).
+const ALWAYS_SENT = [...ALWAYS, 'set_value', 'set_control', 'delete_part'];
+// The part tools in a selection: everything but the always-sent tools.
+const partTools = got => got.filter(n => !ALWAYS_SENT.includes(n));
 
 function select(S, message, boardTypes = []) {
   assert.equal(typeof S.selectTools, 'function', 'server.js must export selectTools(message, boardTypes)');
@@ -98,24 +104,49 @@ test('never more than 12 tools with the five real parts', () => {
   assert.ok(got.length <= 12, `${got.length} tools: ${JSON.stringify(got)}`);
 });
 
+// ── MAX_TOOLS counts part tools only (issue #76) ───────────────────────────
+// A request naming 10 real parts used to get 5 part tools (the 7 always-sent
+// tools took the rest of the 12) and silently lost the others.
+
+const TEN_PARTS = 'a potentiometer, a resistor, a current source, a diode, an LED, a zener, a buzzer, a motor, a bulb and a thermistor';
+const TEN_TOOLS = ['place_potentiometer', 'place_resistor', 'place_current_source', 'place_diode', 'place_led',
+                   'place_zener', 'place_buzzer', 'place_motor', 'place_bulb', 'place_thermistor'];
+
+test('a message naming 10 parts gets all 10 of their tools (more than 5 part tools), at most 12, plus every always-sent tool', () => {
+  const got = names(TEN_PARTS);
+  assert.deepEqual(ALWAYS_SENT.filter(n => !got.includes(n)), [], `always-sent tools missing: ${JSON.stringify(got)}`);
+  assert.deepEqual(TEN_TOOLS.filter(n => !got.includes(n)), [], `named parts dropped: ${JSON.stringify(got)}`);
+  assert.ok(partTools(got).length > 5, `${partTools(got).length} part tools: ${JSON.stringify(got)}`);
+  assert.ok(partTools(got).length <= 12, `${partTools(got).length} part tools: ${JSON.stringify(got)}`);
+  assert.deepEqual(got.filter((n, i) => got.indexOf(n) !== i), [], 'no duplicates');
+});
+
+test('the mixed request (LEDs, a button, a motor and a diode) gets place_button too', () => {
+  const got = names('Build two LEDs in parallel, a button, a motor and a diode.');
+  const want = ['place_led', 'place_resistor', 'place_button', 'place_motor', 'place_diode'];
+  assert.deepEqual(want.filter(n => !got.includes(n)), [], `missing from ${JSON.stringify(got)}`);
+});
+
 // ── With 10 more parts registered (last: changes the registry) ─────────────
 
 describe('with 10 extra parts in the registry', () => {
   let S, gizmos;
   beforeAll(() => { ({ Server: S, gizmos } = withGizmos(10)); });
 
-  test('a keyword that matches 10 parts still sends at most 12 tools, always-sent included', () => {
+  // #76: the always-sent tools no longer count toward the 12.
+  test('a keyword that matches 10 parts sends all 10 gizmo tools: at most 12 part tools, plus every always-sent tool', () => {
     const got = select(S, 'add a gizmo', []);
-    assert.ok(got.length <= 12, `${got.length} tools: ${JSON.stringify(got)}`);
-    assert.deepEqual(ALWAYS.filter(n => !got.includes(n)), [], JSON.stringify(got));
-    assert.ok(got.some(n => /^place_gizmo_/.test(n)), `some gizmo tool is sent: ${JSON.stringify(got)}`);
+    assert.ok(partTools(got).length <= 12, `${partTools(got).length} part tools: ${JSON.stringify(got)}`);
+    assert.deepEqual(ALWAYS_SENT.filter(n => !got.includes(n)), [], JSON.stringify(got));
+    const missing = gizmos.map(g => 'place_' + g.type).filter(n => !got.includes(n));
+    assert.deepEqual(missing, [], `every matched gizmo fits in the 12 part slots: ${JSON.stringify(got)}`);
   });
 
-  test('every part on the board plus keyword matches is still capped at 12, always-sent included', () => {
+  test('14 parts on the board plus keyword matches fill exactly 12 part slots, plus every always-sent tool', () => {
     const board = ['resistor', 'led', 'buzzer', 'button', ...gizmos.map(g => g.type)];
     const got = select(S, 'gizmo resistor led buzzer button', board);
-    assert.ok(got.length <= 12, `${got.length} tools: ${JSON.stringify(got)}`);
-    assert.deepEqual(ALWAYS.filter(n => !got.includes(n)), [], JSON.stringify(got));
+    assert.equal(partTools(got).length, 12, `12 part tools when 14 are asked for: ${JSON.stringify(got)}`);
+    assert.deepEqual(ALWAYS_SENT.filter(n => !got.includes(n)), [], JSON.stringify(got));
     assert.deepEqual(got.filter((n, i) => got.indexOf(n) !== i), [], 'no duplicates');
   });
 });

@@ -671,11 +671,14 @@ for (const message of [
   'use a selector to choose which LED lights',
   'wire a two-way switch to two LEDs',
 ]) {
-  test(`selectTools("${message}") sends place_slide_switch (at most 12 tools)`, () => {
+  test(`selectTools("${message}") sends place_slide_switch (at most 12 part tools)`, () => {
     slide();
     const got = toolNames(message);
     assert.ok(got.includes('place_slide_switch'), `place_slide_switch missing from ${JSON.stringify(got)}`);
-    assert.ok(got.length <= 12, `${got.length} tools`);
+    // #76: the 7 always-sent tools don't count toward the 12.
+    const ALWAYS_SENT = ['delete_all', 'add_wire', 'place_battery', 'use_parts', 'set_value', 'set_control', 'delete_part'];
+    const parts = got.filter(n => !ALWAYS_SENT.includes(n));
+    assert.ok(parts.length <= 12, `${parts.length} part tools: ${JSON.stringify(got)}`);
   });
 }
 

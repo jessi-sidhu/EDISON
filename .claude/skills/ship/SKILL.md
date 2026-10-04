@@ -8,7 +8,7 @@ description: Finish the current task - run checks, review, commit, rebase onto t
 `dev` is the shared workspace: shipping means pushing to it once the checks pass. No PR, no waiting on anyone. Only `/promote` touches `main`.
 
 1. **Branch check.**
-   - On a local task branch (`<first name>/<issue#>-<slug>`): take the issue number from its name.
+   - On a local task branch (`<first name>/<issue#>-<slug>`): take the issue number from its name. It normally lives in its own worktree at `.worktrees/<n>`, made by `/start-task`, and this session is working there.
    - On `dev` itself: fine, but ask which issue this closes, if any.
    - On `main`: stop. Move the work onto `dev` first.
 2. **Check.** This is the gate. From `Plugged/`:
@@ -30,7 +30,11 @@ description: Finish the current task - run checks, review, commit, rebase onto t
    - Then push: `git push origin HEAD:dev`. Never force-push.
    - If the push is rejected because `dev` moved, fetch, rebase and check again, then retry once.
 7. **Tidy up.**
-   - On a task branch in the main checkout: run `git switch dev && git pull && git branch -d <task branch>`.
-   - On a task branch in a worktree (`.worktrees/<n>`): from the main checkout, run `git worktree remove .worktrees/<n>`, then `git branch -d <task branch>`. Never leave a finished worktree behind.
+   - On a task branch in a worktree (`.worktrees/<n>`, the normal case):
+     - Find the main root first: `root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")`.
+     - Leave the worktree: the ExitWorktree tool if the session entered it with EnterWorktree, otherwise `cd "$root"`.
+     - Run `git -C "$root" worktree remove .worktrees/<n>`, then `git -C "$root" branch -d <task branch>`. Never leave a finished worktree behind.
+     - Never switch branches in the main checkout. It stays on `dev`.
+   - Worked directly on `dev` in the main checkout (the fallback): run `git pull`. There's no branch or worktree to remove.
    - If the commit message didn't close the issue, run `gh issue close <n> --comment "Shipped to dev in <sha>"`.
 8. **Report.** Give the commit on `dev`, and remind the user that CI runs on it now (`gh run list --branch dev --limit 1`). It reaches `main` at the next `/promote`.

@@ -7,6 +7,13 @@ git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 branch=$(git branch --show-current)
 echo "Git: on branch '${branch:-detached}'."
 
+# A linked worktree has its own git dir, apart from the shared common dir.
+if [ "$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" != "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ]; then
+  echo "Worktree: $(git rev-parse --show-toplevel)."
+elif [ -n "$branch" ] && [ "$branch" != "dev" ]; then
+  echo "The main checkout should stay on dev: parallel sessions share it. Start work with /start-task, which makes a worktree in .worktrees/<n>."
+fi
+
 if git remote get-url origin >/dev/null 2>&1; then
   GIT_TERMINAL_PROMPT=0 git fetch --quiet origin dev 2>/dev/null
   if git rev-parse --verify --quiet origin/dev >/dev/null; then
