@@ -131,6 +131,7 @@ A board with no `E` solves exactly as before.
 1. Solve.
 2. Find the mode block most inconsistent with the result, and flip it.
 3. Repeat, up to `4·n + 10` rounds, with anti-cycling.
+4. Once every block is consistent, a block's optional `unstable(sol, modes)` may still name a mode, and the loop flips it and goes on (#18). An `E` resting `linear` under positive feedback (loop gain above 1: a Schmitt trigger, a relaxation oscillator) names a rail: the one in its `state` from the last time step, else the one nearer its output. Amplifiers, followers and comparators stay `linear`.
 
 If it doesn't settle, the status is `'unsettled'`. It never reports wrong numbers.
 
@@ -352,7 +353,7 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
   - `t` is the time in seconds at the **end** of the step (the clock after it, which backward Euler solves for; the page passes `run.t + run.dt`, and the scope (#121) plots readings against it), for `V` elements with a `wave`; without `t` (or without `dt`) a wave reads its `offset`. A `V` with no `wave` ignores `t`.
   - Each `C` starts at its voltage in `state` (0 V when missing, i.e. discharged).
   - `state` and `result.state` are keyed `"<label>.<elementId>"` (e.g. `"C1.c"`), in volts, + from the `C`'s pin `a` to pin `b`.
-  - `result.state` holds each capacitor's voltage after the step. Early returns (short wire across a source, parallel-source fight, unsolvable, unsettled, current source with no path) carry **no** `state`; the caller keeps its previous state.
+  - `result.state` holds each capacitor's voltage after the step, and each clipped op-amp half's rail (`'U1.op1': 'high' | 'low'`, an `E` in `high`/`isrc+` or `low`/`isrc−`; none while linear): the hysteresis memory for positive feedback (#18). Early returns (short wire across a source, parallel-source fight, unsolvable, unsettled, current source with no path) carry **no** `state`; the caller keeps its previous state.
   - Each capacitor's current is `result.parts[label].r.current[elementId]`, in mA, + from `a` to `b`.
   - A capacitor carrying current (≥ 1 µA) counts as a complete path, so "Circuit open — no complete path." is not shown while one charges or discharges.
   - Without `dt`, a `C` is an open circuit.
