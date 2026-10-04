@@ -282,10 +282,13 @@ async function deepSeekRounds(markdown, userMsg, history, ctx, board) {
         }
         result = text;
       } else {
-        const action = { tool: c.function.name, ...args };
+        // A wire end by pin name becomes a free hole (#11), so the queued
+        // action holds holes; a pin the part lacks, or a full strip, is refused.
+        const pinned = (ctx.rewriteWire && ctx.rewriteWire({ tool: c.function.name, ...args }, actions, board)) || {};
+        const action = pinned.action || { tool: c.function.name, ...args };
         // A wire already there (#85); one this build added and then deleted is not (#6).
-        const dup = ctx.duplicate ? ctx.duplicate(action, foldWireFixes(actions, board), board) : null;
-        const why = dup ? null : ctx.refusal ? ctx.refusal(action, actions, board) : null;
+        const dup = !pinned.why && ctx.duplicate ? ctx.duplicate(action, foldWireFixes(actions, board), board) : null;
+        const why = pinned.why || (dup ? null : ctx.refusal ? ctx.refusal(action, actions, board) : null);
         if (dup) result = `Refused: ${dup}`;
         else if (why) result = `Refused: ${why} Nothing was queued; fix it and place it again.`;
         else {

@@ -147,7 +147,7 @@ const buildPrompt = tools => [
   'PART LABELS:',
   GENERATED.labels(tools),
   '- The board state lists parts by label, so you can talk about them as R1, LED1 and so on.',
-  '- Only an off-board part\'s pins can be wire ends by label, by pin index: "BAT1.0" (+) or "BAT1.1" (-) on a battery, and the same LABEL.k form for any other off-board part (its guide names them).',
+  '- An off-board part\'s pins are wire ends by label, by pin index: "BAT1.0" (+) or "BAT1.1" (-) on a battery, and the same LABEL.k form for any other off-board part (its guide names them).',
   GENERATED.wiredBy(tools),
   '- A new part gets the next free number for its type. After delete_all, numbering starts again at 1, so the first place_battery is BAT1.',
   '- Without delete_all, a battery added next to BAT1 is BAT2.',
@@ -178,9 +178,9 @@ const buildPrompt = tools => [
   'HOLE NAMES:',
   '- Body: "a3", "e14", "j22"',
   '- Rail: "tp_5" (positive col 5), "tn_5" (GND col 5)',
-  '- Off-board parts: "BAT1.0" (+), "BAT1.1" (-), or another off-board part\'s LABEL.k. This label form is only for off-board part pins.',
+  '- Off-board parts: "BAT1.0" (+), "BAT1.1" (-), or another off-board part\'s LABEL.k.',
   '- The bench holds ONE bench supply (PS1, two channels), ONE function generator (FG1) and at most TWO multimeters: never place a second supply or generator, or a third meter. One wire per terminal.',
-  '- Other parts: use the body holes they sit in, e.g. "b3", never "<label>.<k>".',
+  '- Other parts: their body holes, e.g. "b3", or a pin by name, e.g. "LED1.anode".',
   '',
   'BUILDING BEHAVIOR:',
   '- Keep every part and wire on the board that is correct. Change only what is wrong: delete_wire, delete_part or change a value (below) first, then place and wire what is missing.',
@@ -358,7 +358,7 @@ const DELETE_ALL = {
 };
 const ADD_WIRE = {
   name: 'add_wire',
-  description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or off-board part pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -, or another off-board part\'s LABEL.k). Other parts are wired through the body holes they sit in.',
+  description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or off-board part pins by label ("BAT1.0" for battery +, "BAT1.1" for battery -, or another off-board part\'s LABEL.k). Other parts are wired through the body holes they sit in, or by pin name ("LED1.anode"); the server picks a free hole in its strip.',
   parameters: {
     type: 'OBJECT',
     properties: {
@@ -571,7 +571,7 @@ const listed = (tools, defs = PARTS) => {
 };
 const GENERATED = {
   labels:     tools => `- Every part has a label that never changes: its prefix and a number, e.g. R1, R2. Prefixes: ${listed(tools).map(d => `${d.prefix} = ${partName(d)}`).join(', ')}.`,
-  wiredBy:    tools => `- Parts on the board (${listed(tools, onBoard).map(d => d.prefix).join(', ')}) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.`,
+  wiredBy:    tools => `- Parts on the board (${listed(tools, onBoard).map(d => d.prefix).join(', ')}) are wired through the breadboard holes they sit in, which the Components table lists. A wire end may also be an on-board part's pin by name, e.g. "LED1.anode": the server picks a free hole in its strip.`,
   catalogue:  tools => `- Every part (type: name): ${listed(tools).map(d => `${d.type}: ${d.name}`).join(', ')}.`,
   pinRoles:   tools => inPlay(tools).flatMap(pinRoleLines),
   sizing:     tools => inPlay(tools).flatMap(sizingLines),
@@ -697,6 +697,92 @@ function placementRefusal(a, prior) {
   }
   const check = Parts.checkPlacement(def.type, legs, map, BOARD);
   return check.ok ? null : `${who} not placed: ${check.reason}`;
+}
+
+// ── Wire ends by pin name (issue #11) ────────────────────────
+// An add_wire end may name an on-board part's pin: "U1.in1p", "LED1.anode",
+// or "LED1.1" by index for a 2-pin part. It becomes the first free hole in
+// that pin's strip, so hole bookkeeping isn't the model's job. Free means no
+// part lead and no wire end on the board the earlier steps leave (the sent
+// board, unless a delete_all cleared it, then `prior`). Off-board pins
+// (BAT1.0, MM1.red) and a label no placed part has stay as written.
+const TOP_ROWS    = BODY_ROWS.slice(0, BODY_ROWS.length / 2);             // a→e
+const BOTTOM_ROWS = BODY_ROWS.slice(BODY_ROWS.length / 2).reverse();      // j→f
+
+// The other holes in `hole`'s strip, in the order they are tried: its
+// column half from the outer row toward the gap, or its rail from the
+// nearest column out.
+function stripHoles(hole) {
+  const leg = legAt(null, hole);
+  if (!leg.row) return [];
+  if (!BODY_ROWS.includes(leg.row)) {
+    const out = [];
+    for (let d = 1; d < COLS; d++) for (const c of [leg.col + d, leg.col - d]) if (c >= 0 && c < COLS) out.push(`${leg.row}_${c + 1}`);
+    return out;
+  }
+  return (TOP_ROWS.includes(leg.row) ? TOP_ROWS : BOTTOM_ROWS).filter(r => r !== leg.row).map(r => `${r}${leg.col + 1}`);
+}
+// "column 32, rows f–j", or "the tp rail".
+const stripName = hole => {
+  const leg = legAt(null, hole);
+  return BODY_ROWS.includes(leg.row) ? `column ${leg.col + 1}, rows ${TOP_ROWS.includes(leg.row) ? 'a–e' : 'f–j'}` : `the ${leg.row} rail`;
+};
+
+// A pin's index in `def`, -1 if it has none. On a 2-pin part all digits is
+// an index, as Board.apply and BAT1.0 read it ("LP1.1" is a bulb's second
+// pin, the one named "2"). On a bigger part it is refused: a model counting
+// a chip's printed pins from 1 would get the wrong pin. Anything else is a
+// pin name, in any case.
+function pinIndexOf(def, pin) {
+  if (/^\d+$/.test(String(pin))) return def.pins.length === 2 && +pin < 2 ? +pin : -1;
+  return def.pins.findIndex(p => p.toLowerCase() === String(pin).toLowerCase());
+}
+
+// Why `pin` names no pin of `part`, listing each pin with the hole it sits
+// in ("cathode c8, anode c6"). A pin whose name is a number (the
+// potentiometer's 1 and 3) is never offered as a name: on a part with more
+// than 2 pins it is wired through a free hole in its column.
+function badPin(part, def, pin) {
+  const number = /^\d+$/.test(String(pin));
+  const lead = !number ? `${part.label} has no pin "${pin}".`
+    : def.pins.length === 2 ? `${part.label} has no pin index ${pin}.` : `${part.label}'s pins can't be named by number.`;
+  const tail = def.pins.length === 2 ? ' A number is an index, 0 or 1.'
+    : def.pins.some(p => /^\d+$/.test(p)) ? ' Wire a pin whose name is a number through a free hole in its column.' : '';
+  return `${lead} Its pins, in their holes: ${def.pins.map((p, j) => `${p} ${part.holes[j]}`).join(', ')}.${tail}`;
+}
+
+// → { action } with its pin-named ends as holes (the action itself when it
+// has none), or { end, why } it is refused: a pin the part doesn't have, or
+// a strip with no free hole.
+function pinWire(a, prior, board) {
+  if (!a || a.tool !== 'add_wire' || a.from == null || a.to == null) return { action: a };
+  const named = ['from', 'to'].filter(k => !legAt(null, a[k]).row && (Ids.parsePinRef(a[k]) || {}).label);
+  if (!named.length) return { action: a };
+  const before = prior || [];
+  let now;
+  try { now = Board.apply(isBoard(board) ? board : Board.empty(), before); } catch { return { action: a }; }
+  const taken = new Set();
+  const take = h => { const leg = legAt(null, h); if (leg.row) taken.add(leg.hole); };
+  for (const p of now.board.parts) (p.holes || []).forEach(take);
+  for (const w of now.board.wires) [w.from, w.to].forEach(take);
+  // A wire the board model skipped still reaches the page with its holes.
+  for (const e of now.errors) if (before[e.index] && before[e.index].tool === 'add_wire') [before[e.index].from, before[e.index].to].forEach(take);
+  [a.from, a.to].forEach(take);   // this wire's own hole end: U1.in1p → j32 is never j32 → j32
+  const out = { ...a };
+  const refused = (end, why) => ({ end, why: `The wire ${a.from} → ${a.to} was not added: ${why}` });
+  for (const k of named) {
+    const ref  = Ids.parsePinRef(a[k]);
+    const part = Ids.findByLabel(now.board.parts, ref.label);
+    const def  = part && part.holes && Parts.get(part.type);
+    if (!def) continue;
+    const i = pinIndexOf(def, ref.pin);
+    if (i < 0 || !part.holes[i]) return refused(a[k], badPin(part, def, ref.pin));
+    const hole = stripHoles(part.holes[i]).find(h => !taken.has(h));
+    if (!hole) return refused(a[k], `${stripName(part.holes[i])}, the strip of ${a[k]}, has no free hole.`);
+    taken.add(hole);
+    out[k] = hole;
+  }
+  return { action: out };
 }
 
 // ── Part values: Parts.checkValue ────────────────────────────
@@ -1193,6 +1279,7 @@ const askAI = makeAsk(
     partTools,
     refusal:   (action, prior, board) => placementRefusal(action, prior) || benchRefusal(action, prior, board) || referenceRefusal(action, prior, board),
     duplicate: duplicateWire,
+    rewriteWire: pinWire,
     checkBuild,
   }
 );
@@ -1447,8 +1534,16 @@ function finishAIReply({ reply, actions, board, fullCheck = false }) {
   // holds no holes. The DeepSeek loop has already refused most of them.
   // A wire already on the board, or already in this reply, is dropped
   // quietly: adding it again would stack two wire ends in one hole.
+  // A wire end by pin name becomes a free hole first (#11), so every check
+  // below, and the page, sees holes.
+  // On an edit, a wire it can't add is a fix that can't land whole (#199).
+  const edit = isBoard(board) && !fromLastDeleteAll(actions);
+  const unwired = [];
   const kept = [];
-  for (const a of actions) {
+  for (let a of actions) {
+    const pinned = pinWire(a, kept, board);
+    if (pinned.why) { notes.push(pinned.why); if (edit) unwired.push(pinned.end); continue; }
+    a = pinned.action;
     const dup = duplicateWire(a, kept, board);
     if (dup) { console.warn(`[edit] dropped: ${dup}`); continue; }
     const why = placementRefusal(a, kept) || benchRefusal(a, kept, board);
@@ -1465,6 +1560,10 @@ function finishAIReply({ reply, actions, board, fullCheck = false }) {
     console.warn(`[edit] dropped a reply that names ${missing.join(', ')}, not on the board`);
     actions = [];
     reply += `\n\nI couldn't make that change: it named ${missing.join(', ')}, not on your board. Nothing was changed. Ask me again.`;
+  } else if (unwired.length) {
+    console.warn(`[edit] dropped a reply with a wire to ${unwired.join(', ')} it can't add`);
+    actions = [];
+    reply += `\n\nI couldn't make that change without the wire to ${unwired.join(', ')}. Nothing was changed. Ask me again.`;
   }
 
   // Report problems instead of patching them, so a wrong circuit is visible

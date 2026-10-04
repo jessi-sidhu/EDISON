@@ -200,7 +200,7 @@ const VERBATIM = [
   "HOLE NAMES:",
   "- Body: \"a3\", \"e14\", \"j22\"",
   "- Rail: \"tp_5\" (positive col 5), \"tn_5\" (GND col 5)",
-  "- Other parts: use the body holes they sit in, e.g. \"b3\", never \"<label>.<k>\".",
+  "- Other parts: their body holes, e.g. \"b3\", or a pin by name, e.g. \"LED1.anode\".",
   "BUILDING BEHAVIOR:",
   "- After building, write 2-3 sentences explaining what you built and how it works.",
   "- When you explain a build with more than one LED, say which topology you built: series, parallel, or separate branches.",
