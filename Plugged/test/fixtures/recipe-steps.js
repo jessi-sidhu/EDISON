@@ -68,16 +68,12 @@ function recipeActions(ex) {
 }
 
 const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const STEP = /^\s*(\d+)\.\s+([a-z_]+)\s*(?::\s*(.*))?$/;
+const STEP = /^\s*(\d+)\.\s+([a-z_][a-z0-9_]*)\s*(?::\s*(.*))?$/;
 const uncomment = s => s.split(/[(←]/)[0].trim();
 const argValue = s => (/^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s === 'true' ? true : s === 'false' ? false : s);
 
-// The recipe block for `def` in `prompt`: { heading, steps: actions } or null.
-function parseRecipeSteps(prompt, def) {
-  const lines = String(prompt).split('\n');
-  const names = [toolOf(def), def.name].map(n => new RegExp(escapeRe(n), 'i'));
-  const at = lines.findIndex(l => /recipe/i.test(l) && names.some(re => re.test(l)));
-  if (at < 0) return null;
+// The steps of the block whose heading is lines[at], as actions.
+function stepsAfter(lines, at) {
   const steps = [];
   for (const line of lines.slice(at + 1)) {
     const m = STEP.exec(line);
@@ -99,7 +95,31 @@ function parseRecipeSteps(prompt, def) {
     }
     steps.push(a);
   }
-  return { heading: lines[at], steps };
+  return steps;
 }
 
-module.exports = { recipeActions, parseRecipeSteps };
+const namesOf = def => [toolOf(def), def.name].map(n => new RegExp(escapeRe(n), 'i'));
+
+// The (first) recipe block for `def` in `prompt`: { heading, steps: actions } or null.
+function parseRecipeSteps(prompt, def) {
+  const lines = String(prompt).split('\n');
+  const names = namesOf(def);
+  const at = lines.findIndex(l => /recipe/i.test(l) && names.some(re => re.test(l)));
+  if (at < 0) return null;
+  return { heading: lines[at], steps: stepsAfter(lines, at) };
+}
+
+// Every recipe block for `def` in `prompt` (a part with ai.recipe and
+// ai.recipes has several, #118), in prompt order: [{ heading, steps }].
+// A heading here is a line that starts with RECIPE and names the part.
+function parseRecipeBlocks(prompt, def) {
+  const lines = String(prompt).split('\n');
+  const names = namesOf(def);
+  const out = [];
+  lines.forEach((l, at) => {
+    if (/^\s*RECIPE\b/i.test(l) && names.some(re => re.test(l))) out.push({ heading: l, steps: stepsAfter(lines, at) });
+  });
+  return out;
+}
+
+module.exports = { recipeActions, parseRecipeSteps, parseRecipeBlocks };

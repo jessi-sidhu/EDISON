@@ -267,7 +267,7 @@
 
   function checkAi(ai, values, pins, bad) {
     if (!isObj(ai)) return bad('ai must be an AiSpec object');
-    unknownFields(ai, ['tool', 'about', 'keywords', 'values', 'guide', 'recipe', 'everyday', 'mustWire'], 'ai', bad);
+    unknownFields(ai, ['tool', 'about', 'keywords', 'values', 'guide', 'recipe', 'everyday', 'mustWire', 'listed', 'recipes'], 'ai', bad);
     if (ai.tool !== undefined && (typeof ai.tool !== 'string' || !TYPE_RE.test(ai.tool))) {
       bad(`ai.tool "${ai.tool}" must be lower case letters, digits and _`);
     }
@@ -299,7 +299,12 @@
     }
     // In the set the server sends when a message names no part.
     if (ai.everyday !== undefined && typeof ai.everyday !== 'boolean') bad('ai.everyday must be true or false');
+    if (ai.listed !== undefined && ai.listed !== 'in-play') bad(`ai.listed "${ai.listed}" must be 'in-play'`);
     if (ai.recipe !== undefined) checkExample(ai.recipe, 'ai.recipe', bad);
+    if (ai.recipes !== undefined) {
+      if (!Array.isArray(ai.recipes)) bad('ai.recipes must be a list of Examples');
+      else ai.recipes.forEach((ex, i) => checkExample(ex, `ai.recipes[${i}]`, bad));
+    }
   }
 
   // Calls elements/measure/warnings/report on the defaults and a sample

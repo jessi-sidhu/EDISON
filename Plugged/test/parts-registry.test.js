@@ -210,6 +210,9 @@ const BROKEN = [
   // Unknown fields
   ['unknown top-level field',         variant(testSpan, d => { d.colour = 'red'; }),                  [/colour/]],
   ['unknown ai field',                variant(testSpan, d => { d.ai.prompt = 'hi'; }),                [/prompt/]],
+  // ai.recipes (#118): a list of worked builds, each an Example like ai.recipe.
+  ['ai.recipes that is not a list',   variant(testSpan, d => { d.ai.recipes = d.examples[0]; }),     [/recipes/, /list/]],
+  ['an ai.recipes entry with no name', variant(testSpan, d => { d.ai.recipes = [{ ...d.examples[0], name: '' }]; }), [/recipes/, /name/]],
   ['unknown value-spec field',        variant(testSpan, d => { d.values.resistance.step = 1; }),      [/step/]],
 ];
 
@@ -236,6 +239,7 @@ const AT_LIMIT = [
   ['a report of 80 chars',   variant(testSpan, d => { d.report = () => 'R'.repeat(80); })],
   ['icon of 2048 bytes',     variant(testSpan, d => { d.icon = svgOf(2048); })],
   ['8 keywords',             variant(testSpan, d => { d.ai.keywords = ['k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8']; })],
+  ['ai.recipes of two Examples (#118)', variant(testSpan, d => { d.ai.recipes = [d.examples[0], { ...d.examples[0], name: 'second' }]; })],
   ['16 pins',                nPins(16)],
   ['a fixed span',           variant(testSpan, d => { d.place.span = { min: 3, max: 3, default: 3 }; })],
 ];

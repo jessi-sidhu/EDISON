@@ -1,6 +1,7 @@
 // Known answers for every registered part (testing contract, item 2): each
-// part's examples[] (and its ai.recipe, if any) is built into components and
-// wires, run through Sim.analyze, and must match its `expect`. Issue #23.
+// part's examples[] (and its ai.recipe and ai.recipes, if any) is built into
+// components and wires, run through Sim.analyze, and must match its
+// `expect`. Issue #23.
 //
 // Nothing here is per part: a new part file is covered as soon as
 // parts/index.js lists it.
@@ -99,6 +100,7 @@ test('the registry holds all five parts, each with at least one example (#26)', 
 for (const def of Parts.all()) {
   const cases = def.examples.map((ex, i) => [`examples[${i}]`, ex]);
   if (def.ai && def.ai.recipe) cases.push(['ai.recipe', def.ai.recipe]);
+  if (def.ai && Array.isArray(def.ai.recipes)) def.ai.recipes.forEach((ex, i) => cases.push([`ai.recipes[${i}]`, ex]));   // #118
   for (const [where, ex] of cases) {
     test(`${def.type} ${where}: ${ex.name}`, () => { runExample(ex); });
   }

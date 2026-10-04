@@ -8,11 +8,16 @@
 //                      null for a hole not on the board
 //      voltage(x)      a hole, a net or a net id → volts; null when floating
 //      part(label)     { V, I, P, rating, over }, plus energy (µJ) for a
-//                      capacitor; or null without readings
+//                      capacitor; or null without readings. A part with E
+//                      elements (an op-amp) also has opamps[{ pin, vout,
+//                      mode, iout, ilim, unused }] and V, I are op-amp 1's Vout
+//                      (signed, vs ground) and Iout (+ sourcing)
 //      kcl(net)        [{ label, pin, amps }], each element's current INTO
 //                      the net in mA; sums to about 0
-//      problems()      [{ kind, labels[], why }], the mistake checker (#95):
-//                      'short' | 'no-resistor' | 'backwards' | 'open' | 'over'
+//      problems()      [{ kind, labels[], why, info? }], the mistake checker
+//                      (#95): 'short' | 'no-resistor' | 'backwards' | 'open'
+//                      | 'over' | 'no-supply' | 'output-shorted', and
+//                      'clipped' with info: true (a note, never an error)
 //      thevenin(a, b)  two holes → { Vth V, Rth Ω, In mA } between them, or
 //                      { why } (#93); solves a copy of the board when called
 //    Readings.nets(board)  every net, with no solve
@@ -125,6 +130,8 @@
       const pr = parts[label];
       const ci = graph.findIndex(g => g.comp.label === label && g.part);
       if (!pr || ci < 0) return null;
+      const ops = opampsOf(graph[ci], pr);
+      if (ops.length) return { V: ops[0].vout, I: ops[0].iout, P: null, rating: null, over: false, opamps: ops };
       const pins = graph[ci].part.def.pins;
       const a = pr.r.pins[pins[0]], b = pr.r.pins[pins[pins.length - 1]];
       const V = typeof a === 'number' && typeof b === 'number' ? a - b : null;
@@ -141,8 +148,26 @@
       return out;
     }
 
+    // Each E element of a part: its out+ pin, Vout there (V vs ground),
+    // mode, Iout (mA, + out of out+), ilim (mA), and unused: both its
+    // ctrl pins floating (an op-amp half nobody wired).
+    function opampsOf(g, pr) {
+      const out = [];
+      g.part.els.forEach((e, k) => {
+        if (e.el.kind !== 'E') return;
+        const id = e.el.id !== undefined ? e.el.id : k;
+        const v = pr.r.pins[e.el.out[0]], i = pr.r.current[id];
+        out.push({ pin: e.el.out[0], vout: typeof v === 'number' ? v : null, mode: pr.r.modes[id] || null,
+                   iout: typeof i === 'number' ? i : null, ilim: e.el.ilim !== undefined ? e.el.ilim * 1000 : null,
+                   unused: e.el.ctrl.every(n => pr.r.pins[n] === null) });
+      });
+      return out;
+    }
+
     // Element pins [a, b], current I mA from a to b through it: −I flows
-    // into the net at a, +I at b. Internal "#" nodes are never a net.
+    // into the net at a, +I at b. An E's are its out pair, I + out of
+    // out+: +I into the net at out+, −I at out−. Internal "#" nodes are
+    // never a net.
     function kcl(x) {
       const net = asNet(x);
       if (!net) return [];
@@ -158,9 +183,11 @@
         g.part.els.forEach((e, k) => {
           const I = pr.r.current[e.el.id !== undefined ? e.el.id : k];
           if (typeof I !== 'number') return;
-          const [p, q] = e.el.pins || [];
-          if (e.nodes[0] === net.id) add(g.comp.label, p, -I);
-          if (e.nodes[1] === net.id) add(g.comp.label, q, I);
+          const isE = e.el.kind === 'E';
+          const [p, q] = (isE ? e.el.out : e.el.pins) || [];
+          const s = isE ? -1 : 1;
+          if (e.nodes[0] === net.id) add(g.comp.label, p, -s * I);
+          if (e.nodes[1] === net.id) add(g.comp.label, q, s * I);
         });
       });
       return out;
@@ -175,7 +202,7 @@
 
     function findProblems() {
       const out = [];
-      const add = (kind, labels, why) => { if (labels.length) out.push({ kind, labels, why }); };
+      const add = (kind, labels, why, info) => { if (labels.length) out.push(info ? { kind, labels, why, info: true } : { kind, labels, why }); };
       const labelled = graph.filter(g => g.part && typeof g.comp.label === 'string');
       const sources  = labelled.filter(g => g.part.def.ref !== undefined).map(g => g.comp.label);
       const warned   = (label, re) => ((parts[label] && parts[label].warnings) || []).some(w => re.test(w));
@@ -196,13 +223,17 @@
 
       // No current anywhere, and a source with no loop from its + back to its −
       // through the other elements, every switch counted as closed (an open
-      // switch is normal use), and no backwards part to say why.
+      // switch is normal use), and no backwards part to say why. An op-amp
+      // (an E) joins its inputs and rails to its output: an input senses its
+      // source without drawing current, so an unloaded follower is not open (#118).
       const still = label => { const p = part(label); return !!p && typeof p.I === 'number' && Math.abs(p.I) < 0.001; };
       const looped = src => {
         const own = src.part.els.filter(e => e.el.kind === 'V' || e.el.kind === 'I');
         const uf = new Sim.UnionFind();
         graph.forEach(g => g.part && g.part.els.forEach(e => {
-          if (!own.includes(e)) e.nodes.forEach(n => uf.union(e.nodes[0], n));
+          if (own.includes(e)) return;
+          e.nodes.forEach(n => uf.union(e.nodes[0], n));
+          if (e.el.kind === 'E') [...(e.ctrl || []), ...(e.rails || [])].forEach(n => uf.union(e.nodes[0], n));
         }));
         return own.some(e => uf.find(e.nodes[0]) === uf.find(e.nodes[1]));
       };
@@ -223,6 +254,27 @@
           ? `${label} carries ${Math.abs(p.I).toFixed(1)} mA, over its ${p.rating.mA.toFixed(0)} mA rating. Add more resistance in series.`
           : `${label} has ${Math.abs(p.V).toFixed(1)} V across it, over its ${p.rating.V} V rating. Use a lower supply voltage.`;
         add('over', [label], why);
+      });
+
+      // Op-amps: no supply (the part's own warning), an output at its current
+      // limit (tied straight to ground, a rail or the other output, or too
+      // heavy a load), and a clipped output, which is only a note: a
+      // comparator clips on purpose. An unused half (inputs floating) is neither.
+      labelled.filter(g => warned(g.comp.label, /no supply/i))
+        .forEach(g => add('no-supply', [g.comp.label], `${g.comp.label}: ${warnings(g.comp.label)}`));
+      labelled.forEach(g => {
+        const label = g.comp.label, ops = opampsOf(g, parts[label] || { r: { pins: {}, current: {}, modes: {} } });
+        const limited = ops.find(o => o.mode === 'isrc+' || o.mode === 'isrc−');
+        if (limited) {
+          add('output-shorted', [label], `${label}'s output (${limited.pin}) is at its ${limited.ilim} mA current limit: it is tied ` +
+                                         'straight to ground, a rail or the other output, or its load takes too much current. Use a bigger resistor.');
+        }
+        const clipped = ops.find(o => (o.mode === 'high' || o.mode === 'low') && o.vout !== null && !o.unused);
+        if (clipped) {
+          const v = (clipped.vout < 0 ? '−' : '+') + Math.abs(clipped.vout).toFixed(1);
+          add('clipped', [label], `${label}'s output (${clipped.pin}) is clipped at ${v} V, its rail: it can't swing further. ` +
+                                  'Fine for a comparator; in an amplifier, lower the gain or the input.', true);
+        }
       });
       return out;
     }

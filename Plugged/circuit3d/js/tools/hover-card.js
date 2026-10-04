@@ -14,7 +14,8 @@
 //
 //  formatPower(W)          '9.5 mW' below 10 mW, '104 mW' to under 1 W, '1.72 W'
 //  formatEnergy(µJ)        '850 µJ', '12.5 mJ' from 1 mJ, '1.24 J' from 1 J
-//  cardLines(label, part)  [label, 'V · mA · P', 'over its … rating'?], or null
+//  cardLines(label, part)  [label, 'V · mA · P', 'over its … rating'?], or null;
+//                          an op-amp (part.opamps): [label, one line per op-amp]
 //  holeLines(hole, volts)  [hole, '9.0 V'] signed, or [hole, 'floating']
 // ─────────────────────────────────────────────────────────────
 
@@ -44,8 +45,24 @@
   const ratingText = r => (r.W !== undefined ? (FRACTIONS[r.W] || r.W) + ' W'
                          : r.mA !== undefined ? r.mA + ' mA' : r.V + ' V');
 
+  // One op-amp's line: its signed Vout and current, or why it's pinned.
+  const signed = (v, d) => (Number(fixed(v, d)) < 0 ? '−' : Number(fixed(v, d)) > 0 ? '+' : '') + fixed(Math.abs(v), d) + ' V';
+  function opampLine(o, k) {
+    const head = `op-amp ${k + 1}: `;
+    if (o.mode === 'open') return head + 'no supply (output open)';
+    if (o.unused) return head + 'unused';
+    if (o.mode === 'isrc+' || o.mode === 'isrc−') {
+      return head + `current-limited at ${o.ilim} mA` + (o.vout !== null ? ` (${signed(o.vout, 1)})` : '');
+    }
+    if (o.vout === null) return head + 'floating';
+    if (o.mode === 'high' || o.mode === 'low') return head + `clipped at ${signed(o.vout, 1)} (the rail)`;
+    const I = typeof o.iout === 'number' ? ` · ${o.iout < 0 ? 'sinks' : 'sources'} ${fixed(Math.abs(o.iout), 2)} mA` : '';
+    return head + signed(o.vout, 1) + I;
+  }
+
   function cardLines(label, part) {
     if (!part) return null;
+    if (Array.isArray(part.opamps) && part.opamps.length) return [label].concat(part.opamps.map(opampLine));
     const bits = [];
     if (part.V !== null) bits.push(fixed(Math.abs(part.V), 1) + ' V');
     if (part.I !== null) bits.push(fixed(Math.abs(part.I), 1) + ' mA');

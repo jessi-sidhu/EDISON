@@ -92,13 +92,16 @@ function recipeSteps(ex) {
   return steps;
 }
 
-// The recipe block of one part: a heading, then its steps numbered from 1.
-const recipeBlock = def => [`RECIPE FOR THE ${def.name.toUpperCase()} (${toolName(def)}, use these exact holes): ${def.ai.recipe.name}`,
-  ...recipeSteps(def.ai.recipe).map((s, i) => `  ${i + 1}. ${s}`)];
+// A part's worked builds: ai.recipe, then ai.recipes (#118), in that order.
+const recipesOf = def => [def.ai.recipe, ...(def.ai.recipes || [])].filter(Boolean);
 
-// The recipe blocks of the tools sent that have one.
-const recipeLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(def => def && def.ai.recipe)
-  .flatMap(def => ['', ...recipeBlock(def)]);
+// The recipe block of one worked build: a heading, then its steps numbered from 1.
+const recipeBlock = (def, ex) => [`RECIPE FOR THE ${def.name.toUpperCase()} (${toolName(def)}, use these exact holes): ${ex.name}`,
+  ...recipeSteps(ex).map((s, i) => `  ${i + 1}. ${s}`)];
+
+// The recipe blocks of the tools sent that have any.
+const recipeLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(Boolean)
+  .flatMap(def => recipesOf(def).flatMap(ex => ['', ...recipeBlock(def, ex)]));
 
 // The parts in play: those whose place_ tool is in `tools`, in registry order.
 const inPlay = (tools, defs = PARTS) => {
@@ -126,14 +129,14 @@ const buildPrompt = tools => [
   '- Rails are NOT auto-connected to body holes. Always wire from tp/tn to body holes.',
   '',
   'PARTS:',
-  GENERATED.catalogue,
+  GENERATED.catalogue(tools),
   '- If a part\'s place_ tool is not in your tools, call use_parts with its type first.',
   '',
   'PART LABELS:',
-  GENERATED.labels,
+  GENERATED.labels(tools),
   '- The board state lists parts by label, so you can talk about them as R1, LED1 and so on.',
   '- Only an off-board part\'s pins can be wire ends by label, by pin index: "BAT1.0" (+) or "BAT1.1" (-) on a battery, and the same LABEL.k form for any other off-board part (its guide names them).',
-  GENERATED.wiredBy,
+  GENERATED.wiredBy(tools),
   '- A new part gets the next free number for its type. After delete_all, numbering starts again at 1, so the first place_battery is BAT1.',
   '- Without delete_all, a battery added next to BAT1 is BAT2.',
   '',
@@ -509,7 +512,7 @@ function partTools(types, sentNames) {
     const pack = def ? [...pinRoleLines(def), ...valueLines(def), ...sizingLines(def)] : [];
     if (pack.length) said.push(`\n${pack.join('\n')}\n`);
     if (def && def.ai.guide) said.push(`${d.name}: ${def.ai.guide}`);
-    if (def && def.ai.recipe) said.push(`\n${recipeBlock(def).join('\n')}\n`);
+    if (def) for (const ex of recipesOf(def)) said.push(`\n${recipeBlock(def, ex).join('\n')}\n`);
   }
   if (unknown.length) said.push(`No part type ${unknown.join(', ')}. Part types: ${PARTS.map(d => d.type).join(', ')}.`);
   return { added, text: said.join(' ') };
@@ -540,12 +543,18 @@ const valueLines   = d => aiValues(d).map(key => {
     : `- ${toolName(d)} ${key}: ${rangeOf(spec)}, in ${UNIT_WORDS[spec.unit] || spec.unit} (default ${Parts.withUnit(spec.default, spec.unit)})`;
 });
 
-// The catalogue, labels and wiredBy lines name every part. The pin roles,
-// values and sizing are the packs of the parts in play (the tools sent).
+// The catalogue, labels and wiredBy lines name every part, except one with
+// ai.listed 'in-play' (the op-amp, #118), named only when its tool is sent,
+// so adding it leaves the other requests' prompts as they were. The pin
+// roles, values and sizing are the packs of the parts in play (the tools sent).
+const listed = (tools, defs = PARTS) => {
+  const names = new Set(tools.map(t => t.name));
+  return defs.filter(def => def.ai.listed !== 'in-play' || names.has(toolName(def)));
+};
 const GENERATED = {
-  labels:     `- Every part has a label that never changes: its prefix and a number, e.g. R1, R2. Prefixes: ${PARTS.map(d => `${d.prefix} = ${partName(d)}`).join(', ')}.`,
-  wiredBy:    `- Parts on the board (${onBoard.map(d => d.prefix).join(', ')}) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.`,
-  catalogue:  `- Every part (type: name): ${PARTS.map(d => `${d.type}: ${d.name}`).join(', ')}.`,
+  labels:     tools => `- Every part has a label that never changes: its prefix and a number, e.g. R1, R2. Prefixes: ${listed(tools).map(d => `${d.prefix} = ${partName(d)}`).join(', ')}.`,
+  wiredBy:    tools => `- Parts on the board (${listed(tools, onBoard).map(d => d.prefix).join(', ')}) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.`,
+  catalogue:  tools => `- Every part (type: name): ${listed(tools).map(d => `${d.type}: ${d.name}`).join(', ')}.`,
   pinRoles:   tools => inPlay(tools).flatMap(pinRoleLines),
   sizing:     tools => inPlay(tools).flatMap(sizingLines),
   values:     tools => inPlay(tools).flatMap(valueLines),
@@ -806,6 +815,9 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // A current source's I element, as a [plus, minus] terminal pair: its
   // current leaves `to` and comes back into `from`.
   const isrcPairs = [];
+  // Each op-amp (E element): its output (out+ pin) node, its input nodes and
+  // its part index. Its output drives its load (#118).
+  const opamps = [];
   const joins = wireEdges.map(([x, y]) => ({ x, y, part: -1 }));
   actions.forEach((a, i) => {
     const def = PART_BY_TOOL.get(a.tool);
@@ -817,6 +829,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     const node = p => (p in holeOf ? nodeKey(holeOf[p]) : `part${i}${p}`);   // "#mid" is inside the part
     placedParts.push({ i, a, def, holeOf, pinNodes: def.pins.map(node) });
     for (const el of elementsOf(def)) {
+      if (el.kind === 'E' && Array.isArray(el.out)) opamps.push({ i, out: node(el.out[0]), ctrl: (el.ctrl || []).map(node) });
       if (!Array.isArray(el.pins)) continue;
       const [x, y] = el.pins;
       joins.push({ x: node(x), y: node(y), part: i });
@@ -937,6 +950,18 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     growPair(p, m);
   }
 
+  // #118: an op-amp's output sources current into, and sinks it from, any
+  // supply terminal, so for the on-path checks it pairs with each both ways.
+  // Not for orientation (pos / neg): a diode at an op-amp output is left to
+  // the simulator, below. An unused op-amp (both inputs joined to nothing
+  // outside their own column, as tl072.js's `unused`) drives nothing.
+  const opampOuts = opamps.filter(o => o.ctrl.some(n => joined(n, o.i).size > 1)).map(o => o.out);
+  const supplyNodes = [...new Set(terminals.flat())];
+  for (const o of opampOuts) for (const t of supplyNodes) if (t !== o) terminals.push([o, t], [t, o]);
+  // A diode whose anode or cathode side reaches an op-amp output through
+  // wires, resistors and switches.
+  const driven = d => [d.anode, d.cathode].some(n => { const r = reach(n); return opampOuts.some(o => r.has(o)); });
+
   // #51: two batteries on one pair of rails fight each other.
   for (const [pair, ns] of railPairs) {
     if (ns.length < 2) continue;
@@ -1027,9 +1052,13 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
       problems.push(...footprintProblems(i, a, def, holeOf, pinNodes));
       continue;
     }
-    const backwards = diodes.find(d => d.i === i && d.outer && !reversedZener(d)
-      && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode)
-      && reverseBiased(d) !== false);
+    // At an op-amp output the graph can't tell + from −: only the simulator
+    // says backwards, and nothing is said without it.
+    const atOutput = diodes.find(d => d.i === i && d.outer && !reversedZener(d) && driven(d));
+    const backwards = atOutput ? (reverseBiased(atOutput) === true ? atOutput : null)
+      : diodes.find(d => d.i === i && d.outer && !reversedZener(d)
+        && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode)
+        && reverseBiased(d) !== false);
     if (backwards) {
       const { el, holeOf } = backwards;
       const [ap, cp] = el.pins;
@@ -1044,7 +1073,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     }
     // On a path, but a diode on it faces the wrong way (e.g. both LEDs of a
     // series pair flipped, so neither reads as backwards on its own).
-    const stuck = diodes.find(d => d.i === i && d.outer && !reversedZener(d) && !(pos.has(d.anode) && neg.has(d.cathode)));
+    const stuck = !atOutput && diodes.find(d => d.i === i && d.outer && !reversedZener(d) && !(pos.has(d.anode) && neg.has(d.cathode)));
     if (stuck) {
       problems.push(`The ${partName(def)} at ${a.holeA}/${a.holeB} has no forward path from + to −, so it cannot light. Check each diode on its path: cathode (holeA) toward −, anode (holeB) toward +.`);
     }

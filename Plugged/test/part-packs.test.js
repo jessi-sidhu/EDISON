@@ -193,9 +193,36 @@ test('demo: every pack line in the prompt belongs to a part whose tool is sent',
   checkPacksMatchTools(sent.demo, 'demo');
 });
 
-test('pin: demo: the catalogue, label prefixes and wiredBy line still name every part', () => {
+// #118: the op-amp is listed only in requests that have it in play, so the
+// demo prompt (demo-led.txt) stays byte-identical. SYSTEM_PROMPT (every tool)
+// lists it, so the demo's three core lines are SYSTEM_PROMPT's with only the
+// op-amp's entry taken out.
+const LISTED_ONLY_IN_PLAY = ['tl072'];
+function dropEntry(line, entry) {
+  if (line.includes(`, ${entry}`)) return line.replace(`, ${entry}`, '');
+  if (line.includes(`${entry}, `)) return line.replace(`${entry}, `, '');
+  return line;
+}
+// A part's name as the label-prefix line writes it (server.js partName):
+// all-caps words kept ("TL072", "LED"), the rest lower case.
+const labelName = def => def.name.split(' ').map(w => (/^[A-Z0-9-]{2,}$/.test(w) ? w : w.toLowerCase())).join(' ');
+function withoutInPlayOnly(line) {
+  let out = line;
+  for (const def of LISTED_ONLY_IN_PLAY.map(P)) {
+    for (const entry of [`${def.type}: ${def.name}`, `${def.prefix} = ${labelName(def)}`]) out = dropEntry(out, entry);
+    if (out.startsWith('- Parts on the board (')) out = out.replace(/\(([^)]*)\)/, (m, list) =>
+      `(${list.split(', ').filter(x => x !== def.prefix).join(', ')})`);
+  }
+  return out;
+}
+
+test('pin: demo: the catalogue, label prefixes and wiredBy line name every part but the op-amp (listed only when in play, #118)', () => {
   const lines = linesOf(sent.demo);
-  for (const l of [CATALOGUE, LABELS, WIRED_BY]) assert.ok(l && lines.includes(l), `missing core line: ${l}`);
+  for (const l of [CATALOGUE, LABELS, WIRED_BY]) {
+    assert.ok(l, 'SYSTEM_PROMPT has the core line');
+    const want = withoutInPlayOnly(l);
+    assert.ok(lines.includes(want), `missing core line: ${want}`);
+  }
 });
 
 test('demo: the one-LED recipe and the LED pack (series/parallel/branches) are sent; the button-branches recipe is not', () => {

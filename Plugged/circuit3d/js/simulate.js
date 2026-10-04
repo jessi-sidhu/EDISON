@@ -40,7 +40,8 @@
 //  Browser: window.App.runSimulation() / App.stopSimulation(), unchanged.
 //  Node:    module.exports = the pure solver (UnionFind, bbNodeId,
 //           buildGraph, solveLinear, settleModes, analyze,
-//           simulationSummary, pickDt) so a test runner can call it.
+//           simulationSummary, pickDt, estimateFreqMax) so a test runner
+//           can call it.
 //  Everything above the "Presentation" divider is pure: no document,
 //  no THREE, no audio.
 // ─────────────────────────────────────────────────────────────
@@ -225,12 +226,14 @@
   // One linear solve with every mode block in a fixed mode.
   // grounds: Set of nodes held at 0 V, one per connected circuit.
   // modeOf:  Map(element entry -> 'off' | 'on' | 'breakdown' for a D,
-  //          'linear' | 'high' | 'low' | 'isrc+' | 'isrc−' for an E).
+  //          'linear' | 'high' | 'low' | 'isrc+' | 'isrc−' | 'open' for an E).
   // skip:    Set of V element entries left out (the later sources of a
   //          parallel group, parallelSources); optional.
+  // t:       the time step's time in seconds, for V elements with a wave;
+  //          optional (a wave then reads its offset).
   // Returns { v(node), vCurrent: Map(V element entry -> amps),
   // eCurrent: Map(E element entry -> amps out of out+) } or null.
-  function solveMNA(graph, grounds, modeOf, skip) {
+  function solveMNA(graph, grounds, modeOf, skip, t) {
     const index = new Map();
     const add = n => { if (n != null && !grounds.has(n) && !index.has(n)) index.set(n, index.size); };
     graph.forEach(g => {
@@ -284,7 +287,7 @@
       const row = N + k, pos = at(e.nodes[0]), neg = at(e.nodes[1]);
       if (pos >= 0) { A[pos][row] += 1; A[row][pos] += 1; }
       if (neg >= 0) { A[neg][row] -= 1; A[row][neg] -= 1; }
-      b[row] = e.el.volts || 0;
+      b[row] = sourceVolts(e.el, t);
     });
 
     // E: one more unknown, its output current j, + out of out+ into the
@@ -293,6 +296,7 @@
     //   high    V(out+) − V(vpos) + rout·j = −headroom
     //   low     V(out+) − V(vneg) + rout·j = +headroom
     //   isrc±   j = ±ilim
+    //   open    j = 0 (unpowered: a rail reaches no source)
     // An E that is not a mode block (no rails, no ilim) is always linear.
     es.forEach((e, k) => {
       const row = N + vs.length + k, el = e.el, [op, om] = e.nodes;
@@ -300,6 +304,7 @@
       if (at(op) >= 0) A[at(op)][row] -= 1;
       if (at(om) >= 0) A[at(om)][row] += 1;
       const mode = modeOf.get(e) || 'linear';
+      if (mode === 'open') { A[row][row] = 1; return; }
       if (mode === 'isrc+' || mode === 'isrc−') { A[row][row] = 1; b[row] = mode === 'isrc+' ? el.ilim : -el.ilim; return; }
       A[row][row] = el.rout || 0;
       put(op, 1);
@@ -313,6 +318,16 @@
     const vCurrent = new Map(vs.map((e, k) => [e, x[N + k]]));
     const eCurrent = new Map(es.map((e, k) => [e, x[N + vs.length + k]]));
     return { v: n => (grounds.has(n) ? 0 : x[index.get(n)]), vCurrent, eCurrent };
+  }
+
+  // A V element's volts: with a sine wave, offset + amp·sin(2π·freq·t), or
+  // the offset when t is missing; `volts` otherwise, or for a malformed wave.
+  function sourceVolts(el, t) {
+    const w = el.wave;
+    if (w && w.kind === 'sine' && [w.amp, w.freq, w.offset].every(Number.isFinite)) {
+      return Number.isFinite(t) ? w.offset + w.amp * Math.sin(2 * Math.PI * w.freq * t) : w.offset;
+    }
+    return el.volts || 0;
   }
 
   // Amps through one of a registry part's elements, + in its pin order.
@@ -429,7 +444,26 @@
   const isSource = g => !!(g.part && g.part.def.ref !== undefined);
   const refNode  = g => g.nodes[g.part.def.pins.indexOf(g.part.def.ref)];
   const conducts = (e, modeOf) => !(e.el.kind === 'SW' && !e.el.closed) &&
-    !(e.el.kind === 'C' && !e.cap) && !(modeOf && modeOf.get(e) === 'off');
+    !(e.el.kind === 'C' && !e.cap) && !(modeOf && (modeOf.get(e) === 'off' || modeOf.get(e) === 'open'));
+
+  // The E elements with rails that are unpowered: a rail that reaches no
+  // source through wires and the other elements (an E's own output pair
+  // doesn't count, so V− isn't "supplied" back through the output). Each
+  // is open: it drives nothing (mode 'open', current 0).
+  function unpoweredEs(graph) {
+    const es = allElements(graph).filter(e => e.el.kind === 'E' && e.rails);
+    if (!es.length) return new Set();
+    const uf = new UnionFind();
+    graph.forEach(g => {
+      g.nodes.forEach(n => uf.make(n));
+      if (!g.part) { g.nodes.forEach(n => uf.union(g.nodes[0], n)); return; }
+      g.part.els.forEach(e => {
+        if (e.el.kind !== 'E' && conducts(e)) e.nodes.forEach(n => uf.union(e.nodes[0], n));
+      });
+    });
+    const fed = new Set(graph.filter(isSource).map(g => uf.find(refNode(g))));
+    return new Set(es.filter(e => e.rails.some(n => !fed.has(uf.find(n)))));
+  }
 
   function groundCircuits(graph, modeOf) {
     const uf = new UnionFind();
@@ -594,7 +628,8 @@
   //  step = { dt, state } (optional) runs one time step of dt seconds: each
   //  C starts at state[`${label}.${id}`] volts (0 when missing), and a
   //  solved result also has state, each C's volts after the step. Without
-  //  dt a C is open.
+  //  dt a C is open. step.t (optional) is the step's time in seconds: a V
+  //  with a wave reads offset + amp·sin(2π·freq·t), and its offset without t.
   function analyze(components, wires, step) {
     return run(components, wires, step).r;
   }
@@ -671,14 +706,17 @@
       return done({ status: 'unsolvable', lines: withHeads(null) });
     }
 
-    // Every mode block (D, and E with rails or ilim) in board order, and the loop that settles them.
+    // Every mode block (D, and E with rails or ilim) in board order, and the
+    // loop that settles them. An unpowered E is no block: it stays open.
     const { grounds } = groundCircuits(graph);
-    const blockEls = els.filter(e => e.el.kind === 'D' || isModeE(e));
+    const unpowered = unpoweredEs(graph);
+    const blockEls = els.filter(e => e.el.kind === 'D' || (isModeE(e) && !unpowered.has(e)));
     const blocks   = blockEls.map(e => (e.el.kind === 'E'
       ? { initial: 'linear', check: (sol, mode) => checkE(e, sol, mode) }
       : { initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
-    const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]));
-    const solveFor = modes => solveMNA(graph, grounds, modesOf(modes), parallel.skip);
+    const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]).concat([...unpowered].map(e => [e, 'open'])));
+    const waveT    = timed && Number.isFinite(step.t) ? step.t : undefined;
+    const solveFor = modes => solveMNA(graph, grounds, modesOf(modes), parallel.skip, waveT);
 
     const solved = settleModes(blocks, solveFor);
     if (!solved) {
@@ -789,12 +827,16 @@
   }
 
   // ── Pure: time step size ─────────────────────────────────────
-  //  pickDt(tauMin): the step for a time run, τ/50 seconds clamped to
-  //  10 µs–10 ms; 1 ms when τ can't be estimated.
+  //  pickDt(tauMin, fmax): the step for a time run, min(τ/50, 1/(50·fmax))
+  //  seconds clamped to 10 µs–10 ms. Without a usable fmax: τ/50 clamped,
+  //  or 1 ms when τ can't be estimated. Without τ: 1/(50·fmax) clamped.
   const DT_MIN = 1e-5, DT_MAX = 1e-2, DT_UNKNOWN = 1e-3;
-  function pickDt(tauMin) {
-    if (typeof tauMin !== 'number' || !Number.isFinite(tauMin) || tauMin <= 0) return DT_UNKNOWN;
-    return Math.min(DT_MAX, Math.max(DT_MIN, tauMin / 50));
+  const usable = x => typeof x === 'number' && Number.isFinite(x) && x > 0;
+  function pickDt(tauMin, fmax) {
+    const clamp = d => Math.min(DT_MAX, Math.max(DT_MIN, d));
+    if (!usable(fmax)) return usable(tauMin) ? clamp(tauMin / 50) : DT_UNKNOWN;
+    const fromF = 1 / (50 * fmax);
+    return clamp(usable(tauMin) ? Math.min(tauMin / 50, fromF) : fromF);
   }
 
   // A cheap guess at the board's fastest time constant: the smallest R
@@ -810,6 +852,29 @@
       });
     });
     return Number.isFinite(rMin) && Number.isFinite(cMin) ? rMin * cMin : undefined;
+  }
+
+  // The board's highest wave frequency in Hz, undefined when it has no wave.
+  function estimateFreqMax(components) {
+    let fMax;
+    components.forEach(comp => {
+      const def = comp ? partDef(comp.type) : null;
+      if (!def || typeof def.elements !== 'function') return;
+      def.elements(partValues(def, comp), partControls(def, comp)).forEach(el => {
+        const f = el.kind === 'V' && el.wave ? el.wave.freq : NaN;
+        if (Number.isFinite(f) && f > 0 && !(f <= fMax)) fMax = f;
+      });
+    });
+    return fMax;
+  }
+
+  // Does the board hold a V element with a wave? Then Run starts the time loop.
+  function hasWaveSource(components) {
+    return components.some(comp => {
+      const def = comp ? partDef(comp.type) : null;
+      if (!def || typeof def.elements !== 'function') return false;
+      return def.elements(partValues(def, comp), partControls(def, comp)).some(el => el.kind === 'V' && !!el.wave);
+    });
   }
 
   // Does the board hold a C element? Then Run starts the time loop.
@@ -969,7 +1034,7 @@
     // Switch to select mode so the user can click parts during simulation
     if (!App.simRunning && App.setMode) App.setMode('select');
 
-    if (hasCapacitor(components)) { startTimeRun(); return; }
+    if (hasCapacitor(components) || hasWaveSource(components)) { startTimeRun(); return; }
 
     const result = analyze(components, wires);
     showResults(result.lines);
@@ -987,7 +1052,7 @@
   }
 
   // ── Time run ─────────────────────────────────────────────────
-  //  A board with a C keeps simulating: each animation frame takes up to
+  //  A board with a C or a wave source keeps simulating: each frame takes up to
   //  MAX_STEPS steps of dt, carrying each C's volts (state) forward, so sim
   //  time keeps pace with real time (or falls behind, "(slowed)"). Then the
   //  frame renders the latest result and announces it, like a single run.
@@ -996,7 +1061,9 @@
 
   function timedStep(run) {
     const { components, wires } = App.state;
-    const result = analyze(components, wires, { dt: run.dt, state: run.state });
+    // Backward Euler solves the end of the step, so a wave reads its value
+    // there: the same t the clock shows once run.t has advanced.
+    const result = analyze(components, wires, { dt: run.dt, state: run.state, t: run.t + run.dt });
     if (result.state) run.state = result.state;   // early returns carry none
     run.t += run.dt;
     run.result = result;
@@ -1014,7 +1081,7 @@
   }
 
   function startTimeRun() {
-    const run = { raf: 0, dt: pickDt(estimateTau(App.state.components)), state: {}, t: 0,
+    const run = { raf: 0, dt: pickDt(estimateTau(App.state.components), estimateFreqMax(App.state.components)), state: {}, t: 0,
                   budget: 0, last: performance.now(), slowed: false, dirty: false, result: null };
     const result = timedStep(run);
     run.budget = -run.dt;   // that first step is paid back by the first frames
@@ -1037,13 +1104,13 @@
   function timeFrame(now) {
     const run = _time;
     if (!run) return;
-    // The last capacitor deleted: back to a single solve.
-    if (!hasCapacitor(App.state.components)) {
+    // The last capacitor and wave source deleted: back to a single solve.
+    if (!hasCapacitor(App.state.components) && !hasWaveSource(App.state.components)) {
       _time = null;
       runSimulation();
       return;
     }
-    if (run.dirty) run.dt = pickDt(estimateTau(App.state.components));
+    if (run.dirty) run.dt = pickDt(estimateTau(App.state.components), estimateFreqMax(App.state.components));
     run.budget += Math.max(0, now - run.last) / 1000;
     run.last = now;
     let n = Math.floor(run.budget / run.dt + 1e-9);
@@ -1084,5 +1151,5 @@
     App.simulationSummary = simulationSummary;
   }
 
-  return { UnionFind, bbNodeId, buildGraph, solveLinear, settleModes, analyze, simulationSummary, pickDt, install };
+  return { UnionFind, bbNodeId, buildGraph, solveLinear, settleModes, analyze, simulationSummary, pickDt, estimateFreqMax, install };
 });

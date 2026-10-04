@@ -94,7 +94,7 @@ The element `pins` name the part's pins, or internal nodes written `'#name'` (pr
 | `kind` | Fields | Notes |
 |---|---|---|
 | `R` | `pins:[a,b], ohms` | `ohms > 0` |
-| `V` | `pins:[plus,minus], volts` | Adds one unknown. |
+| `V` | `pins:[plus,minus], volts, wave?` | Adds one unknown. `wave: { kind: 'sine', amp, freq, offset }` (V, Hz, V) replaces `volts`: `offset` in a plain solve, `offset + amp·sin(2π·freq·t)` in a time step at `t`. A wave with a non-finite `amp`, `freq` or `offset` falls back to `volts`. |
 | `I` | `pins:[from,to], amps` | Arrives with the first part that needs it. |
 | `SW` | `pins:[a,b], closed` | Closed = 1 mΩ, open = removed. Never an ideal short. |
 | `D` | `pins:[anode,cathode], vf, ron, vz?` | Mode block: `off` / `on` / (`breakdown` if `vz`). Replaces today's LED special case. |
@@ -112,6 +112,9 @@ The element `pins` name the part's pins, or internal nodes written `'#name'` (pr
 | `low` | `lo` behind `rout` | `u ≤ lo` and `|I| ≤ ilim` |
 | `isrc+` | `I = +ilim` | `V(out+) ≤ clamp(u, lo, hi) − rout·ilim` (the clipped drive would push more) |
 | `isrc−` | `I = −ilim` | `V(out+) ≥ clamp(u, lo, hi) + rout·ilim` |
+| `open` | `I = 0` (drives nothing) | Unpowered: a `rails` pin reaches no source through wires and the other elements (the E's own output pair doesn't count). Not a mode block; set before the solve, never flipped. |
+
+An `E` with `rails` whose rail pin isn't connected to any source has its output open (`open` above), so a chip with no supply drives nothing. Boards with no E with `rails` are unaffected.
 
 A board with no `E` solves exactly as before.
 
@@ -146,6 +149,9 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
   everyday?: true,             // in the set sent when a message names no part
   mustWire?: ['wiper'],        // pins that must be wired; the server warns when one goes nowhere (optional)
   recipe?: Example,            // a worked build; must also pass the testing contract
+  recipes?: Example[],         // more worked builds (#118), each like recipe; sent after it, one block each
+  listed?: 'in-play',          // named in the catalogue, label-prefix and wiredBy prompt lines only when its tool
+                               //   is sent (default: always named); SYSTEM_PROMPT (every tool) still names it (#118)
 }
 ```
 - `ai: false` instead of an object: the part is never offered to the AI as a tool or listed in the prompt (e.g. the multimeter, the capacitor).
@@ -310,7 +316,8 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
   - `status` can also be `'unsettled'` or `'no-source'`
   - `parts: { [label]: { r: PartResult, m: measured, warnings: string[] } }`
 - `ledsOn` and `buzzersOn` are gone (#26): the page reads `parts[label].m` and calls each part's `view.update`. `'no-source'` replaced `'no-battery'`.
-- **Optional third argument `{ dt, state }`** (additive): `analyze(components, wires, { dt, state })` runs one time step of length `dt`.
+- **Optional third argument `{ dt, state, t? }`** (additive): `analyze(components, wires, { dt, state, t })` runs one time step of length `dt`.
+  - `t` is the time in seconds at the **end** of the step (the clock after it, which backward Euler solves for; the page passes `run.t + run.dt`, and the scope (#121) plots readings against it), for `V` elements with a `wave`; without `t` (or without `dt`) a wave reads its `offset`. A `V` with no `wave` ignores `t`.
   - Each `C` starts at its voltage in `state` (0 V when missing, i.e. discharged).
   - `state` and `result.state` are keyed `"<label>.<elementId>"` (e.g. `"C1.c"`), in volts, + from the `C`'s pin `a` to pin `b`.
   - `result.state` holds each capacitor's voltage after the step. Early returns (short wire across a source, parallel-source fight, unsolvable, unsettled, current source with no path) carry **no** `state`; the caller keeps its previous state.
@@ -318,8 +325,8 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
   - A capacitor carrying current (≥ 1 µA) counts as a complete path, so "Circuit open — no complete path." is not shown while one charges or discharges.
   - Without `dt`, a `C` is an open circuit.
   - Called without the third argument on a board with no `C` elements, it behaves exactly as today.
-- **`Sim.pickDt(tauMin)`** → the page's step in seconds: `tauMin / 50`, clamped to 10 µs–10 ms; 1 ms when `tauMin` is not a positive finite number.
-- **The page's time run (#103):** Run on a board with any `C` starts a `requestAnimationFrame` loop instead of one solve. It steps up to 200 times per frame at `dt = pickDt(τ)` (τ estimated as the smallest R × the smallest C), carrying `state`, so sim time keeps pace with real time (`(slowed)` when it can't). Each frame shows `t = <s> s` at the top of `#sim-results`, then sends `plugged:sim` with that frame's result. A control change keeps `state`; Stop cancels the loop and clears it. A board with no `C` solves once, as before.
+- **`Sim.pickDt(tauMin, fmax?)`** → the page's step in seconds: `min(tauMin / 50, 1 / (50·fmax))`, clamped to 10 µs–10 ms. Without a positive finite `fmax` it is `tauMin / 50` clamped, or 1 ms when `tauMin` is not a positive finite number; without `tauMin` but with `fmax` it is `1 / (50·fmax)` clamped. `Sim.estimateFreqMax(components)` → the board's highest wave `freq` in Hz, or `undefined`.
+- **The page's time run (#103, #119):** Run on a board with any `C` or any `V` with a `wave` starts a `requestAnimationFrame` loop instead of one solve. It steps up to 200 times per frame at `dt = pickDt(τ, fmax)` (τ estimated as the smallest R × the smallest C, `fmax` the highest wave frequency), carrying `state` and passing `t`, so sim time keeps pace with real time (`(slowed)` when it can't). Each frame shows `t = <s> s` at the top of `#sim-results`, then sends `plugged:sim` with that frame's result. A control change keeps `state`; Stop cancels the loop and clears it. A board with no `C` and no wave solves once, as before.
 
 ### `Readings` (`circuit3d/js/readings.js`)
 - **Owner:** readings (`circuit3d/js/readings.js`). A plain module that loads in Node, like `simulate.js`. It never changes the solver.
@@ -329,13 +336,14 @@ The one SI formatter: `withUnit(1234, 'Ω')` → `1.23 kΩ`. Used by the inspect
 - **Output:** an object with:
   - `netOf(hole)` → `{ id, holes[], pins[] }`
   - `voltage(hole | net)` → volts, or `null` when floating
-  - `part(label)` → `{ V, I, P, rating, over, energy? }`
+  - `part(label)` → `{ V, I, P, rating, over, energy?, opamps? }`
+    - A part with `E` elements (an op-amp) has `opamps: [{ pin, vout, mode, iout, ilim, unused }]`, one per E: its `out+` pin, Vout there (V vs ground, signed), the E's mode, Iout (mA, + sourcing out of `out+`), `ilim` (mA), and `unused` (both `ctrl` pins floating: a half nobody wired). Its V and I are op-amp 1's Vout and Iout, P is `null`.
     - V is the voltage across the part's outer pins, I is its current, and P = V·I, in W (I is in mA, so P = V × I ÷ 1000).
     - `rating` comes from the part's own values where it has one. Resistors are rated **¼ W**. A part with no rating has none.
     - `energy` is ½CV², in µJ, for capacitors only.
-  - `kcl(net)` → `[{ label, pin, amps }]`: each element current into the net, signed, in mA. It sums to 0 within 1 µA.
+  - `kcl(net)` → `[{ label, pin, amps }]`: each element current into the net, signed, in mA. It sums to 0 within 1 µA. An `E` enters at its `out` pins: +Iout into the `out+` net, −Iout into the `out−` net.
   - `thevenin(a, b)` → `{ Vth, Rth, In }` or `{ why }`. It solves copies of the board when called, never on every solve. `{ why }` when there is no source, or when a and b are on the same net.
-  - `problems()` → `[{ kind, labels[], why }]`, built from the simulation result. It covers shorts, LEDs with no resistor, backwards parts, open circuits and parts over their rating. `why` is plain English.
+  - `problems()` → `[{ kind, labels[], why, info? }]`, built from the simulation result. It covers shorts, LEDs with no resistor, backwards parts, open circuits and parts over their rating, and op-amps: `no-supply`, `output-shorted` (an output at its current limit: tied straight to ground, a rail or the other output, or a load that takes too much current), and `clipped`, the only row with `info: true` (a note, never an error: a comparator clips on purpose; an unused half gives none). `why` is plain English.
 - **`Readings.nets(board)`:** which holes and pins are joined, with no solve needed (for the connection highlight). `board` is `{ components, wires }`, as for `Readings.from`.
 - **Errors:** never throws. `voltage` gives `null` when floating; `thevenin` gives `{ why }`; `part(label)` for an unknown label and `netOf(hole)` for a hole not on the board give `null`.
 - **Mock:** none. Tests build a real result in Node with `Board.toSim` and `Sim.analyze`.
