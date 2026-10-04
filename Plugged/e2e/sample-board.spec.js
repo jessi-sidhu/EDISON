@@ -96,7 +96,7 @@ const boardNow = page => page.evaluate(() => App.exportBoard()).then(shape);
 
 // ── The picker ─────────────────────────────────────────────────────────────
 
-test('Use sample photo shows a picker of 3 tiles, demo-board, ensc-lab and leds-buttons, each with its photo, title and credit; Escape while leds-buttons reads builds nothing', async ({ page }) => {
+test('Use sample photo shows a picker of 4 tiles, demo-board, ensc-lab, leds-buttons and thandi-blinker, each with its photo, title and credit; Escape while leds-buttons reads builds nothing', async ({ page }) => {
   test.setTimeout(60_000);   // software WebGL
   const errors = watchErrors(page);
   const api = await watchApi(page);
@@ -105,7 +105,7 @@ test('Use sample photo shows a picker of 3 tiles, demo-board, ensc-lab and leds-
 
   await openPicker(page);
   const listed = await page.locator('#photo-samples [data-sample]').evaluateAll(ts => ts.map(t => t.dataset.sample));
-  expect(listed.sort(), 'a tile each for demo-board, ensc-lab and leds-buttons').toEqual(['demo-board', LAB, ID]);
+  expect(listed.sort(), 'a tile each for demo-board, ensc-lab, leds-buttons and thandi-blinker (#17)').toEqual(['demo-board', LAB, ID, 'thandi-blinker']);
   for (const id of listed) {
     await expect(tile(page, id), `the ${id} tile shows its title`).toContainText(samples[id].title);
     await expect(tile(page, id), `the ${id} tile shows its credit`).toContainText(samples[id].credit);
