@@ -36,6 +36,7 @@ const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 const { TWO_LEDS, handOver } = require('./fixtures/circuits');
+const { chooseSample } = require('./fixtures/photo-sample');
 
 // The contract's mock Reading (docs/API-CONTRACT.md → "Mock Reading"): R1 from
 // the + rail to a14 (built with a white jumper b10 → tp_10, flagged moved),
@@ -78,11 +79,10 @@ async function stub(page, reading) {
 
 const editorReady = page => page.waitForFunction(() => window.App && App.state && App.state.breadboard && App.renderer);
 
-// 📷 → Use sample photo → straight to demo-board, the one offered sample
-// (#200: no picker) → the confirm screen.
+// 📷 → Use sample photo → the demo-board tile when the picker shows (#15:
+// 2 samples offered; with one, no picker, #200) → the confirm screen.
 async function openConfirm(page) {
-  await page.locator('#photo-btn').click();
-  await page.locator('#photo-sample').click();
+  await chooseSample(page, 'demo-board');
   await expect(page.locator('#photo-confirm'), 'the Reading opens the confirm screen').toBeVisible();
 }
 

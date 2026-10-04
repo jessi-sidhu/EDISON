@@ -14,7 +14,10 @@
 //         (#photo-samples, #182): a tile per offered window.PhotoSamples
 //         entry (all but offered: false, #200), its photo, title and credit
 //         → its stored taps, sent as `sample: <id>`; Escape or Cancel closes
-//         it, nothing sent. One offered sample: no picker, straight to it
+//         it, nothing sent. One offered sample: no picker, straight to it.
+//         A sample with a `board` (#15): its photo as it is, under
+//         "Reading your board…" for SAMPLE_READ_MS, then that board straight
+//         to Build it's path below (no /api/photo, no confirm screen)
 //    → resize to ≤ 3,000 px → PhotoGrid.warp → JPEG 0.9 → POST /api/photo
 //    → the Reading opens the confirm screen (PhotoConfirm.open) at once, on
 //      the same flattened image, with the box round's placeholders (#173),
@@ -50,6 +53,7 @@
   const PHOTO_PAGE_TIMEOUT_MS = 60000;   // above the server's 45 s PHOTO_TIMEOUT_MS
   const PHOTO_LEADS_PAGE_TIMEOUT_MS = 45000;   // the server's 40 s PHOTO_LEADS_TIMEOUT_MS plus the upload
   const MAX_SIDE  = 3000;                // the original is resized to this before flattening
+  const SAMPLE_READ_MS = 1000;           // a board sample's photo under READING, then its board (#15)
   const READING   = 'Reading your board…';
   const DEFAULT_Q = "What's wrong with my circuit?";       // Build it with nothing typed
   // docs/API-CONTRACT.md → "POST /api/photo" → Errors
@@ -67,6 +71,7 @@
   const colsEl  = $('photo-cols'),    okBtn  = $('photo-ok'),     status = $('photo-status');
   const errBtn  = $('photo-error-sample'), confirm = $('photo-confirm');
   const picker  = $('photo-samples'),      credit  = $('photo-credit');
+  const cornerBtns = corners.querySelector('.photo-btns');
 
   let img  = null;   // the photo being tapped
   let taps = [];     // its tapped corners, photo pixels, in corner order
@@ -84,6 +89,7 @@
     menu.hidden = true;
     picker.hidden = true;
     corners.hidden = true;
+    prompt.hidden = cornerBtns.hidden = false;            // showPhoto hides them
     confirm.hidden = true;
     showStatus('', false);
     modal.style.display = 'flex';
@@ -126,13 +132,13 @@
     img = im;
     taps = [];
     corners.hidden = false;
-    sizeCanvas();
+    sizeCanvas(img);
     update();
   }
 
   // The photo fills the canvas box exactly, scaled to fit the window.
-  function sizeCanvas() {
-    const w = img.naturalWidth, h = img.naturalHeight;
+  function sizeCanvas(im) {
+    const w = im.naturalWidth, h = im.naturalHeight;
     const fit = Math.min((window.innerWidth - 96) / w, (window.innerHeight - 200) / h);
     const cw  = Math.round(w * fit), ch = Math.round(h * fit), dpr = window.devicePixelRatio || 1;
     canvas.style.width  = cw + 'px';
@@ -344,7 +350,7 @@
     }
   }
 
-  // Build it on the confirm screen: { actions, flags, labels, skipped }.
+  // Build it on the confirm screen, or a board sample (#15): { actions, flags, labels, skipped }.
   // The board, the simulation, then Edison answers her question (#143).
   function built(result) {
     const typed    = $('sparky-input').value.trim();
@@ -400,8 +406,31 @@
     const im = await loadImage(s.file).catch(() => null);
     if (my !== job) return;
     if (!im) return showStatus(AI_FAILED, true);
+    if (s.board) return buildBoard(my, im, s.board);
     Capture.grid = PhotoGrid.homography(s.taps, s.cols);
     send(im, Capture.grid, id);
+  }
+
+  // A hard-coded board (#15): its photo as it is under READING for
+  // SAMPLE_READ_MS, then the board exactly. No /api/photo, no confirm screen;
+  // Escape or Cancel meanwhile (a new job) builds nothing.
+  async function buildBoard(my, im, actions) {
+    showPhoto(im);
+    await new Promise(r => setTimeout(r, SAMPLE_READ_MS));
+    if (my !== job) return;
+    built({ actions, flags: [], labels: {}, skipped: [] });
+  }
+
+  // The corner step's canvas alone, showing the photo: no prompt, no
+  // buttons, and no image to tap (img stays null).
+  function showPhoto(im) {
+    img = null;
+    taps = [];
+    Capture.grid = null;
+    prompt.hidden = cornerBtns.hidden = true;
+    corners.hidden = false;
+    sizeCanvas(im);
+    canvas.getContext('2d').drawImage(im, 0, 0, canvas.width, canvas.height);
   }
 
   // ── Wiring ─────────────────────────────────────────────────

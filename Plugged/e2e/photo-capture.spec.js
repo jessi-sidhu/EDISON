@@ -73,16 +73,17 @@
 //     A sample's confirm screen shows its credit (PhotoSamples[id].credit) as
 //     visible text inside #photo-confirm, and no other sample's credit.
 //   - #200: the picker offers only samples that build a working circuit:
-//     every entry but those with offered: false, and today that's demo-board
-//     alone. With one offered sample, Use sample photo (and the error card's)
-//     goes straight to it: no picker. The picker tests here offer a second
-//     sample in the page (offered = true before the picker first opens), so
-//     its tiles are the offered samples only.
+//     every entry but those with offered: false (demo-board and, since #15,
+//     leds-buttons). With one offered sample, Use sample photo (and the error
+//     card's) goes straight to it: no picker. Each test here sets the offered
+//     samples in the page (offerOnly, before the picker first opens), so its
+//     tiles are those samples only.
 //   - While #photo-modal is open, keydown is swallowed in the capture phase:
 //     Backspace and Ctrl+Z never reach the board.
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
+const { offerOnly } = require('./fixtures/photo-sample');
 
 const PHOTO_FILE = path.join(__dirname, 'fixtures', 'photo.jpg');
 const PHOTO_B64  = fs.readFileSync(PHOTO_FILE).toString('base64');
@@ -141,8 +142,8 @@ async function pickSample(page, id) {
   await expect(tile(page, id), `the sample picker (#182) shows the ${id} tile`).toBeVisible();
   await tile(page, id).click();
 }
-// Offers these samples too (#200: only demo-board is offered), so the picker
-// shows; before it first opens, since its tiles are built then.
+// Offers these samples too (#200: an off-picker sample is offered: false), so
+// the picker shows them; before it first opens, since its tiles are built then.
 const offer = (page, ids) => page.evaluate(ids => { for (const id of ids) window.PhotoSamples[id].offered = true; }, ids);
 const offeredOf = samples => Object.keys(samples).filter(id => samples[id].offered !== false);
 
@@ -280,7 +281,7 @@ test('Choose photo → tap a1, a63, j63, j1 → the grid appears; Redo; Looks ri
 
 // ── The sample ─────────────────────────────────────────────────────────────
 
-test('Use sample photo → straight to demo-board, the one offered sample (no picker, #200) → /api/photo gets sample "demo-board" with its flattened image, the corner step never shows, and its credit is on the confirm screen', async ({ page }) => {
+test('with demo-board the one sample offered, Use sample photo → straight to it (no picker, #200) → /api/photo gets sample "demo-board" with its flattened image, the corner step never shows, and its credit is on the confirm screen', async ({ page }) => {
   const errors = watchErrors(page);
   const sent = [];
   await page.route('**/api/photo', route => {
@@ -293,7 +294,8 @@ test('Use sample photo → straight to demo-board, the one offered sample (no pi
   expect(sample.file).toBe('samples/demo-board.jpg');
   expect(Object.keys(sample.taps).sort()).toEqual([`a${sample.cols}`, 'a1', `j${sample.cols}`, 'j1'].sort());
 
-  expect(offeredOf(await samplesOf(page)), 'demo-board is the one sample offered (#200)').toEqual(['demo-board']);
+  await offerOnly(page, ['demo-board']);
+  expect(offeredOf(await samplesOf(page)), 'demo-board is the one sample offered here').toEqual(['demo-board']);
 
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();
@@ -323,7 +325,7 @@ test('with 2 samples offered, Use sample photo opens a picker with a tile per of
     return route.fulfill({ json: MOCK_RESPONSE });
   });
   await openEditor(page);
-  await offer(page, ['resistors']);
+  await offerOnly(page, ['demo-board', 'resistors']);
   const samples = await samplesOf(page);
   const ids = Object.keys(samples);
   expect(ids, 'PhotoSamples holds demo-board and the 4 new samples').toEqual(expect.arrayContaining(['demo-board', ...NEW_SAMPLES]));
@@ -493,6 +495,7 @@ test('an error shows the reply with Use sample photo; a stalled /api/photo gives
   });
   await openEditor(page);
   expect(await page.evaluate(() => window.PhotoCapture && window.PhotoCapture.timeoutMs), 'PHOTO_PAGE_TIMEOUT_MS').toBe(60000);
+  await offerOnly(page, ['demo-board']);
 
   await page.locator('#photo-btn').click();
   await page.locator('#photo-sample').click();            // one offered sample: sent at once (#200)

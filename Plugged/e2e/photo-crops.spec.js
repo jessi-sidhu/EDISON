@@ -94,6 +94,7 @@
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
+const { chooseSample } = require('./fixtures/photo-sample');
 
 // The demo board's saved reading: boxes, but real holes and nothing unsure.
 const MOCK_READING = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'photo', 'demo-board.json'), 'utf8')).reading;
@@ -174,11 +175,9 @@ function answers(c) {
 // Where each answered leg should land.
 const LANDS = { R1: ['h10', 'h14'], LED1: ['b40', 'b42'], W1: ['g15', 'rail:jOuter:20'] };
 
-// 📷 → Use sample photo → straight to demo-board, the one offered sample (#200: no picker).
-const openSample = async page => {
-  await page.locator('#photo-btn').click();
-  await page.locator('#photo-sample').click();
-};
+// 📷 → Use sample photo → the demo-board tile when the picker shows (#15: 2
+// samples offered; with one, no picker, #200).
+const openSample = page => chooseSample(page, 'demo-board');
 
 const confirmState = page => page.evaluate(() => {
   const c = window.PhotoConfirm;
