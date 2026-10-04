@@ -19,6 +19,9 @@
 | AI-03 | Fresh board. Place a battery, a resistor and an LED **backwards** by hand, and wire them. Send: `Why isn't my LED lighting up?` | The reply says the LED is backwards (reversed, cathode and anode swapped, or flip it). |
 | AI-04 | After AI-03, send: `Fix it.` Accept, then Run Simulation. | The LED lights. |
 | AI-05 | Send: `What does a resistor do?` | A plain answer. No preview, and no Accept/Decline bar. |
+| AI-06 | Fresh board. Send: `Build one LED circuit.` Look at the preview, Accept, then Run Simulation. | No hole holds two leads: every resistor leg, LED leg and wire end sits in its own hole (for example resistor a2–a6, LED b6/b8, wires into b2 and c8). The reply has no "Hole … holds 2 leads" or other "Heads up" line. `💡 LED ON (14.9 mA)`. |
+| AI-07 | After AI-06, send: `Add a second LED in parallel.` Accept, then Run Simulation. | Still one resistor and one pair of rail wires. LED2's legs are in the same two columns as LED1's (anode with anode, cathode with cathode), in free rows. The reply says the LEDs are in parallel and has no "Heads up". Two `💡 LED ON (7.4 mA)` lines. |
+| AI-08 | Fresh board. Send: `Put two LEDs in series.` Accept, then Run Simulation. | One resistor and one current path: LED1's cathode column is LED2's anode column, and only LED2's cathode column is wired to ground. The reply says the LEDs are in series and that they are dimmer or need a lower resistor. No "Heads up". Two `💡 LED ON` lines with the same current, about 10.6 mA at 9 V and 470 Ω. |
 
 ## Logic checks (are the numbers right?)
 Build these by hand, then click Run Simulation.

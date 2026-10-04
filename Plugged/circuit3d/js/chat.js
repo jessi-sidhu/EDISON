@@ -55,14 +55,24 @@
   const PLACE = { place_resistor: 'placeResistor', place_led: 'placeLED',
                   place_buzzer: 'placeBuzzer', place_button: 'placeButton' };
 
+  // The one value each part takes from the AI; buzzers and buttons take none.
+  const VALUE_KEY = { place_resistor: 'resistance', place_led: 'color', place_battery: 'voltage' };
+
+  // The values an action names for its part, e.g. { resistance: 1000 }, or {}
+  // for the part's defaults. The server has already dropped bad ones.
+  function partValues(a) {
+    const key = VALUE_KEY[a.tool];
+    return key && a[key] != null ? { [key]: a[key] } : {};
+  }
+
   function applyOne(a, board) {
     if (PLACE[a.tool]) {
       const hA = holeOf(a.holeA, board), hB = holeOf(a.holeB, board);
       if (!hA || !hB) return false;
-      board[PLACE[a.tool]](hA, hB);
+      board[PLACE[a.tool]](hA, hB, partValues(a));
       return true;
     }
-    if (a.tool === 'place_battery') { board.placeBattery(BATTERY_SPOT.x, BATTERY_SPOT.z); return true; }
+    if (a.tool === 'place_battery') { board.placeBattery(BATTERY_SPOT.x, BATTERY_SPOT.z, partValues(a)); return true; }
     if (a.tool === 'delete_all')    { board.clearAll(); return true; }
     if (a.tool === 'add_wire') {
       const from = resolveEndpoint(a.from, board), to = resolveEndpoint(a.to, board);
@@ -103,7 +113,7 @@
     });
   }
 
-  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, colorHex, BATTERY_SPOT };
+  return { resolveEndpoint, applyActions, acceptBuild, predictLabels, partValues, colorHex, BATTERY_SPOT };
 });
 
 // ── Browser panel ─────────────────────────────────────────────
@@ -117,11 +127,11 @@ if (typeof window !== 'undefined') (function (App, Chat) {
     components:    () => App.state.components,
     parseHole:     s => App.parseHole(s),
     getHole:       (col, row) => App.state.breadboard.getHole(col, row),
-    placeResistor: (a, b) => App.placeResistor(a, b),
-    placeLED:      (a, b) => App.placeLED(a, b),
-    placeBuzzer:   (a, b) => App.placeBuzzer(a, b),
-    placeButton:   (a, b) => App.placeButton(a, b),
-    placeBattery:  (x, z) => App.placeBattery(x, z),
+    placeResistor: (a, b, v) => App.placeResistor(a, b, v),
+    placeLED:      (a, b, v) => App.placeLED(a, b, v),
+    placeBuzzer:   (a, b, v) => App.placeBuzzer(a, b, v),
+    placeButton:   (a, b, v) => App.placeButton(a, b, v),
+    placeBattery:  (x, z, v) => App.placeBattery(x, z, v),
     clearAll:      () => App.clearAll(),
     batch:         fn => App.history.batch(fn),
     addWire(from, to, hex) {
@@ -230,7 +240,7 @@ if (typeof window !== 'undefined') (function (App, Chat) {
           const SPANS = { resistor: App.RESISTOR_SPAN, led: App.LED_SPAN,
                           buzzer: App.BUZZER_SPAN, button: App.BUTTON_SPAN };
           const rotation = hA.hole.col === hB.hole.col ? 1 : 0;
-          ghost = App.buildPreview(type, SPANS[type] || 2, bb.HS, rotation);
+          ghost = App.buildPreview(type, SPANS[type] || 2, bb.HS, rotation, Chat.partValues(a));
           ghost.position.set((hA.hole.x + hB.hole.x) / 2, 0, (hA.hole.z + hB.hole.z) / 2);
         }
       } else if (a.tool === 'place_battery') {

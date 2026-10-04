@@ -254,3 +254,52 @@ test('buildGraph merges columns, rails and wired holes into one node each', () =
   assert.equal(Sim.bbNodeId(5, 'h'), 'bb_bot_5');
   assert.equal(Sim.bbNodeId(5, 'tp'), 'bb_rail_tp');
 });
+
+// ── The prompt's recipe builds, issue #10 ─────────────────────
+// test/fixtures/recipes.js holds the example builds the system prompt
+// copies (C = 2), as AI actions. Run through the solver with the defaults
+// (9 V, 470R, red LED Vf 2.0 V, R_ON 0.1 ohm).
+
+const Recipes = require('./fixtures/recipes.js');
+
+function simulate(actions) {
+  const { components, wires } = Recipes.toCircuit(actions);
+  return { components, r: Sim.analyze(components, wires), graph: Sim.buildGraph(components, wires) };
+}
+const ledIdx = comps => comps.map((c, i) => c.type === 'led' ? i : -1).filter(i => i >= 0);
+
+// I = (9 - 2) / (470 + 0.1) = 14.890 mA
+test('one-LED recipe: the LED lights at (9-2)/470 (#10)', () => {
+  const { components, r } = simulate(Recipes.ONE_LED);
+  const [led] = ledIdx(components);
+
+  assert.equal(r.status, 'ok');
+  assert.equal(r.ledsOn.length, 1, texts(r).join(' | '));
+  assert.ok(Math.abs(mA(ledI(r, led)) - 14.89) < 0.05, `got ${mA(ledI(r, led))}`);
+});
+
+// Both LEDs across columns 6 and 8: 14.89 mA through the resistor, split
+// (9 - 2) / (470 + 0.05) / 2 = 7.446 mA each.
+test('parallel recipe: both LEDs lit, sharing both nodes and the current (#10)', () => {
+  const { components, r, graph } = simulate(Recipes.PARALLEL_2);
+  const [a, b] = ledIdx(components);
+
+  assert.equal(graph[a].nodes[1], graph[b].nodes[1], 'the anodes share a node');
+  assert.equal(graph[a].nodes[0], graph[b].nodes[0], 'the cathodes share a node');
+  assert.equal(r.status, 'ok');
+  assert.equal(r.ledsOn.length, 2, texts(r).join(' | '));
+  assert.ok(Math.abs(mA(ledI(r, a)) - 7.45) < 0.2, `LED1 ${mA(ledI(r, a))}`);
+  assert.ok(Math.abs(mA(ledI(r, b)) - 7.45) < 0.2, `LED2 ${mA(ledI(r, b))}`);
+});
+
+// A chain: I = (9 - 2 - 2) / (470 + 0.2) = 10.634 mA through both LEDs.
+test('series recipe: both LEDs lit with equal current (9-4)/470 (#10)', () => {
+  const { components, r, graph } = simulate(Recipes.SERIES_2);
+  const [a, b] = ledIdx(components);
+
+  assert.equal(graph[a].nodes[0], graph[b].nodes[1], "LED1's cathode is LED2's anode");
+  assert.equal(r.status, 'ok');
+  assert.equal(r.ledsOn.length, 2, texts(r).join(' | '));
+  assert.ok(Math.abs(mA(ledI(r, a)) - mA(ledI(r, b))) < 1e-6, `LED1 ${mA(ledI(r, a))}, LED2 ${mA(ledI(r, b))}`);
+  assert.ok(Math.abs(mA(ledI(r, a)) - 10.63) < 0.05, `got ${mA(ledI(r, a))}`);
+});

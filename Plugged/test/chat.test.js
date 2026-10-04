@@ -189,3 +189,76 @@ test('predicted labels count each type separately and follow the board, gaps inc
   ];
   assert.deepEqual(Chat.predictLabels(actions, board), ['R3', 'LED1', null, 'R1', 'BAT1']);
 });
+
+// ── Part values (1 kΩ, green, 5 V), issue #9 ───────────────────────────────
+
+// A board that records the values object each place* call receives: the
+// third argument for parts on the breadboard and for the battery alike.
+function valuesBoard() {
+  const got = [];
+  const board = Object.assign(fakeBoard([]), {
+    placeResistor: (a, b, v) => got.push(['resistor', v]),
+    placeLED:      (a, b, v) => got.push(['led', v]),
+    placeBuzzer:   (a, b, v) => got.push(['buzzer', v]),
+    placeButton:   (a, b, v) => got.push(['button', v]),
+    placeBattery:  (x, z, v) => got.push(['battery', v]),
+  });
+  board.got = got;
+  return board;
+}
+
+test('place_resistor with resistance:1000 calls placeResistor with { resistance: 1000 }', () => {
+  const board = valuesBoard();
+  const out = Chat.applyActions([{ tool: 'place_resistor', holeA: 'a2', holeB: 'a6', resistance: 1000 }], board);
+  assert.deepEqual(out, { applied: 1, failed: 0 });
+  assert.deepStrictEqual(board.got, [['resistor', { resistance: 1000 }]]);
+});
+
+test('place_led with color:"green" calls placeLED with { color: "green" }', () => {
+  const board = valuesBoard();
+  Chat.applyActions([{ tool: 'place_led', holeA: 'a8', holeB: 'a6', color: 'green' }], board);
+  assert.deepStrictEqual(board.got, [['led', { color: 'green' }]]);
+});
+
+test('place_battery with voltage:5 calls placeBattery with { voltage: 5 } as its third argument', () => {
+  const board = valuesBoard();
+  Chat.applyActions([{ tool: 'place_battery', voltage: 5 }], board);
+  assert.deepStrictEqual(board.got, [['battery', { voltage: 5 }]]);
+});
+
+// Only the key that belongs to the part reaches the board: a resistor takes
+// no colour, an LED no resistance, and anything unknown is left behind.
+test('each part gets only its own value key, never another part\'s or an unknown one', () => {
+  const board = valuesBoard();
+  Chat.applyActions([
+    { tool: 'place_resistor', holeA: 'a2', holeB: 'a6', resistance: 1000, color: 'green', voltage: 5, label: 'R9', junk: 1 },
+    { tool: 'place_led',      holeA: 'a8', holeB: 'a6', color: 'blue', resistance: 1000, forwardVoltage: 9 },
+    { tool: 'place_battery',  voltage: 5, resistance: 1000, holeA: 'a1' },
+  ], board);
+  assert.deepStrictEqual(board.got, [
+    ['resistor', { resistance: 1000 }],
+    ['led',      { color: 'blue' }],
+    ['battery',  { voltage: 5 }],
+  ]);
+});
+
+// Chosen shape: the third argument is always an object, and it is empty
+// when the AI named no value, so App.componentValues fills in the defaults.
+test('a part placed without a value gets an empty values object, so it keeps its defaults', () => {
+  const board = valuesBoard();
+  Chat.applyActions([
+    { tool: 'place_battery' },
+    { tool: 'place_resistor', holeA: 'a2', holeB: 'a6' },
+    { tool: 'place_led',      holeA: 'a8', holeB: 'a6' },
+  ], board);
+  assert.deepStrictEqual(board.got, [['battery', {}], ['resistor', {}], ['led', {}]]);
+});
+
+test('buzzers and buttons get no values, even if the action carries some', () => {
+  const board = valuesBoard();
+  Chat.applyActions([
+    { tool: 'place_buzzer', holeA: 'a2', holeB: 'a4', resistance: 1000, color: 'green', voltage: 5 },
+    { tool: 'place_button', holeA: 'a6', holeB: 'a9', resistance: 1000, color: 'green', voltage: 5 },
+  ], board);
+  assert.deepStrictEqual(board.got, [['buzzer', {}], ['button', {}]]);
+});

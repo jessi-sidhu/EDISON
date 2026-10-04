@@ -144,3 +144,45 @@ test('with AI_PROVIDER=deepseek, makeAsk runs the reply through the shared finis
     if (saved === undefined) delete process.env.AI_PROVIDER; else process.env.AI_PROVIDER = saved;
   }
 });
+
+// ── Part values on the real tools, issue #9 ────────────────────────────────
+// CIRCUIT_TOOLS is not exported, so read the literal out of server.js the way
+// the system-prompt tests do, and convert it as askDeepSeek does.
+function realTools() {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'backend', 'server.js'), 'utf8');
+  const start = src.indexOf('[', src.indexOf('const CIRCUIT_TOOLS'));
+  const end = src.indexOf('\n}];', start) + 3;
+  return P.toOpenAITools(new Function(`return ${src.slice(start, end)};`)());
+}
+const toolParams = name => {
+  const t = realTools().find(x => x.function.name === name);
+  assert.ok(t, `no ${name} tool`);
+  return t.function.parameters;
+};
+
+test('the OpenAI tool for place_resistor has an optional number property "resistance"', () => {
+  const p = toolParams('place_resistor');
+  assert.ok(p.properties.resistance, 'place_resistor has no resistance property');
+  assert.equal(p.properties.resistance.type, 'number');
+  assert.deepEqual(p.required, ['holeA', 'holeB']);
+});
+
+test('the OpenAI tool for place_led has an optional string property "color"', () => {
+  const p = toolParams('place_led');
+  assert.ok(p.properties.color, 'place_led has no color property');
+  assert.equal(p.properties.color.type, 'string');
+  assert.deepEqual(p.required, ['holeA', 'holeB']);
+});
+
+test('the OpenAI tool for place_battery has an optional number property "voltage"', () => {
+  const p = toolParams('place_battery');
+  assert.ok(p.properties.voltage, 'place_battery has no voltage property');
+  assert.equal(p.properties.voltage.type, 'number');
+  assert.ok(!(p.required || []).includes('voltage'), 'voltage must be optional');
+});
+
+test('buzzer and button tools take no value fields', () => {
+  for (const name of ['place_buzzer', 'place_button']) {
+    assert.deepEqual(Object.keys(toolParams(name).properties).sort(), ['holeA', 'holeB'], name);
+  }
+});

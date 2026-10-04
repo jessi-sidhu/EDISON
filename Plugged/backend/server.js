@@ -73,10 +73,12 @@ const SYSTEM_PROMPT = [
   '  2. add_wire from "BAT1.1" to "tn_N" (black wire)',
   '- Without BOTH battery wires the circuit WILL NOT WORK. ALWAYS include them.',
   '- Never wire BAT1.0 straight to BAT1.1, or tp to tn: that is a short circuit.',
+  '- Battery wires go to the rails at the highest column, the end nearest the battery, so they drop straight in. In the recipes, N = the highest column in the board description (Columns 1-N).',
   '',
   'COMPONENT RULES:',
   '- LED: holeA = cathode (-) goes toward GND. holeB = anode (+) goes toward resistor/power.',
   '- Every LED needs a resistor in series to limit current.',
+  '- When the user names a value, pass it: "a 1 kΩ resistor" → place_resistor with resistance: 1000 (ohms), "a green LED" → place_led with color: "green", "a 5 V battery" → place_battery with voltage: 5. Leave it out otherwise.',
   '',
   'SIZING (columns apart, same row):',
   '- place_resistor: exactly 4 columns apart (e.g. a3 and a7)',
@@ -95,27 +97,56 @@ const SYSTEM_PROMPT = [
   '- When asked to build, fix, or create a circuit: call delete_all FIRST, then rebuild from scratch.',
   '- Never patch an existing circuit. Always clear and rebuild the full correct circuit.',
   '- After building, write 2-3 sentences explaining what you built and how it works.',
+  '- When you explain a build with more than one LED, say which topology you built: series, parallel, or separate branches.',
   '',
   'CRITICAL WIRING RULES:',
   '- Placing a component on the board does NOT connect it to power or ground.',
   '- You MUST add_wire from a power rail (tp_N) to each component that needs +9V.',
   '- You MUST add_wire from each component that needs GND to a ground rail (tn_N).',
   '- Without these rail-to-body wires, the circuit WILL NOT WORK.',
+  '- A hole holds one lead. To connect to a part, use another hole in the same column and half.',
+  '- Every hole, body or rail, takes at most one part lead or wire end. Spread leads across rows a-e of a column.',
   '',
   'COMPLETE RECIPE FOR ONE LED (starting at column C):',
   '  1. delete_all',
   '  2. place_battery',
-  '  3. add_wire: BAT1.0 -> tp_C (red)               ← battery to + rail',
-  '  4. add_wire: BAT1.1 -> tn_{C+6} (black)         ← battery to - rail',
+  '  3. add_wire: BAT1.0 -> tp_{N} (red)             ← battery to + rail at the highest column',
+  '  4. add_wire: BAT1.1 -> tn_{N} (black)           ← battery to - rail at the highest column',
   '  5. place_resistor: holeA=a{C}, holeB=a{C+4}',
-  '  6. place_led: holeA=a{C+6} (cathode), holeB=a{C+4} (anode)',
-  '  7. add_wire: tp_{C} -> a{C} (red)               ← rail to resistor (REQUIRED!)',
-  '  8. add_wire: a{C+6} -> tn_{C+6} (black)         ← LED cathode to rail (REQUIRED!)',
+  '  6. place_led: holeA=b{C+6} (cathode), holeB=b{C+4} (anode)',
+  '  7. add_wire: tp_{C+1} -> b{C} (red)             ← rail to the resistor\'s column (REQUIRED!)',
+  '  8. add_wire: c{C+6} -> tn_{C+6} (black)         ← LED cathode\'s column to rail (REQUIRED!)',
   'Steps 7 and 8 are REQUIRED for EVERY LED group. Without them the LED will not light up.',
+  'At C=2: resistor a2-a6, LED cathode b8 and anode b6, wires tp_3 -> b2 and c8 -> tn_8. No hole is used twice.',
   '',
-  'FOR 3 LEDs (at C=2, C=10, C=18):',
+  'SERIES vs PARALLEL:',
+  '- Parallel: the parts share BOTH nodes. Every LED\'s anode sits in the same column as the other anodes, and every cathode in the same column as the other cathodes, each in a free row. One resistor can feed them all.',
+  '- Series: a chain with one current path. LED1\'s cathode column is LED2\'s anode column. Each red LED drops about 2 V, so two in series are dimmer, or need a lower resistor on a low-voltage battery.',
+  '- "Add a second LED in parallel" means the parallel recipe below: the new LED goes across the same two columns, NOT a second resistor and its own rail wires.',
+  '- Separate branches (each LED with its own resistor and rail wires) ONLY when the user asks for independent LEDs or one resistor each.',
+  '',
+  'RECIPE FOR 2 LEDs IN PARALLEL (one shared resistor, starting at column C):',
+  '  Steps 1-8 of the one-LED recipe, then:',
+  '  9. place_led: holeA=d{C+6} (cathode), holeB=d{C+4} (anode)   ← same two columns as LED1, free row d',
+  '  Total calls: 9.',
+  '',
+  'RECIPE FOR 2 LEDs IN SERIES (one resistor, starting at column C):',
+  '  1. delete_all',
+  '  2. place_battery',
+  '  3. add_wire: BAT1.0 -> tp_{N} (red)',
+  '  4. add_wire: BAT1.1 -> tn_{N} (black)',
+  '  5. place_resistor: holeA=a{C}, holeB=a{C+4}',
+  '  6. place_led: holeA=b{C+6} (cathode), holeB=b{C+4} (anode)    ← LED1',
+  '  7. place_led: holeA=c{C+8} (cathode), holeB=c{C+6} (anode)    ← LED2, anode in LED1\'s cathode column',
+  '  8. add_wire: tp_{C+1} -> b{C} (red)',
+  '  9. add_wire: d{C+8} -> tn_{C+8} (black)                       ← LED2 cathode\'s column to rail',
+  '  Total calls: 9.',
+  '',
+  'SEPARATE BRANCHES, ONLY WHEN ASKED (e.g. "3 LEDs, each with its own resistor", at C=2, C=10, C=18):',
+  '  Battery wires once: BAT1.0 -> tp_{N} (red) and BAT1.1 -> tn_{N} (black), tp_50 and tn_50 on a 50-column board.',
+  '  Each group is steps 5-8 of the one-LED recipe at its own C.',
   '  Total calls: 1 delete_all + 1 place_battery + 2 battery wires + 3*(place_resistor + place_led + 2 rail wires) = 16 calls.',
-  '  Every LED group needs its own pair of rail-to-body wires: tp_{C}->a{C} and a{C+6}->tn_{C+6}.',
+  '  Every LED group needs its own pair of rail-to-body wires: tp_{C+1}->b{C} and c{C+6}->tn_{C+6}.',
   '',
   'Reply style: 2-5 sentences max. Be specific with hole names. Be encouraging.',
   'For pure questions (no building), just respond with helpful text. Do not call any tools.',
@@ -130,7 +161,13 @@ const CIRCUIT_TOOLS = [{
     },
     {
       name: 'place_battery',
-      description: 'Place a 9V battery off-board. It gets the next battery label (BAT1 after delete_all). You MUST follow this with add_wire calls to connect BAT1.0 (+) to a positive rail (tp_N) and BAT1.1 (-) to a negative rail (tn_N).',
+      description: 'Place a battery off-board, 9V unless you pass voltage. It gets the next battery label (BAT1 after delete_all). You MUST follow this with add_wire calls to connect BAT1.0 (+) to a positive rail (tp_N) and BAT1.1 (-) to a negative rail (tn_N).',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          voltage: { type: 'NUMBER', description: 'Optional. Battery voltage in volts, e.g. 5. Only when the user names one.' },
+        },
+      },
     },
     {
       name: 'place_resistor',
@@ -140,6 +177,7 @@ const CIRCUIT_TOOLS = [{
         properties: {
           holeA: { type: 'STRING', description: 'Start hole, e.g. "a3"' },
           holeB: { type: 'STRING', description: 'End hole, 4 columns from holeA, e.g. "a7"' },
+          resistance: { type: 'NUMBER', description: 'Optional. Resistance in ohms, e.g. 1000 for 1 kΩ. Only when the user names one.' },
         },
         required: ['holeA', 'holeB'],
       },
@@ -152,6 +190,8 @@ const CIRCUIT_TOOLS = [{
         properties: {
           holeA: { type: 'STRING', description: 'Cathode (-) hole, e.g. "a9"' },
           holeB: { type: 'STRING', description: 'Anode (+) hole, e.g. "a7"' },
+          // The names are LED_COLORS below. This literal can't reference it.
+          color: { type: 'STRING', description: 'Optional. LED colour: red, yellow, green, blue, or white. Only when the user names one.' },
         },
         required: ['holeA', 'holeB'],
       },
@@ -196,6 +236,39 @@ const CIRCUIT_TOOLS = [{
   ],
 }];
 
+// ── Part values ──────────────────────────────────────────────
+// The LED colours the board knows. Keep in step with LED_TYPES in
+// circuit3d/js/components.js.
+const LED_COLORS = ['red', 'yellow', 'green', 'blue', 'white'];
+
+// Drops a value the board can't use from its action, keeping the part at its
+// default. Returns the (possibly copied) action and a note for each drop.
+// A null or missing value is not a value, so it goes without a note.
+function checkPartValues(a) {
+  const notes = [];
+  const drop = (key, note) => {
+    const { [key]: _gone, ...rest } = a;
+    if (a[key] != null) notes.push(note);
+    a = rest;
+  };
+  const positive = v => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const shown = v => typeof v === 'string' ? `"${v}"` : String(v);
+
+  if (a.tool === 'place_resistor' && 'resistance' in a && !positive(a.resistance)) {
+    drop('resistance', `The resistance ${shown(a.resistance)} isn't a usable value, so the resistor at ${a.holeA}/${a.holeB} uses the default resistance.`);
+  }
+  if (a.tool === 'place_battery' && 'voltage' in a && !positive(a.voltage)) {
+    drop('voltage', `The battery voltage ${shown(a.voltage)} isn't a usable value, so the battery uses the default voltage.`);
+  }
+  if (a.tool === 'place_led' && 'color' in a) {
+    const c = typeof a.color === 'string' ? a.color.toLowerCase() : null;
+    if (!LED_COLORS.includes(c)) {
+      drop('color', `The LED colour ${shown(a.color)} isn't one I have (${LED_COLORS.join(', ')}), so the LED at ${a.holeA}/${a.holeB} uses the default colour.`);
+    } else if (c !== a.color) a = { ...a, color: c };
+  }
+  return { action: a, notes };
+}
+
 // ── Validate actions ─ report problems, never rewrite ────────
 // Reports what is wrong with the proposed circuit and returns the actions
 // untouched. Patching them silently hides the model's mistake and can turn a
@@ -229,9 +302,41 @@ function nodeKey(hole) {
   return hole;   // other part pins and anything unrecognised stay as themselves
 }
 
-// LEDs are left out of the graph below: they only conduct one way, so
+// LEDs are left out of the plain graph below: they only conduct one way, so
 // treating one as a plain connection would bridge power to ground.
 const CONDUCTORS = ['place_resistor', 'place_button', 'place_buzzer'];
+
+const PART_NAMES = { place_resistor: 'resistor', place_led: 'LED', place_buzzer: 'buzzer', place_button: 'button' };
+
+// A breadboard hole takes one lead. Names each body hole (a-j) that holds
+// more than one part lead or wire end, and what is in it. Rails are one net
+// each and are left alone. Counts start again at each delete_all.
+function findStackedHoles(actions) {
+  let used = new Map();
+  const put = (hole, what) => {
+    const h = String(hole).toLowerCase();
+    if (!/^[a-j]\d+$/.test(h)) return;
+    if (!used.has(h)) used.set(h, []);
+    used.get(h).push(what);
+  };
+  for (const a of actions) {
+    if (a.tool === 'delete_all') used = new Map();
+    else if (PART_NAMES[a.tool]) { put(a.holeA, PART_NAMES[a.tool]); put(a.holeB, PART_NAMES[a.tool]); }
+    else if (a.tool === 'add_wire') { put(a.from, 'wire'); put(a.to, 'wire'); }
+  }
+  const problems = [];
+  for (const [h, list] of used) {
+    if (list.length < 2) continue;
+    // "the resistor", "a wire", "2 LEDs"
+    const what = [...new Set(list)].map(k => {
+      const n = list.filter(x => x === k).length;
+      return n > 1 ? `${n} ${k}s` : (k === 'wire' ? 'a wire' : `the ${k}`);
+    });
+    const said = what.length > 1 ? `${what.slice(0, -1).join(', ')} and ${what[what.length - 1]}` : what[0];
+    problems.push(`Hole ${h} holds ${list.length} leads (${said}). A hole takes one lead; use another hole in the same column.`);
+  }
+  return problems;
+}
 
 // Problems name battery pins in label form (BAT1.0), matching the board and
 // the prompt, unless the AI itself wrote the old form (battery_0_pin0).
@@ -252,18 +357,27 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     if (CONDUCTORS.includes(c.tool)) edges.push([nodeKey(c.holeA), nodeKey(c.holeB)]);
   }
 
-  function reach(seed, graph = edges) {
+  // An edge [x, y] conducts both ways; [x, y, true] only from x to y.
+  // Nodes in `blocked` are never entered.
+  function reach(seed, graph = edges, blocked = new Set()) {
     const seen = new Set([seed]), queue = [seed];
     while (queue.length) {
       const at = queue.shift();
-      for (const [x, y] of graph) {
+      for (const [x, y, oneWay] of graph) {
         if (!x || !y) continue;
-        const next = x === at ? y : (y === at ? x : null);
-        if (next && !seen.has(next)) { seen.add(next); queue.push(next); }
+        const next = x === at ? y : (y === at && !oneWay ? x : null);
+        if (next && !seen.has(next) && !blocked.has(next)) { seen.add(next); queue.push(next); }
       }
     }
     return seen;
   }
+
+  // LEDs conduct forward only: from + that is anode -> cathode, from - it is
+  // cathode -> anode. So a series chain reaches both ends, and a reversed LED
+  // is still no path.
+  const leds = actions.filter(a => a.tool === 'place_led');
+  const fromPlus  = edges.concat(leds.map(l => [nodeKey(l.holeB), nodeKey(l.holeA), true]));
+  const fromMinus = edges.concat(leds.map(l => [nodeKey(l.holeA), nodeKey(l.holeB), true]));
 
   // Every battery the build places or wires to.
   const batteries = new Set();
@@ -283,12 +397,20 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     if (reach(plus, wireEdges).has(minus)) {
       problems.push(`${pinName(n, 0)} and ${pinName(n, 1)} are joined by wires alone, which is a short circuit across the battery. Put a resistor or other part between them.`);
     }
-    for (const k of reach(plus)) pos.add(k);
-    for (const k of reach(minus)) neg.add(k);
+    // First each side without LEDs, then grown through forward LEDs without
+    // crossing into the other side: an LED that lit up one branch must not
+    // carry + round through the ground rail and hide a reversed LED elsewhere.
+    const plusSide = reach(plus), minusSide = reach(minus);
+    const onlyMinus = new Set([...minusSide].filter(k => !plusSide.has(k)));
+    const onlyPlus  = new Set([...plusSide].filter(k => !minusSide.has(k)));
+    for (const k of plusSide) pos.add(k);
+    for (const k of minusSide) neg.add(k);
+    for (const k of reach(plus, fromPlus, onlyMinus))  pos.add(k);
+    for (const k of reach(minus, fromMinus, onlyPlus)) neg.add(k);
   }
 
   // holeA is the cathode (-), holeB is the anode (+).
-  for (const led of actions.filter(a => a.tool === 'place_led')) {
+  for (const led of leds) {
     const cathode = nodeKey(led.holeA), anode = nodeKey(led.holeB);
     const forward  = pos.has(anode) && neg.has(cathode);
     const reversed = pos.has(cathode) && neg.has(anode);
@@ -302,6 +424,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     }
   }
 
+  problems.push(...findStackedHoles(actions));
   return problems;
 }
 
@@ -411,6 +534,15 @@ function finishAIReply({ reply, actions }) {
         && (!a.holeA || !a.holeB)) return false;
     return true;
   });
+
+  // Drop bad part values; the parts stay, at their defaults.
+  const valueNotes = [];
+  actions = actions.map(a => {
+    const { action, notes } = checkPartValues(a);
+    valueNotes.push(...notes);
+    return action;
+  });
+  if (valueNotes.length) reply += `\n\n${valueNotes.join('\n')}`;
 
   // Report problems instead of patching them, so a wrong circuit is visible
   // rather than rewritten into a different one.

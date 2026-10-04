@@ -627,8 +627,11 @@
   //  span:     number of holes the component spans
   //  hs:       hole spacing (HOLE_SPACING from breadboard)
   //  rotation: 0 (horizontal) or 1 (vertical)
+  //  values:   optional part values: resistance (resistor bands),
+  //            color (LED dome); defaults when absent
   // ─────────────────────────────────────────────────────────────
-  function buildPreview(type, span, hs, rotation) {
+  function buildPreview(type, span, hs, rotation, values) {
+    values = values || {};
     const group  = new THREE.Group();
     const alpha  = 0.45;
     const half   = (span * hs) / 2;
@@ -653,7 +656,7 @@
       group.add(body);
 
       // bands
-      const bands = resistorBands(defaultResistance());
+      const bands = resistorBands(values.resistance ?? defaultResistance());
       const bw = bodyLen * 0.1;
       const bs = bodyLen / 5;
       for (let i = 0; i < bands.length; i++) {
@@ -697,7 +700,7 @@
 
       const dome = new THREE.Mesh(
         new THREE.SphereGeometry(COLLAR_R, 18, 9, 0, Math.PI * 2, 0, Math.PI * 0.55),
-        ghostMat(LED_TYPES.red.hex, alpha * 0.85)
+        ghostMat(ledHex(values.color), alpha * 0.85)
       );
       dome.position.y = bodyY + 0.04;
       group.add(dome);
