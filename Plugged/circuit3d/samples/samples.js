@@ -3,7 +3,7 @@
 //  Contract: docs/API-CONTRACT.md → "Page additions" (window.PhotoSamples).
 //  A plain script, not .json: the static server never serves .json.
 //
-//  Each entry: { file, cols, taps, title, credit, offered?, board?, match?, explain?, fix? }. taps are the corner
+//  Each entry: { file, cols, taps, title, credit, offered?, board?, match?, explain?, fix?, reading? }. taps are the corner
 //  holes a1, aN, jN, j1 (N = cols) in the file's own pixels (a corner may
 //  lie off the image); the key is the `sample` sent to /api/photo, and the
 //  key of its recording (test/fixtures/photo/<key>.json, leads/<key>.json).
@@ -26,6 +26,11 @@
 //  { reply, actions } the canned answer to a later one asking to fix it,
 //  previewed with Accept like any AI edit (chat.js askSparky). Each is used
 //  once; a new photo or a cleared board drops them (photo.js).
+//
+//  reading (#20): a recorded Reading v1 (as Gemini returned it) for a
+//  rehearsed upload. After "Reading your board…" it opens on the confirm
+//  screen over her flattened photo (no crop round); Build it still builds
+//  `board`, not the reading. A tile ignores it.
 //
 //  demo-board.jpg is a placeholder until #144: test/fixtures/photo/web/
 //  p6_piranha.jpg (lungstruck, CC BY 2.0), its a1/a24/j24/j1 taps used as
@@ -164,6 +169,36 @@ window.PhotoSamples = {
         { tool: 'place_tl072', hole: 'e32', direction: 'left' },
         { tool: 'add_wire', from: 'a29', to: 'tn_29', color: 'black' },
       ],
+    },
+    // Gemini's real reading of this photo, recorded 2026-10-04; shown on the confirm screen only (#20)
+    // (LED1's leg roles set by hand so Build it needs no tap)
+    reading: {
+      board: { visible: true, cols: 63, rails: { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' }, split: false },
+      parts: [
+        { id: 'LED1', type: 'led', what: 'yellow led', value: 0, bands: [], color: '', leads: [{ hole: 'h10', pt: [359.5, 249.2], role: 'anode' }, { hole: 'f9', pt: [330.1, 314.4], role: 'cathode' }], box: [312.1, 273.4, 514.1, 418.9], confidence: 0.95, unsure: [] },
+        { id: 'R1', type: 'resistor', what: '220 resistor', value: 220, bands: [], color: '', leads: [{ hole: 'h10', pt: [358.8, 249.8], role: 'unknown' }, { hole: 'g15', pt: [512.7, 282], role: 'unknown' }], box: [316.2, 273.4, 514.1, 344.3], confidence: 0.9, unsure: [] },
+        { id: 'R2', type: 'resistor', what: '10k resistor', value: 10000, bands: [], color: '', leads: [{ hole: 'j16', pt: [539.9, 188.2], role: 'unknown' }, { hole: 'h22', pt: [719.5, 249.4], role: 'unknown' }], box: [571.2, 205.9, 707.9, 333.7], confidence: 0.95, unsure: [] },
+        { id: 'R3', type: 'resistor', what: '10k resistor', value: 10000, bands: [], color: '', leads: [{ hole: 'i22', pt: [727.9, 218.2], role: 'unknown' }, { hole: 'i27', pt: [870.7, 216.4], role: 'unknown' }], box: [707.9, 205.9, 881.3, 241.4], confidence: 0.95, unsure: [] },
+        { id: 'R4', type: 'resistor', what: '10k resistor', value: 10000, bands: [], color: '', leads: [{ hole: 'rail:jInner:22', pt: [717, 105.5], role: 'unknown' }, { hole: 'rail:jInner:24', pt: [793.8, 173.7], role: 'unknown' }], box: [689.5, 32, 795.6, 163.3], confidence: 0.95, unsure: [] },
+        { id: 'R5', type: 'resistor', what: '10k resistor', value: 10000, bands: [], color: '', leads: [{ hole: 'i31', pt: [992.9, 219.2], role: 'unknown' }, { hole: 'j35', pt: [1112.5, 189.3], role: 'unknown' }], box: [934.3, 163.3, 1073, 205.9], confidence: 0.95, unsure: [] },
+        { id: 'X1', type: 'other', what: 'TL052CP ic', value: 0, bands: [], color: '', leads: [{ hole: 'e26', pt: [850.7, 362.1], role: 'unknown' }, { hole: 'e30', pt: [973.1, 362.1], role: 'unknown' }], box: [850.7, 316, 973.1, 408.2], confidence: 0.95, unsure: ['leads'] },
+        { id: 'X2', type: 'other', what: '10uF capacitor', value: 0, bands: [], color: '', leads: [{ hole: 'g32', pt: [1019, 284], role: 'unknown' }, { hole: 'c32', pt: [1019, 458], role: 'unknown' }], box: [979.2, 284, 1058.8, 458], confidence: 0.95, unsure: ['leads'] },
+        { id: 'X3', type: 'other', what: '10k potentiometer', value: 0, bands: [], color: '', leads: [{ hole: 'f34', pt: [1081.2, 328.4], role: 'unknown' }, { hole: 'f39', pt: [1217.9, 328.4], role: 'unknown' }], box: [1081.2, 280.5, 1217.9, 376.3], confidence: 0.95, unsure: ['leads'] },
+      ],
+      wires: [
+        { id: 'W1', color: '', ends: [{ hole: 'rail:jInner:3', pt: [144.6, 103.9] }, { hole: 'rail:aOuter:3', pt: [144.6, 637.9] }], box: [67.3, 95.9, 153, 642.6], confidence: 0.95, unsure: [] },
+        { id: 'W2', color: '', ends: [{ hole: 'rail:jOuter:5', pt: [204.3, 70.5] }, { hole: 'rail:aInner:4', pt: [178.6, 603] }], box: [183.6, 14.2, 316.2, 607.1], confidence: 0.95, unsure: [] },
+        { id: 'W3', color: '', ends: [{ hole: 'rail:jOuter:5', pt: [203.3, 77.3] }, { hole: 'off', pt: [258.1, 195.3] }], box: [230.5, 63.9, 285.6, 195.3], confidence: 0.9, unsure: [] },
+        { id: 'W4', color: '', ends: [{ hole: 'off', pt: [529.2, 203.2] }, { hole: 'j29', pt: [930.8, 188.5] }], box: [483.5, 159.8, 971, 220.1], confidence: 0.95, unsure: [] },
+        { id: 'W5', color: '', ends: [{ hole: 'g22', pt: [715.6, 281.5] }, { hole: 'g30', pt: [965, 281.5] }], box: [701.8, 259.2, 956.8, 301.8], confidence: 0.95, unsure: [] },
+        { id: 'W6', color: '', ends: [{ hole: 'rail:jOuter:25', pt: [810.9, 75.9] }, { hole: 'rail:jInner:26', pt: [835.8, 167.3] }], box: [787.4, 63.9, 842.5, 166.9], confidence: 0.95, unsure: [] },
+        { id: 'W7', color: '', ends: [{ hole: 'rail:jOuter:31', pt: [992.3, 73.8] }, { hole: 'j34', pt: [1076.4, 185.8] }], box: [987.4, 24.9, 1087.3, 181.1], confidence: 0.95, unsure: [] },
+        { id: 'W8', color: '', ends: [{ hole: 'h32', pt: [1022, 249.5] }, { hole: 'h37', pt: [1181, 243.4] }], box: [991.4, 184.6, 1189.3, 245], confidence: 0.9, unsure: [] },
+        { id: 'W9', color: '', ends: [{ hole: 'g35', pt: [1118.2, 282.6] }, { hole: 'g37', pt: [1166.6, 280.7] }], box: [1097.5, 241.4, 1222, 287.6], confidence: 0.9, unsure: [] },
+        { id: 'W10', color: '', ends: [{ hole: 'b29', pt: [927.9, 493.8] }, { hole: 'rail:aInner:28', pt: [902.1, 604] }], box: [895.6, 479.3, 936.4, 614.2], confidence: 0.95, unsure: [] },
+        { id: 'W11', color: '', ends: [{ hole: 'a32', pt: [1020.5, 518.3] }, { hole: 'rail:aOuter:34', pt: [1081, 629.4] }], box: [1020, 507.7, 1177.1, 656.8], confidence: 0.95, unsure: [] },
+      ],
+      power: [],
     },
   },
   piranha: {

@@ -13,7 +13,9 @@
 //    A chosen photo whose SHA-256 is in a sample's `match` (#17): the same
 //         corner step (the sample's own file if it won't decode, a HEIC),
 //         then Looks right builds that sample's board as its tile does, and
-//         window.PhotoCanned = its canned answers for chat.js (no /api/photo)
+//         window.PhotoCanned = its canned answers for chat.js (no /api/photo).
+//         With a recorded `reading` (#20), READING then the confirm screen on
+//         it (flattened with her grid, no crop round); Build it → the board
 //    📷 → Use sample photo (or the error card's) → the sample picker
 //         (#photo-samples, #182): a tile per offered window.PhotoSamples
 //         entry (all but offered: false, #200), its photo, title and credit
@@ -443,13 +445,22 @@
   }
 
   // A hard-coded board (#15): its photo as it is under READING for
-  // SAMPLE_READ_MS, then the board exactly. No /api/photo, no confirm screen;
-  // Escape or Cancel meanwhile (a new job) builds nothing.
-  async function buildBoard(my, im, id) {
+  // SAMPLE_READ_MS, then the board exactly. No /api/photo; Escape or Cancel
+  // meanwhile (a new job) builds nothing. A rehearsed upload (her grid) of a
+  // sample with a recorded `reading` (#20) opens that on the confirm screen
+  // first, flattened as send() does, no crop round; its Build it builds the board.
+  async function buildBoard(my, im, id, grid) {
+    const s = window.PhotoSamples[id];
+    const board = () => built({ actions: s.board, flags: [], labels: {}, skipped: [], sample: id });
     showPhoto(im);
     await new Promise(r => setTimeout(r, SAMPLE_READ_MS));
     if (my !== job) return;
-    built({ actions: window.PhotoSamples[id].board, flags: [], labels: {}, skipped: [], sample: id });
+    if (!(grid && s.reading)) return board();
+    const flat = flatten(downsize(im, grid), grid);
+    corners.hidden = true;
+    showStatus('', false);
+    credit.textContent = s.credit || '';
+    PhotoConfirm.open(structuredClone(s.reading), flat, grid, board);
   }
 
   // The corner step's canvas alone, showing the photo: no prompt, no
@@ -483,7 +494,7 @@
     if (!Capture.grid) return;
     if (!rehearsed) return send(img, Capture.grid, null);
     showStatus(READING, false);                            // a rehearsed photo (#17): its sample's board, as its tile builds it
-    buildBoard(nextJob(), img, rehearsed);
+    buildBoard(nextJob(), img, rehearsed, Capture.grid);   // her grid: a recorded reading's confirm screen (#20)
   });
   colsEl.addEventListener('change', () => { if (img) update(); });
   $('photo-cancel').addEventListener('click', close);
