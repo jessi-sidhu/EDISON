@@ -266,8 +266,9 @@ const BUTTON_PACK = [
 // ── Tools, generated from the parts registry ─────────────────
 // One place_<type> tool per part (its ai.tool when it sets one), plus the
 // tools that aren't parts. docs/API-CONTRACT.md → "AI tools". Built once at
-// startup from Parts.all(), so a new part file needs no change here.
-const PARTS = Parts.all();
+// startup from Parts.all(), so a new part file needs no change here. A part
+// with `ai: false` (the multimeter) is left out of every tool and prompt line.
+const PARTS = Parts.all().filter(def => def.ai !== false);
 const toolName = def => (def.ai && def.ai.tool) || `place_${def.type}`;
 
 // "resistor", "LED", "push button": a part's name inside a sentence.

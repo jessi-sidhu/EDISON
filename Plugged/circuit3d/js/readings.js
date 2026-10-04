@@ -12,6 +12,8 @@
 //                      the net in mA; sums to about 0
 //      problems()      [{ kind, labels[], why }], the mistake checker (#95):
 //                      'short' | 'no-resistor' | 'backwards' | 'open' | 'over'
+//      thevenin(a, b)  two holes → { Vth V, Rth Ω, In mA } between them, or
+//                      { why } (#93); solves a copy of the board when called
 //    Readings.nets(board)  every net, with no solve
 //
 //  Nets come from simulate.js's own buildGraph, so they always match the
@@ -42,6 +44,8 @@
   // Ratings the part files don't expose as values.
   const RESISTOR_W = 0.25;   // W, every kit resistor is ¼ W
   const ZENER_W    = 0.5;    // W, the same as MAX_POWER in parts/zener.js
+
+  const TEST_AMPS = 0.001;   // A, the test current thevenin() pushes b → a
 
   // "b14" → { col: 13, row: 'b' }, "tp_50" → { col: 49, row: 'tp' };
   // null when it isn't a hole on this board.
@@ -207,7 +211,39 @@
       return out;
     }
 
-    return { netOf, voltage, part, kcl, problems };
+    // The equivalent circuit between holes a and b (#93). Vth = V(a) − V(b)
+    // from this solve. Rth: solve a copy of the board with a 1 mA ideal
+    // current source pushing current into a and out of b, then
+    // Rth = ((V'(a) − V'(b)) − Vth) / 1 mA, differences only. The source is
+    // appended last, so the board's own source stays the reference. On a
+    // board with LEDs or diodes this is the small-signal Rth at today's
+    // operating point. Never touches the board or this solve's readings.
+    function thevenin(a, b) {
+      try { return findThevenin(a, b); } catch { return { why: 'The equivalent circuit could not be worked out here.' }; }
+    }
+
+    function findThevenin(a, b) {
+      if (res.status === 'no-source') return { why: 'There is no source on the board, so there is no equivalent circuit.' };
+      if (res.status !== 'ok' || res.shorted) return { why: 'The circuit has no working solution to measure from.' };
+      const na = netOf(a), nb = netOf(b);
+      if (!na || !nb) return { why: 'Pick two holes on the board.' };
+      if (na.id === nb.id) return { why: `${a} and ${b} are joined, so the voltage between them is always 0.` };
+      const va = voltage(a), vb = voltage(b);
+      if (va === null || vb === null) return { why: `${va === null ? a : b} is not connected to a source.` };
+      const Vth = va - vb;
+
+      const src = { type: 'current_source', label: null, pins: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }],
+                    holeRefs: [parseHole(b), parseHole(a)], values: { current: TEST_AMPS } };   // from b, to a
+      const copy = Sim.analyze(board.components.concat([src]), board.wires || []);
+      const ta = copy.status === 'ok' && !copy.shorted ? copy.voltageAt(parseHole(a)) : null;
+      const tb = copy.status === 'ok' && !copy.shorted ? copy.voltageAt(parseHole(b)) : null;
+      if (typeof ta !== 'number' || typeof tb !== 'number') return { why: 'The test solve failed between these holes.' };
+      const Rth = ((ta - tb) - Vth) / TEST_AMPS;
+      if (!Number.isFinite(Rth) || Rth <= 0) return { why: 'There is no resistance between these holes to measure.' };
+      return { Vth, Rth, In: Vth / Rth * 1000 };
+    }
+
+    return { netOf, voltage, part, kcl, problems, thevenin };
   }
 
   return { from, nets };

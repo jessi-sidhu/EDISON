@@ -441,3 +441,97 @@ test('problems: an empty board, a blank result or no arguments give [] without t
   assert.deepStrictEqual(problemsOf(Readings.from({}, { components: [], wires: [] })), [], 'blank result');
   assert.deepStrictEqual(problemsOf(Readings.from()), [], 'Readings.from() with nothing');
 });
+
+// ── 9. thevenin(a, b): the equivalent circuit between two holes (issue #93) ──
+// readings.thevenin(a, b), holes as strings → { Vth, Rth, In }: Vth in V
+// = V(a) − V(b), signed; Rth in Ω; In in mA = Vth / Rth × 1000 (Norton),
+// so In's sign follows Vth. Or { why }, a non-empty string, when there is
+// no source on the board, a and b are one net, a or b floats, Rth is not
+// finite or ≤ 0, or a solve fails. Never throws.
+// Method (the builder's, not asserted): Vth from this solve; Rth from a
+// copy of the board with a 1 mA ideal current source b → a appended last,
+// Rth = ((V'(a) − V'(b)) − Vth) / 1 mA. Every number below was checked
+// against the real simulator with that 1 mA source placed on the board as
+// a current_source part.
+
+function theveninOf(readings, a, b) {
+  assert.strictEqual(typeof readings.thevenin, 'function', 'Readings.from(...).thevenin should be a function');
+  let out;
+  assert.doesNotThrow(() => { out = readings.thevenin(a, b); }, `thevenin(${a}, ${b}) threw`);
+  assert.ok(out && typeof out === 'object', `thevenin(${a}, ${b}) should return an object; got ${JSON.stringify(out)}`);
+  return out;
+}
+
+function assertWhy(out, what) {
+  assert.ok(typeof out.why === 'string' && out.why.trim(), `${what}: expected { why }, got ${JSON.stringify(out)}`);
+  assert.ok(typeof out.Vth !== 'number', `${what}: a { why } has no Vth; got ${JSON.stringify(out)}`);
+}
+
+test('thevenin across R2 of the 9 V divider (1k/2k): Vth 6.00 V, Rth 666.7 Ω, In 9.00 mA', () => {
+  // Vth = 9 × 2k / 3k = 6 V; Rth = 1k ∥ 2k = 666.67 Ω; In = 9 V / 1k = 9 mA.
+  const { readings } = solve(DIVIDER_PARTS, DIVIDER_WIRES);
+  const th = theveninOf(readings, 'e14', 'e18');
+  near(th.Vth, 6, 0.005, 'Vth (V)');
+  near(th.Rth, 666.667, 0.1, 'Rth (Ω)');
+  near(th.In, 9, 0.01, 'In (mA)');
+});
+
+test('thevenin with a and b swapped: Vth and In change sign, Rth does not', () => {
+  const { readings } = solve(DIVIDER_PARTS, DIVIDER_WIRES);
+  const th = theveninOf(readings, 'e18', 'e14');
+  near(th.Vth, -6, 0.005, 'Vth (V) = V(e18) − V(e14)');
+  near(th.Rth, 666.667, 0.1, 'Rth (Ω)');
+  near(th.In, -9, 0.01, 'In (mA)');
+});
+
+test('thevenin on other pairs: across R1 (b not ground) and behind a 2 kΩ series resistor', () => {
+  // Across R1 of the divider: Vth = 9 − 6 = 3 V, Rth = 1k ∥ 2k (the ideal
+  // battery is a short) = 666.67 Ω, In = 3 / 666.67 = 4.5 mA.
+  const across = theveninOf(solve(DIVIDER_PARTS, DIVIDER_WIRES).readings, 'e10', 'e14');
+  near(across.Vth, 3, 0.005, 'across R1: Vth (V)');
+  near(across.Rth, 666.667, 0.1, 'across R1: Rth (Ω)');
+  near(across.In, 4.5, 0.01, 'across R1: In (mA)');
+
+  // tp → b20, R1 1 kΩ a20–a24 to node X (column 24), R2 1 kΩ b24–b28,
+  // d28 → tn; R3 2 kΩ c24–c30 from X to column 30, which nothing else
+  // touches. Between e30 and the − rail: Vth = V(X) = 9 × 1k / 2k = 4.5 V
+  // (no current in R3), Rth = 1k ∥ 1k + 2k = 2500 Ω, In = 4.5 / 2500 = 1.8 mA.
+  const parts = [BAT, res('R1', ['a20', 'a24'], 1000), res('R2', ['b24', 'b28'], 1000), res('R3', ['c24', 'c30'], 2000)];
+  const pairs = [...POWER, ['tp_20', 'b20'], ['d28', 'tn_28']];
+  const behind = theveninOf(solve(parts, pairs).readings, 'e30', 'tn_5');
+  near(behind.Vth, 4.5, 0.005, 'behind R3: Vth (V)');
+  near(behind.Rth, 2500, 0.1, 'behind R3: Rth (Ω)');
+  near(behind.In, 1.8, 0.01, 'behind R3: In (mA)');
+});
+
+test('thevenin on a board with no source gives { why }', () => {
+  const { readings } = solve([res('R1', ['a10', 'a14'], 1000), res('R2', ['b14', 'b18'], 2000)],
+                             [['tp_10', 'c10'], ['c18', 'tn_18']]);
+  assertWhy(theveninOf(readings, 'e14', 'e18'), 'no source');
+});
+
+test('thevenin between two holes of one net gives { why }', () => {
+  const { readings } = solve(DIVIDER_PARTS, DIVIDER_WIRES);
+  assertWhy(theveninOf(readings, 'a14', 'e14'), 'a14 and e14, one column');
+  assertWhy(theveninOf(readings, 'e18', 'tn_40'), 'e18 and the − rail, joined by wire');
+});
+
+test('thevenin with a floating hole, or something that is not a hole, gives { why }', () => {
+  const { readings } = solve(DIVIDER_PARTS, DIVIDER_WIRES);
+  assertWhy(theveninOf(readings, 'a55', 'e18'), 'a = a55, an empty column');
+  assertWhy(theveninOf(readings, 'e14', 'a55'), 'b = a55, an empty column');
+  assertWhy(theveninOf(readings, 'nowhere', 'e18'), 'a = "nowhere"');
+  assertWhy(theveninOf(readings, undefined, undefined), 'no holes');
+});
+
+test('thevenin leaves the board and this solve\'s readings as they were', () => {
+  const { board, readings } = solve(DIVIDER_PARTS, DIVIDER_WIRES);
+  const before = JSON.stringify(board);
+  theveninOf(readings, 'e14', 'e18');
+  assert.strictEqual(JSON.stringify(board), before, 'the board given to Readings.from is unchanged');
+  near(readings.voltage('e14'), 6, 1e-6, 'V(e14) after thevenin');
+  const r1 = readings.part('R1');
+  near(r1.V, 3, 1e-6, 'R1.V after thevenin');
+  near(r1.I, 3, 1e-6, 'R1.I (mA) after thevenin');
+  assert.strictEqual(readings.part('IS1'), null, 'no current source is left in this solve');
+});

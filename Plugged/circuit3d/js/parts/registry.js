@@ -410,7 +410,8 @@
     if (def.gestures !== undefined) checkGestures(def.gestures, def.controls, bad);
     checkBehaviour(def, pins, bad);
 
-    if (def.ai !== undefined) {
+    // ai: false keeps a part from the AI (no tool, no prompt line); a missing ai is still refused.
+    if (def.ai !== undefined && def.ai !== false) {
       checkAi(def.ai, def.values, pins, bad);
       if (isObj(def.ai)) {
         const tool = toolOf(def);

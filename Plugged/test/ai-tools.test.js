@@ -39,6 +39,8 @@ const promptOf = S => {
 };
 const prompt = () => promptOf(Server);
 const toolName = def => (def.ai && def.ai.tool) || 'place_' + def.type;
+// The parts the AI can use: a part with `ai: false` (the multimeter, #96) gets no tool or prompt line.
+const aiParts = () => Parts.all().filter(def => def.ai !== false);
 
 // A declaration is valid in Gemini's schema, the shape toOpenAITools reads.
 const TYPES = ['STRING', 'NUMBER', 'INTEGER', 'BOOLEAN', 'ARRAY', 'OBJECT'];
@@ -61,9 +63,9 @@ function checkDecl(d) {
 
 // ── Generated tools ─────────────────────────────────────────────────────────
 
-test('every registered part has a generated tool, and every tool is a valid declaration', () => {
+test('every registered part has a generated tool (unless ai: false), and every tool is a valid declaration', () => {
   const got = decls();
-  for (const def of Parts.all()) assert.ok(got.some(d => d.name === toolName(def)), `no tool for ${def.type}`);
+  for (const def of aiParts()) assert.ok(got.some(d => d.name === toolName(def)), `no tool for ${def.type}`);
   for (const d of got) checkDecl(d);
   const n = got.map(d => d.name);
   assert.deepEqual(n.filter((x, i) => n.indexOf(x) !== i), [], 'a tool name appears twice');
@@ -142,10 +144,10 @@ test('the prompt names the pin roles: place_led holeA = cathode, holeB = anode',
     'no line like "place_led: holeA = cathode, holeB = anode"');
 });
 
-test('the prompt has the label prefixes and a one-line catalogue naming every part', () => {
+test('the prompt has the label prefixes and a one-line catalogue naming every part (unless ai: false)', () => {
   const p = prompt();
-  for (const def of Parts.all()) assert.match(p, new RegExp(`\\b${def.prefix}\\d*\\b`), `label prefix ${def.prefix}`);
-  const names = Parts.all().map(def => [def.type, def.name.toLowerCase()]);
+  for (const def of aiParts()) assert.match(p, new RegExp(`\\b${def.prefix}\\d*\\b`), `label prefix ${def.prefix}`);
+  const names = aiParts().map(def => [def.type, def.name.toLowerCase()]);
   const catalogue = p.split('\n').find(l => names.every(ns => ns.some(n => l.toLowerCase().includes(n))));
   assert.ok(catalogue, `no one line names every part: ${names.map(n => n[0]).join(', ')}`);
 });
@@ -414,7 +416,7 @@ test('delete_part takes only the part', () => {
 test("set_value offers every AI value key of every part, typed as in that part's place_ tool", () => {
   const props = tool('set_value').parameters.properties;
   const want = new Set(['part']);
-  for (const def of Parts.all()) {
+  for (const def of aiParts()) {
     const place = tool(toolName(def)).parameters;
     for (const key of aiValueKeys(def)) {
       want.add(key);
@@ -476,7 +478,7 @@ describe('with 10 extra parts in the registry', () => {
       assert.ok(lineWith(p, new RegExp(`place_${g.type}\\b.*\\b2–6 columns\\b.*\\b3 is typical\\b`)), `sizing line for ${g.type}`);
       assert.match(p, new RegExp(`\\b${g.prefix}\\d*\\b`), `label prefix ${g.prefix}`);
     }
-    const all = Parts.all().map(def => [def.type, def.name.toLowerCase()]);
+    const all = aiParts().map(def => [def.type, def.name.toLowerCase()]);
     assert.ok(p.split('\n').some(l => all.every(ns => ns.some(n => l.toLowerCase().includes(n)))),
       'no one catalogue line names every part, gizmos included');
   });

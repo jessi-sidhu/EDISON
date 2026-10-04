@@ -288,7 +288,7 @@ test('use_parts ["zener"] answers with the Zener pin role, values and sizing lin
 
 test('pin: SYSTEM_PROMPT (every tool) still has every part\'s values and sizing lines, and both hand-written packs', () => {
   const p = Server.SYSTEM_PROMPT;
-  for (const def of Parts.all()) {
+  for (const def of Parts.all().filter(d => d.ai !== false)) {   // an ai: false part (#96) gets no pack
     const pack = packOf(def);
     assert.equal(pack.values.length, aiValues(def).length, `${def.type}: one values line per AI value key`);
     if (def.place.kind === 'span') assert.equal(pack.sizing.length, 1, `${def.type}: a sizing line`);

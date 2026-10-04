@@ -44,8 +44,11 @@ const typesOf = gs => gs.flatMap(g => g.parts.map(p => p.type));
 
 test('groups come in the contract category order, empty categories dropped', () => {
   const gs = groups(Parts.all(), '');
-  assert.deepEqual(gs.map(g => g.category), ['Passives', 'Sources', 'Semiconductors', 'I/O'],
-    'today: resistor (Passives), battery (Sources), LED (Semiconductors), buzzer and button (I/O); no Instruments');
+  assert.deepEqual(gs.map(g => g.category), ['Passives', 'Sources', 'Semiconductors', 'I/O', 'Instruments'],
+    'today: resistor (Passives), battery (Sources), LED (Semiconductors), buzzer and button (I/O), multimeter (Instruments, #96)');
+  const noInstruments = Parts.all().filter(d => d.category !== 'Instruments');
+  assert.deepEqual(groups(noInstruments, '').map(g => g.category), ['Passives', 'Sources', 'Semiconductors', 'I/O'],
+    'a category with no parts is dropped');
 });
 
 test('every registered part appears exactly once, under its own category', () => {
@@ -78,7 +81,9 @@ test('a part in another category gets its own group, in category order', () => {
   const extra = Object.assign(testSpan(), { type: 'test_span' });   // Passives, beside the resistor
   const gs = groups([meter, ...Parts.all(), extra], '');
   assert.deepEqual(gs.map(g => g.category), ['Passives', 'Sources', 'Semiconductors', 'I/O', 'Instruments']);
-  assert.deepEqual(gs[gs.length - 1].parts.map(p => p.type), ['test_meter']);
+  // test_meter first (given first), then every registered Instrument (the multimeter since #96).
+  const instruments = Parts.all().filter(d => d.category === 'Instruments').map(d => d.type);
+  assert.deepEqual(gs[gs.length - 1].parts.map(p => p.type), ['test_meter', ...instruments]);
   // Every registered Passive (the resistor, and the potentiometer since #31), then test_span last.
   const passives = Parts.all().filter(d => d.category === 'Passives').map(d => d.type);
   assert.ok(passives.includes('resistor'));

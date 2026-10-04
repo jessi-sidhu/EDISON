@@ -342,7 +342,7 @@ test('sidebar: every registered part once under its category; "led" filters to t
 
   // Everything, grouped, in the contract's category order.
   const categories = await page.locator('#sidebar .comp-group').evaluateAll(gs => gs.map(g => g.dataset.category));
-  expect(categories).toEqual(['Passives', 'Sources', 'Semiconductors', 'I/O']);
+  expect(categories).toEqual(['Passives', 'Sources', 'Semiconductors', 'I/O', 'Instruments']);   // Instruments: the multimeter (#96)
   expect((await partItems.evaluateAll(els => els.map(e => e.dataset.type))).sort())
     .toEqual(defs.map(d => d.type).sort());
   for (const d of defs) {
