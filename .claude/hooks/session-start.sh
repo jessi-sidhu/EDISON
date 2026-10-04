@@ -16,7 +16,8 @@ if git remote get-url origin >/dev/null 2>&1; then
 fi
 
 case "$branch" in
-  main|dev) echo "On $branch: start work with /start-task <issue#>, which branches off dev. Don't commit to main or dev." ;;
+  main) echo "On main: switch to dev (git switch dev). main only changes through /promote." ;;
+  dev) echo "On dev (the shared workspace): start work with /start-task <issue#>; /ship pushes it back to dev after the checks." ;;
 esac
 
 # The user's open issues, so the agent knows what they're working on.

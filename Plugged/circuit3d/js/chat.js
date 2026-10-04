@@ -23,6 +23,8 @@
   function resolveEndpoint(str, board) {
     const ref = Ids.parsePinRef(str);
     if (ref) {
+      // Label form ("U1.OUT") and named pins aren't wired up yet.
+      if (ref.label || typeof ref.pin !== 'number') return null;
       const comp = Ids.findComponent(board.components(), ref.type, ref.n);
       return comp ? { comp, pin: ref.pin } : null;
     }

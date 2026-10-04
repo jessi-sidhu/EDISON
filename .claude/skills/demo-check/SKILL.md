@@ -1,6 +1,6 @@
 ---
 name: demo-check
-description: Run the app and walk the demo story from docs/PRD.md in a real browser, reporting anything broken. Runs against main (the demo-ready branch) by default. Use at sprint checkpoints, before judging, or when the user asks whether the demo still works. For testing dev before a promotion, use /qa-pass instead.
+description: Run the app and walk the demo story from docs/PRD.md in a real browser, reporting anything broken. Runs against main (the demo-ready branch) by default. Use at sprint checkpoints, before judging, or when the user asks whether the demo still works. To test dev and move it to main, use /promote instead.
 ---
 
 # Demo check

@@ -29,7 +29,9 @@
       "Bash(gh issue *)",
       "Bash(gh label *)",
       "Bash(gh pr checks*)",
-      "Bash(git push -u origin HEAD)"
+      "Bash(git push -u origin HEAD)",
+      "Bash(git push origin HEAD:dev)",
+      "Bash(git fetch origin dev)"
     ],
     "deny": [
       "Read(**/.env)",
@@ -38,9 +40,7 @@
       "Bash(git push --force*)",
       "Bash(git push -f*)",
       "Bash(git push origin main*)",
-      "Bash(git push -u origin main*)",
-      "Bash(git push origin dev*)",
-      "Bash(git push -u origin dev*)"
+      "Bash(git push -u origin main*)"
     ]
   },
   "enabledPlugins": {

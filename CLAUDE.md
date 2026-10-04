@@ -4,11 +4,12 @@
 - **A GitHub issue is an approved design.** Working an issue counts as bounded work: skip brainstorming and spec writing, restate the plan in 3 to 5 bullets, then implement. Use brainstorming and writing-plans only for architecture and planning work, and remember that its result still needs a second teammate to agree.
 - **Project skills, open to everyone:**
   - `/start-task`: begin an issue.
-  - `/ship`: finish it, with a PR into `dev`.
+  - `/ship`: finish it. Runs the checks, then pushes straight to `dev`.
+  - `/promote`: quick test of `dev` (CI green plus a walk of the demo path), then move it to `main`.
   - `/new-task`: write an issue.
   - `/adapt-to-tracks`: re-plan when tracks drop.
   - `/demo-check`: walk the demo on `main` in a browser.
-- **QA, usually Guneev:** `/qa-pass` runs `docs/QA.md` against `dev` in a real browser, files failures as `bug` issues, and says whether `dev` can be promoted to `main`.
+- **QA, usually Guneev:** `/qa-pass` is the full `docs/QA.md` run against `dev` in a real browser, at checkpoints (about daily, and before submitting). It files failures as `bug` issues.
 - **`/start-task` is an orchestrator.** It sizes the issue, then runs the specialists in `.claude/agents/`:
   - **Full path** (logic, contract, demo path, bugs, more than 2 files): scout → test-writer → builder → reviewer.
   - **Lean path** (at most 2 files of text or style): builder → reviewer.

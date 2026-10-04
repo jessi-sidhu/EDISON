@@ -74,3 +74,14 @@ test('a full build places every part and passes the wire colour through', () => 
   assert.deepEqual(out, { applied: 5, failed: 0 });
   assert.deepEqual(calls, ['clear', 'battery', 'wire ef4444', 'resistor a2-a6', 'led a8-a6']);
 });
+
+test('op_amp_0_pin1 resolves to pin 1 of the first op amp', () => {
+  const amp = { type: 'op_amp' };
+  const board = fakeBoard([{ type: 'resistor' }, amp]);
+  assert.deepEqual(Chat.resolveEndpoint('op_amp_0_pin1', board), { comp: amp, pin: 1 });
+});
+
+test('a label-form ref like U1.OUT resolves to null for now', () => {
+  const board = fakeBoard([{ type: 'op_amp' }]);
+  assert.equal(Chat.resolveEndpoint('U1.OUT', board), null);
+});

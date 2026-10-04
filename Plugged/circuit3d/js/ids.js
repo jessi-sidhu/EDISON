@@ -20,10 +20,17 @@
     return comp.type + '_' + components.filter(c => c.type === comp.type).indexOf(comp);
   }
 
-  // "battery_0_pin1" -> { type: 'battery', n: 0, pin: 1 }; null for anything else.
+  // Two forms; null for anything else (holes like "a12" or "tp_5" included).
+  //   "op_amp_0_pin2" -> { type: 'op_amp', n: 0, pin: 2 }   (type may hold "_")
+  //   "U1.OUT"        -> { label: 'U1', pin: 'OUT' }        (label form)
+  // pin is a number when it is all digits, a string otherwise.
   function parsePinRef(str) {
-    const m = /^([a-z]+)_(\d+)_pin(\d+)$/i.exec(String(str));
-    return m ? { type: m[1].toLowerCase(), n: +m[2], pin: +m[3] } : null;
+    const s = String(str);
+    const pinOf = p => /^\d+$/.test(p) ? +p : p;
+    let m = /^([a-z][a-z0-9_]*?)_(\d+)_pin(\w+)$/i.exec(s);
+    if (m) return { type: m[1].toLowerCase(), n: +m[2], pin: pinOf(m[3]) };
+    m = /^([a-z]+\d+)\.(\w+)$/i.exec(s);
+    return m ? { label: m[1], pin: pinOf(m[2]) } : null;
   }
 
   function findComponent(components, type, n) {

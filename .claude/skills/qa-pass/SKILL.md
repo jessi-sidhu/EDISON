@@ -1,6 +1,6 @@
 ---
 name: qa-pass
-description: QA the dev branch like a real user - run every case in docs/QA.md (AI prompts, simulator numbers, core flows) in a real browser, report pass/fail, file failures as bug issues, and open the dev → main promotion PR when it's clean. Use when Guneev (or anyone) says QA dev, run QA, test the build, is dev ready, or promote dev.
+description: Full QA pass on dev like a real user - run every case in docs/QA.md (AI prompts, simulator numbers, core flows) in a real browser, report pass/fail and file failures as bug issues. For checkpoints (about daily, and before submitting), not every promotion. Use when Guneev (or anyone) says QA dev, run QA, or full test pass. For a quick check before moving dev to main, use /promote instead.
 ---
 
 # QA pass on dev
@@ -29,7 +29,5 @@ This is black-box testing: use the app the way a person would, and judge it only
    - `gh issue create --label bug`, plus `--label demo-critical` when it's on the demo path.
    - Body: case ID, steps, the exact prompt or circuit, expected (from QA.md), actual, and the screenshot path.
    - Leave it unassigned so Aarmen or whoever is free picks it up. Show the drafts before creating anything.
-7. **Promotion verdict.**
-   - **Every case passes** (skipped sign-in cases are fine if the user says so): offer to open the promotion PR with `gh pr create --base main --head dev --title "Promote dev → main (QA pass <date>)"`, with the results table as the body. It needs **one other teammate's approval**, so never merge it yourself.
-   - **Anything fails:** say "not ready to promote", and list the blocking IDs.
+7. **Verdict.** Say whether `dev` is demo-ready. If it is, suggest running `/promote`. If not, list the blocking case IDs.
 8. Stop anything this skill started, such as the local server and any browser tabs it opened.

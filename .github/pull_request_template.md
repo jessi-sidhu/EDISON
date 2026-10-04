@@ -1,6 +1,6 @@
 Closes #
 
-<!-- Feature PRs target `dev`. Only the `dev → main` promotion PR targets `main`. -->
+<!-- Work reaches `dev` by `/ship` (a direct push), so PRs are normally only the `dev → main` promotion that `/promote` opens. -->
 
 ## What changed
 <!-- One to three bullets, user-visible first. -->

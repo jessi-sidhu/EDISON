@@ -18,12 +18,12 @@ To run it: `cd Plugged/backend && node server.js`, then open http://localhost:50
 - **Equal say.** Any shared change (API contract, architecture, dependencies, config) needs the person proposing it plus **one other teammate** agreeing.
 - **Roles:**
   - **Aarmen:** architecture, fixing the bugs QA files, and testing features as they land.
-  - **Guneev:** QA/QC. Runs real-use tests (AI prompts, whether the logic is right) from `docs/QA.md` with `/qa-pass`, and decides when `dev` is ready to promote to `main`. Writes very little code.
+  - **Guneev:** QA/QC. Runs real-use tests (AI prompts, whether the logic is right) from `docs/QA.md` with `/qa-pass` at checkpoints. Writes very little code.
   - **Manav and Armaan:** fast feature sprints from GitHub issues.
-- **Branches: feature → `dev` → `main`.**
-  - Feature PRs go into `dev` and merge as soon as their checks pass.
-  - Guneev's QA pass promotes `dev` to `main`, with one other approval.
-  - `main` is always demo-ready.
+- **Branches: `dev` is the shared workspace, `main` is tested.**
+  - Anyone pushes to `dev`. `/ship` runs the checks and pushes straight there, with no PR and no waiting.
+  - Anyone moves `dev` to `main` with `/promote`: CI green, a quick walk of the demo path in a browser, then merge. Do it at the end of each day and at checkpoints.
+  - `main` is always demo-ready. Never push to it directly.
 - **Claude Code does most of the coding.** `/start-task <issue>` is an orchestrator that runs specialist agents:
   - **scout:** reads the issue and code and plans the change.
   - **test-writer:** writes failing tests first.

@@ -17,7 +17,7 @@ The issue is an approved design, so don't brainstorm or write a spec. You are th
 4. **Branch.**
    - Don't commit or stash anyone else's work.
    - Run `git switch dev && git pull`, then `git switch -c <first name>/<n>-<short-slug>`. Take the first name from `git config user.name`, in lowercase.
-   - Branches always come off `dev`.
+   - Branches always come off `dev`, and stay local: `/ship` pushes the finished work straight to `dev`.
 
 ## 2. Size it (say which path and why, in one line)
 **Full path: scout → test-writer → builder → reviewer.** Use it if **any** of these is true:
