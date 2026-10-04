@@ -3,7 +3,8 @@
 //
 //  #labs-menu-btn in the top bar opens (on a click, never a hover) a
 //  list of lab starter circuits, one per lab sheet (labs/sheets.js), as
-//  "Lab <n>: <title>". Picking one fetches the sheet's starter .sparky
+//  "Lab <n>: <title>". Picking one opens its lab sheet (as ?lab= does) and
+//  fetches the sheet's starter .sparky
 //  and loads it with App.loadCircuitData, the same path as opening a
 //  file, so it is one undo step, then frames it from FRAME_DISTANCE back
 //  so the board and the mat show around a lone starter part (#194). The
@@ -26,6 +27,14 @@
 //  labFromSearch(search) → the ?lab= id in a location.search, or null
 //  FRAME_DISTANCE  the closest the camera comes when a lab opens
 //                (App.frameCircuit's minDistance; a saved circuit gets 6)
+//  paperWidth(w, room) → the lab paper's width once a pull ends (Edison,
+//                tools/lab-sheet.js): 0 (tucked) under PAPER_SNAP, else
+//                w kept between PAPER_MIN and room − PAPER_MIN_BOARD, so
+//                the board keeps its room. room: the px between the folded
+//                parts rail and the chat, less the grip.
+//  PAPER_WIDTH   the paper's width when it opens
+//  frame()       frames a lab: FRAME_DISTANCE back, and in Edison (beside
+//                the lab paper) the whole board and the bench instruments
 // ─────────────────────────────────────────────────────────────
 
 (function (root, factory) {
@@ -52,6 +61,15 @@
   // (a 608 px canvas): at 12, U1, all four supply rails and a strip of mat
   // beyond each long edge of the board; at 6, U1 filled the view.
   const FRAME_DISTANCE = 12;
+
+  // The lab paper, from the approved mock (1440 × 900): it opens at 480, a
+  // pull narrower than 200 tucks it, and the board always keeps 260.
+  const PAPER_WIDTH = 480, PAPER_SNAP = 200, PAPER_MIN = 380, PAPER_MIN_BOARD = 260;
+  function paperWidth(w, room) {
+    if (!(w >= PAPER_SNAP)) return 0;
+    const max = Math.max(PAPER_MIN, room - PAPER_MIN_BOARD);
+    return Math.round(Math.min(Math.max(w, PAPER_MIN), max));
+  }
 
   if (typeof document !== 'undefined') {
     wire();
@@ -92,7 +110,8 @@
       item.className = 'labs-menu-item';
       item.setAttribute('role', 'menuitem');
       item.textContent = lab.title;
-      item.addEventListener('click', () => { close(); load(lab, urlFor(lab.id), FRAME_DISTANCE); });
+      // A lab picked here opens with its sheet (the lab paper in Edison), as ?lab= does.
+      item.addEventListener('click', () => { close(); if (window.LabSheet) LabSheet.open(lab.id); load(lab, urlFor(lab.id), FRAME_DISTANCE); });
       menu.appendChild(item);
     }
 
@@ -125,9 +144,15 @@
       return false;
     }
     App.loadCircuitData(data);
-    if (frameDistance) App.frameCircuit({ minDistance: frameDistance });
+    if (frameDistance) frame();
     return true;
   }
 
-  return { LABS, urlFor, labFromSearch, FRAME_DISTANCE };
+  // Browser only: App and the page exist.
+  function frame() {
+    const whole = typeof document !== 'undefined' && document.documentElement.dataset.ui === 'edison';
+    App.frameCircuit({ minDistance: FRAME_DISTANCE, whole });
+  }
+
+  return { LABS, urlFor, labFromSearch, FRAME_DISTANCE, frame, PAPER_WIDTH, PAPER_MIN_BOARD, paperWidth };
 });

@@ -27,11 +27,14 @@
 //   (no green), a Passed dot blue.
 // - .lab-sheet-close is square (border-radius 0).
 // - Once ?lab= has loaded and the sheet's reframe has run, the camera is at
-//   least 9 from its target (the issue expects about 9 to 12; the builder
-//   picks it from a screenshot), and well short of the home view's 37.2.
+//   least 9 from its target, and (since the lab paper, 2026-10-03) the whole
+//   breadboard is on the canvas beside the paper.
 // - Only labs frame wider: the same circuit opened as a saved file (through
 //   App.loadCircuitData, the path File → Open takes) keeps minDistance 6.
 // With ?ui=classic the sheet keeps its old look (the last case, a pin).
+// Since the lab paper (2026-10-03) the sheet is a white page with a black
+// grip, Passed is the bus blue #2C5CC0, and Lab 2 has no click-to-tick steps
+// in Edison: step 2 checks the supply at U1's pins, step 6 the 6.1 answer.
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
@@ -40,13 +43,10 @@ test.use({ viewport: { width: 1440, height: 900 } });   // the laptop the demo r
 
 const LAB2_FILE = path.join(__dirname, '..', 'circuit3d', 'labs', 'lab2.sparky');
 
-const HUD_BLACK = 'rgb(16, 16, 16)';      // #101010, the HUD's chrome (edison-hud.css --hud-k)
-const HUD_INK   = 'rgb(244, 244, 244)';   // #F4F4F4, --hud-ink
-const HUD_BLUE  = 'rgb(61, 123, 255)';    // #3D7BFF, --hud-blue: Passed
+const HUD_BLUE  = 'rgb(44, 92, 192)';     // #2C5CC0, the bus blue on the white lab paper: Passed
 const CLEAR     = 'rgba(0, 0, 0, 0)';     // a transparent background, as computed
 
 const WIDE_MIN  = 9;    // the closest a lab may open (U1's close-up today is 6)
-const WIDE_MAX  = 16;   // the issue's ~9-12 with room; the home view is 37.2
 const OPEN_DIST = 6;    // App.frameCircuit's default, kept for saved circuits and AI builds
 
 function watchErrors(page) {
@@ -69,7 +69,7 @@ async function openLab2(page, ui) {
 const firstFamily = font => font.split(',')[0].trim().replace(/^["']|["']$/g, '');
 const rgb = s => (/^rgba?\((\d+), (\d+), (\d+)/.exec(s) || []).slice(1).map(Number);
 // A neutral grey (r = g = b), between the HUD's #676767 and #8A8A8A with room.
-const isGrey = s => { const [r, g, b] = rgb(s); return r === g && g === b && r >= 80 && r <= 160; };
+const isGrey = s => { const [r, g, b] = rgb(s); return r === g && g === b && r >= 80 && r <= 200; };   // up to the paper's #BDBDBD outline
 
 const pending = page => page.locator('#lab-sheet .lab-step[data-status="pending"]');
 
@@ -90,18 +90,18 @@ async function settledDistance(page) {
   return prev;
 }
 
-test('?lab=lab2&ui=edison: the lab sheet is the black HUD (#101010, ink #F4F4F4, DM Mono, a caps code row over a sentence-case title), square tags (Not yet a grey outline, Passed blue once a manual step is ticked) and dots to match, a square close button', async ({ page }) => {
+test('?lab=lab2&ui=edison: the lab sheet is the white lab paper (DM Mono, a caps code row over a sentence-case title), square tags (Not yet a grey outline, Passed the bus blue once step 6\'s answer is written) and dots to match, a square close button', async ({ page }) => {
   const errors = watchErrors(page);
   await openLab2(page, 'edison');
   const sheet = await page.evaluate(() => LabSheets.get('lab2'));
 
   // The panel: black, light ink, DM Mono, no pad grid and no shadow.
-  const look = await page.locator('#lab-sheet').evaluate(el => {
+  const look = await page.locator('#lab-sheet .lab-paper-sheet').evaluate(el => {
     const s = getComputedStyle(el);
     return { background: s.backgroundColor, image: s.backgroundImage, ink: s.color, font: s.fontFamily, shadow: s.boxShadow };
   });
   expect.soft({ ...look, font: firstFamily(look.font) }, 'the sheet is the HUD black panel (was the pad: rgb(233, 239, 226) under a grid)')
-    .toEqual({ background: HUD_BLACK, image: 'none', ink: HUD_INK, font: 'DM Mono', shadow: 'none' });
+    .toEqual({ background: 'rgb(255, 255, 255)', image: 'none', ink: 'rgb(43, 43, 43)', font: 'DM Mono', shadow: 'none' });
 
   // The code row in caps from CSS; the title as written.
   const head = await page.evaluate(() => {
@@ -129,12 +129,12 @@ test('?lab=lab2&ui=edison: the lab sheet is the black HUD (#101010, ink #F4F4F4,
   // The close button is square.
   await expect.soft(page.locator('#lab-sheet .lab-sheet-close'), 'the close button is square').toHaveCSS('border-radius', '0px', { timeout: 2000 });
 
-  // Passed: tick the first manual step, the way a student does.
-  const manual = sheet.steps.find(s => s.check.kind === 'manual');
-  expect(manual, 'Lab 2 has a manual step').toBeTruthy();
+  // Passed: write the answer to 6.1, the way a student does; step 6 (an answer check) confirms.
+  const manual = sheet.steps.find(s => s.check.kind === 'answer');
+  expect(manual, 'Lab 2 has a written-answer step').toBeTruthy();
   const li = page.locator('#lab-sheet ol > li').nth(manual.n - 1);
-  await li.click();
-  await expect(li.locator('.lab-step-status'), 'the click ticks the manual step').toHaveText(/^\s*Passed\s*$/);
+  await page.locator('#lab-sheet .lab-paper-written').first().fill('The output must fall when the input rises.');
+  await expect(li.locator('.lab-step-status'), 'the written answer confirms its step').toHaveText(/^\s*Passed\s*$/);
   await expect.soft(li.locator('.lab-step-status'), 'a Passed tag is HUD blue').toHaveCSS('background-color', HUD_BLUE, { timeout: 2000 });
   await expect.soft(li.locator('.lab-step-status'), 'a Passed tag is square').toHaveCSS('border-radius', '0px', { timeout: 2000 });
   await expect.soft(page.locator('#lab-sheet .lab-stepper-dot').nth(manual.n - 1), 'its stepper dot is HUD blue')
@@ -143,7 +143,8 @@ test('?lab=lab2&ui=edison: the lab sheet is the black HUD (#101010, ink #F4F4F4,
   expect(errors).toEqual([]);
 });
 
-test('?lab=lab2&ui=edison opens on a wider view: once the sheet\'s reframe settles the camera is at least 9 from its target (not U1\'s close-up at 6) and well short of home; pin: the same circuit opened as a saved file still frames at 6', async ({ page }) => {
+test('?lab=lab2&ui=edison opens on the whole board beside the lab paper: once the reframe settles the camera is at least 9 from its target (not U1\'s close-up at 6) and every corner of the breadboard is on the canvas; pin: the same circuit opened as a saved file still frames at 6', async ({ page }) => {
+  test.setTimeout(60_000);   // two camera settles and a reload on a laptop (software WebGL)
   const errors = watchErrors(page);
   await openLab2(page, 'edison');
 
@@ -152,9 +153,18 @@ test('?lab=lab2&ui=edison opens on a wider view: once the sheet\'s reframe settl
     return Math.hypot(pos[0] - target[0], pos[1] - target[1], pos[2] - target[2]);
   });
   const lab = await settledDistance(page);
-  expect.soft(lab, `the lab opens at distance ${lab.toFixed(3)}: wide enough to show the board and mat around U1 (a close-up is ${OPEN_DIST})`)
+  expect.soft(lab, `the lab opens at distance ${lab.toFixed(3)}: wide enough to show the board and mat around U1 (a close-up is ${OPEN_DIST}; home is ${homeD.toFixed(1)})`)
     .toBeGreaterThanOrEqual(WIDE_MIN);
-  expect.soft(lab, `and still framed on the parts: at most ${WIDE_MAX}, the home view is ${homeD.toFixed(1)}`).toBeLessThanOrEqual(Math.min(WIDE_MAX, homeD - 1));
+  // Beside the lab paper the whole breadboard is framed: its corners project onto the canvas.
+  const corners = await page.evaluate(() => {
+    const b = new THREE.Box3().setFromObject(App.state.breadboard.group);
+    App.camera.updateMatrixWorld();
+    return [[b.min.x, b.min.z], [b.max.x, b.min.z], [b.min.x, b.max.z], [b.max.x, b.max.z]].map(([x, z]) => {
+      const p = new THREE.Vector3(x, 0, z).project(App.camera);
+      return Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1;
+    });
+  });
+  expect.soft(corners, 'every corner of the breadboard is on the canvas').toEqual([true, true, true, true]);
 
   // Pin: only labs frame wider. Close the sheet, then open the same starter as
   // a saved circuit (App.loadCircuitData, File → Open's path): minDistance 6.
@@ -186,7 +196,7 @@ test('pin: classic ?lab=lab2 keeps the old lab sheet (#FAF9F6, Inter, round pill
   await expect(notYet, 'a Not yet pill stays #ECE8E1').toHaveCSS('background-color', 'rgb(236, 232, 225)');
   await expect(page.locator('#lab-sheet .lab-sheet-close'), 'the close button keeps its 6 px corners').toHaveCSS('border-radius', '6px');
 
-  const manual = sheet.steps.find(s => s.check.kind === 'manual');
+  const manual = sheet.steps.find(s => s.check.kind === 'manual' || s.check.kind === 'answer');   // classic has no answer box: ticked by a click
   const li = page.locator('#lab-sheet ol > li').nth(manual.n - 1);
   await li.click();
   await expect(li.locator('.lab-step-status')).toHaveText(/^\s*Passed\s*$/);

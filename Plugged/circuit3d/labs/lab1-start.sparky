@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "name": "ENSC 220 Lab 1: Series-parallel resistors",
+  "components": [
+    {
+      "type": "bench_supply",
+      "id": "PS1",
+      "label": "PS1",
+      "values": {
+        "voltage": 0,
+        "limit": 0.5
+      },
+      "holeRefs": null,
+      "position": {
+        "x": 16.4,
+        "z": -1
+      }
+    }
+  ],
+  "wires": []
+}

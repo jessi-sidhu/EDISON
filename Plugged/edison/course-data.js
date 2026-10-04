@@ -106,11 +106,11 @@
   };
 
   const feed = [
-    { minsAgo: 1,  lab: 'LAB-02', step: 2, label: 'U1', text: 'V+ (pin 8) not wired' },
+    { minsAgo: 1,  lab: 'LAB-02', step: 1, label: 'U1', text: 'V+ (pin 8) not wired' },
     { minsAgo: 5,  lab: 'LAB-01', step: 3, label: 'R2', text: 'R2 is 220 Ω, expected 2.2 kΩ' },
     { minsAgo: 9,  lab: 'LAB-02', step: 5, label: 'U1', text: 'Output clipping at +10.5 V' },
-    { minsAgo: 13, lab: 'LAB-02', step: 3, label: 'R1', text: 'Rin wired to pin 3 instead of pin 2' },
-    { minsAgo: 17, lab: 'LAB-01', step: 4, label: 'R3', text: 'Measured across the wrong pair of holes' },
+    { minsAgo: 13, lab: 'LAB-02', step: 2, label: 'R1', text: 'Rin wired to pin 3 instead of pin 2' },
+    { minsAgo: 17, lab: 'LAB-01', step: 7, label: 'R3', text: 'Measured across the wrong pair of holes' },
   ];
 
   return { course, announcements, labs, chapters, grades, heatmap, feed };

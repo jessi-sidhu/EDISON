@@ -104,18 +104,21 @@ function without(board, label) {
 const measureSteps = L => L.get('lab1').steps.filter(s => s.check && s.check.kind === 'measure');
 const STATUSES = ['passed', 'failed', 'pending'];
 
-test('Lab 1 sheet: 4–6 numbered steps, code LAB-01, starter is the lab file', () => {
+test('Lab 1 sheet: code LAB-01, 8 numbered steps with text and hints; its starter is the bench supply alone, at 0 V, nothing wired', () => {
   const s = labSheets().get('lab1');
-  expect(s).toMatchObject({ id: 'lab1', code: 'LAB-01', starter: 'labs/lab1.sparky' });
-  expect(s.steps.length, 'Lab 1 has 4–6 steps').toBeGreaterThanOrEqual(4);
-  expect(s.steps.length, 'Lab 1 has 4–6 steps').toBeLessThanOrEqual(6);
-  expect(s.steps.map(x => x.n)).toEqual(s.steps.map((_, i) => i + 1));
+  expect(s).toMatchObject({ id: 'lab1', code: 'LAB-01', starter: 'labs/lab1-start.sparky' });
+  expect(s.steps.map(x => x.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   for (const st of s.steps) {
     expect(typeof st.text === 'string' && st.text.length > 0, `step ${st.n} has text`).toBe(true);
     expect(typeof st.hint === 'string' && st.hint.length > 0, `step ${st.n} has a hint`).toBe(true);
   }
-  // The starter is the lab file on disk, relative to circuit3d/.
-  expect(fs.existsSync(path.join(ROOT, 'circuit3d', s.starter)), `${s.starter} exists under circuit3d/`).toBe(true);
+  expect(s.steps.map(st => st.check.kind), 'build (set, place, place, wire), then measure, then explain')
+    .toEqual(['set', 'part', 'part', 'flows', 'measure', 'measure', 'measure', 'answer']);
+  const file = path.join(ROOT, 'circuit3d', s.starter);
+  expect(fs.existsSync(file), `${s.starter} exists under circuit3d/`).toBe(true);
+  const start = JSON.parse(fs.readFileSync(file, 'utf8'));
+  expect(start.components.map(c => [c.label, c.type, c.values.voltage])).toEqual([['PS1', 'bench_supply', 0]]);
+  expect(start.wires).toEqual([]);
 });
 
 test('every measure check on Lab 1 passes on the finished starter circuit', () => {
@@ -341,6 +344,21 @@ function lab2Board(pick) {
 }
 const finishedLab2 = () => lab2Board(s => [s.supply, s.input, s.feedback]);
 
+// A Give me build (LabSheets.giveStep) onto a test board: board parts by
+// their holes, an instrument (no holes) on the bench, then the wires.
+function addGiven(board, g) {
+  for (const p of g.parts.filter(x => !x.holes)) {
+    board.components.push({ type: p.type, label: p.label, values: Object.assign({}, p.values), holeRefs: null,
+                            pins: Parts.get(p.type).pins.map(() => ({ x: 0, y: 0, z: 0 })) });
+  }
+  return add(board, { parts: g.parts.filter(x => x.holes), wires: g.wires.map(w => [w.from, w.to]) });
+}
+// Lab 2 finished with the meter on the output, as step 4 asks (its Give me).
+function withMeter(board) {
+  const s = labSheets().get('lab2');
+  return addGiven(board, labSheets().giveStep(s.steps.find(x => x.check.kind === 'probes'), chipHoles(board), s.seat));
+}
+
 // The page's time run (simulate.js startTimeRun): dt from Sim.pickDt for the
 // board's wave, each step solved at the end of its dt with the state carried
 // on, for `seconds` of sim time. each(readings, t, result) after every step.
@@ -371,12 +389,12 @@ const peakStep = s => {
 };
 
 // The sheet's steps (from the issue): 1 place the TL072 across the centre
-// gap (part U1); 2 wire ±12 V to pins 8 and 4 (manual); 3 the generator
+// gap (part U1); 2 wire ±12 V to pins 8 and 4 (supply, at U1's pins); 3 the generator
 // through Rin to pin 2 (part R1); 4 Rf from pin 1 to pin 2 (part R2); 5 run
 // and read the output peak on the scope (peak at U1's OUT1, expect 10 V);
-// 6 explain the phase flip (manual). The tolerance is at most 0.05 (see the
+// 6 explain the phase flip (answer, the paper's 6.1). The tolerance is at most 0.05 (see the
 // half-built test below for why it may need to be tighter).
-test('Lab 2 sheet: code LAB-02, starter labs/lab2.sparky, steps numbered 1..n with the lab\'s checks, the peak at U1 OUT1 expecting 10 V', () => {
+test('Lab 2 sheet (case 11): code LAB-02, starter labs/lab2.sparky (FG1 a 0.5 V peak sine), steps numbered 1..n with the lab\'s checks, the peak at U1 OUT1 expecting 5 V', () => {
   const s = lab2Sheet(labSheets());
   expect(s).toMatchObject({ id: 'lab2', code: 'LAB-02', starter: 'labs/lab2.sparky' });
   expect(typeof s.title === 'string' && s.title.length > 0, 'Lab 2 has a title').toBe(true);
@@ -387,10 +405,12 @@ test('Lab 2 sheet: code LAB-02, starter labs/lab2.sparky, steps numbered 1..n wi
     expect(typeof st.hint === 'string' && st.hint.length > 0, `step ${st.n} has a hint`).toBe(true);
   }
   expect(s.steps.map(st => [st.check.kind, st.check.label || null]), 'the steps\' checks, in order').toEqual([
-    ['part', 'U1'], ['manual', null], ['part', 'R1'], ['part', 'R2'], ['peak', 'U1'], ['manual', null],
+    ['supply', 'U1'], ['part', 'R1'], ['part', 'R2'], ['probes', 'MM1'], ['peak', 'U1'], ['answer', null],
   ]);
   const peak = peakStep(s).check;
-  expect(peak).toMatchObject({ pin: Parts.get('tl072').pins[0], expect: 10, unit: 'V' });
+  expect(peak).toMatchObject({ pin: Parts.get('tl072').pins[0], expect: 5, unit: 'V' });
+  const fg = JSON.parse(fs.readFileSync(LAB2, 'utf8')).components.find(c => c.label === 'FG1');
+  expect(fg.values, 'case 11: a 0.5 V sine at 1 Hz').toMatchObject({ amplitude: 0.5, frequency: 1, offset: 0 });
   expect(peak.tol, 'the peak tolerance').toBeGreaterThan(0);
   expect(peak.tol, 'the peak tolerance').toBeLessThanOrEqual(0.05);
 });
@@ -433,11 +453,11 @@ test('Lab 2 starter: U1 (a TL072 across the centre gap), PS1 and FG1, nothing wi
 // t = 0.25 s; before t = 0.2 s it is under 9.47 V (9.950 · sin(0.4π)), more
 // than 5 % short of 10 V, so the step is Not yet there; from the crest on
 // the memo holds the peak through the troughs, so it stays Passed.
-test('finished Lab 2, time-stepped for 2 s with one shared memo: OUT1 peaks at 9.950 V, the peak step is pending before the first crest and passed from it to t = 2 s; every checked step passes', () => {
+test('finished Lab 2, time-stepped for 2 s with one shared memo: OUT1 peaks at 4.975 V, the peak step is pending before the first crest and passed from it to t = 2 s; every checked step passes', () => {
   const L = labSheets();
   const s = lab2Sheet(L);
   const peak = peakStep(s);
-  const b = finishedLab2();
+  const b = withMeter(finishedLab2());
   const memo = {}; const trace = [];
   let maxV = 0;
   timeRun(b, 2, (r, t, result) => {
@@ -447,7 +467,7 @@ test('finished Lab 2, time-stepped for 2 s with one shared memo: OUT1 peaks at 9
     trace.push({ t, v, status: L.evaluate(peak.check, r, b, memo) });
   });
   expect(trace[trace.length - 1].t, 'the run covers 2 s of sim time').toBeCloseTo(2, 6);
-  expect(maxV, 'the largest |V(OUT1)| over 2 s: 1 V × 100 kΩ / 10.05 kΩ').toBeCloseTo(9.950, 2);
+  expect(maxV, 'the largest |V(OUT1)| over 2 s: 0.5 V × 100 kΩ / 10.05 kΩ').toBeCloseTo(4.975, 2);
 
   const show = list => list.map(x => `t=${x.t.toFixed(2)} ${x.v === null ? 'null' : x.v.toFixed(2)} V ${x.status}`).join('; ');
   const early = trace.filter(x => x.t < 0.2 - 1e-9);
@@ -456,9 +476,9 @@ test('finished Lab 2, time-stepped for 2 s with one shared memo: OUT1 peaks at 9
   expect(late.filter(x => x.status !== 'passed').map(x => show([x])), 'from the first crest (t = 0.25 s) to t = 2 s the peak step is passed').toEqual([]);
 
   // And at t = 2 s every checked step is passed on the finished board (the
-  // manual ones are the student's to tick).
+  // written answer is the student's).
   const r = (() => { let last; timeRun(b, 2, x => { last = x; }); return last; })();
-  for (const st of s.steps.filter(x => x.check.kind !== 'manual' && x.check.kind !== 'peak')) {
+  for (const st of s.steps.filter(x => !['manual', 'answer', 'peak'].includes(x.check.kind))) {
     expect(L.evaluate(st.check, r, b, memo), `step ${st.n} (${st.check.kind} ${st.check.label}) on the finished board`).toBe('passed');
   }
 });
@@ -520,4 +540,195 @@ test('the ENSC 220 Labs menu lists every lab sheet, Lab 2 included, as "Lab <n>"
     expect(item.title, `${id}'s menu item`).toMatch(new RegExp(`^Lab ${Number(s.code.slice(4))}\\b`));
     expect(Labs.urlFor(id), `${id}'s menu file is its sheet's starter`).toBe(s.starter);
   }
+});
+
+// The lab manual on Lab 2 (the lab paper): pre-lab answers as typed, and the
+// data table read from the same time run the sheet sees. Hand-computed as
+// above: Vin peak 1 V (FG1's set amplitude), Vout peak 9.950 V, the gain
+// −9.950 / 1 = −9.950, and the output inverted (opposite sign to FG1).
+test('checkAnswer: a pre-lab answer as typed ("−10", "-10 ", "5 V", "1.05V"), within the item\'s tolerance', () => {
+  const L = labSheets();
+  const [gain, peak, meter, clip] = lab2Sheet(L).prelab;
+  expect(['−10', '-10', ' -10.2 ', '-9.8'].map(t => L.checkAnswer(gain, t)), 'the gain −10, ±3%').toEqual(['correct', 'correct', 'correct', 'correct']);
+  expect(['10', '-11', 'abc', '- 10'].map(t => L.checkAnswer(gain, t)), 'wrong sign, wrong value, not a number').toEqual(['not yet', 'not yet', 'not yet', 'not yet']);
+  expect(['', '   ', null].map(t => L.checkAnswer(gain, t)), 'nothing typed').toEqual(['empty', 'empty', 'empty']);
+  expect([L.checkAnswer(peak, '5 V'), L.checkAnswer(peak, '5V'), L.checkAnswer(meter, '−5 V'), L.checkAnswer(meter, '5 V'), L.checkAnswer(clip, '1.05V'), L.checkAnswer(clip, '1.5 V')])
+    .toEqual(['correct', 'correct', 'correct', 'not yet', 'correct', 'not yet']);
+});
+
+test('readData on finished Lab 2 (case 11), the meter on the output, time-stepped for 2 s with one memo: Vin peak 0.50, Vout peak 4.975, gain −9.95, the meter at the input\'s peak −4.975, inverted; each ok', () => {
+  const L = labSheets();
+  const s = lab2Sheet(L);
+  const board = withMeter(finishedLab2());
+  const memo = {};
+  let last = null;
+  timeRun(board, 2, readings => { last = s.data.map(row => L.readData(row, s.data, readings, board, memo)); });
+  const [vin, vout, gain, meter, phase] = last;
+  expect(vin, 'FG1\'s set amplitude').toEqual({ value: 0.5, ok: true });
+  expect(vout.value, 'OUT1\'s peak').toBeCloseTo(4.975, 2);
+  expect(gain.value, '−Vout / Vin').toBeCloseTo(-9.95, 2);
+  expect(meter.value, 'the meter at the input\'s crest: case 11 wants −5.15 to −4.85 V').toBeCloseTo(-4.975, 2);
+  expect(phase.value, 'the output against FG1').toBe('inverted');
+  expect([vout.ok, gain.ok, meter.ok, phase.ok]).toEqual([true, true, true, true]);
+});
+
+test('readData on the unwired Lab 2 starter: the measured rows stay null (only FG1\'s set amplitude reads); the starter never throws', () => {
+  const L = labSheets();
+  const s = lab2Sheet(L);
+  const board = lab2Starter();
+  const memo = {};
+  let last = null;
+  timeRun(board, 0.5, readings => { last = s.data.map(row => L.readData(row, s.data, readings, board, memo)); });
+  expect(last.map(r => r.value)).toEqual([0.5, null, null, null, null]);
+  expect(L.readData(null, [], null, board, memo)).toEqual({ value: null, ok: null });
+});
+
+// Lab 1 built the way a student who asks for every step would: Give me on
+// steps 1–4 from the starter. Each build step confirms on a DC solve as it
+// lands (the paper's check between runs); the result is lab1.sparky's
+// circuit (the same parts in the same holes), so the measure steps pass and
+// the data reads 4.31 mA, 5.69 V and 1.72 mA (10 V over 1 kΩ + 2.2 kΩ ∥ 3.3 kΩ).
+test('Lab 1 with Give me: steps 1–4 on the starter build lab1.sparky\'s circuit, each confirming as it lands; then every measure passes and the data reads 4.31 mA, 5.69 V, 1.72 mA', () => {
+  const L = labSheets();
+  const s = L.get('lab1');
+  const b = load(JSON.parse(fs.readFileSync(path.join(ROOT, 'circuit3d', s.starter), 'utf8')));
+  for (const st of s.steps.slice(0, 4)) {
+    expect(L.evaluate(st.check, solve(b), b, {}), `step ${st.n} before Give me`).toBe('pending');
+    const g = L.giveStep(st, {}, s.seat);
+    expect(g, `step ${st.n} has a Give me`).not.toBeNull();
+    for (const x of g.set) Object.assign(b.components.find(c => c.label === x.label).values, x.values);
+    add(b, { parts: g.parts, wires: g.wires.map(w => [w.from, w.to]) });
+    expect(L.evaluate(st.check, solve(b), b, {}), `step ${st.n} after Give me`).toBe('passed');
+  }
+  const done = lab1();
+  const sig = board => board.components.map(c => [c.label, c.type, c.values.resistance || c.values.voltage, JSON.stringify(c.holeRefs)]).sort();
+  expect(sig(b), 'the same parts, values and holes as lab1.sparky').toEqual(sig(done));
+  const r = solve(b), memo = {};
+  for (const st of measureSteps(L)) expect(L.evaluate(st.check, r, b, memo), `measure step ${st.n}`).toBe('passed');
+  const got = s.data.map(row => L.readData(row, s.data, r, b, memo));
+  expect(got.map(x => Number(x.value.toFixed(2)))).toEqual([4.31, 5.69, 1.72]);
+  expect(got.map(x => x.ok)).toEqual([true, true, true]);
+});
+
+// The lab paper's width once a pull ends (tools/labs.js paperWidth): under
+// 200 tucks it (0); otherwise 380 at least, and the board keeps 260 of the
+// room. At 1440 × 900 the room is 1440 − 56 (rail) − 30 (grip) − 340 (chat) = 1014.
+test('paperWidth: a short pull tucks the paper, a pull opens it at 380 or more, and the board always keeps 260 px', () => {
+  const Labs = require('../circuit3d/js/tools/labs.js');
+  expect([0, 150, 199].map(w => Labs.paperWidth(w, 1014)), 'under 200: tucked').toEqual([0, 0, 0]);
+  expect([200, 300, 480, 700].map(w => Labs.paperWidth(w, 1014)), 'at least 380, as pulled up to 754').toEqual([380, 380, 480, 700]);
+  expect(Labs.paperWidth(5000, 1014), 'never past room − 260').toBe(754);
+  expect(Labs.paperWidth(500, 500), 'a room too small for both: the paper keeps its minimum').toBe(380);
+  expect(Labs.paperWidth(Number.NaN, 1014), 'nonsense tucks').toBe(0);
+  expect(Labs.PAPER_WIDTH, 'it opens at 480').toBe(480);
+});
+
+// "Give me" (the lab paper): a step's build, its holes from the chip's own.
+// Steps 2, 3 and 4 given on the starter build the lab's whole circuit: the
+// same parts and wires as test/fixtures/lab2-finish.js, and OUT1 peaks at
+// 9.950 V as hand-computed above. Every piece says where it goes.
+test('giveStep: steps 1–4 given on the Lab 2 starter (U1 seated) build the fixture\'s circuit and put the meter on the output; it peaks at 4.975 V; each piece names its holes; step 5 runs; step 6 gives nothing', () => {
+  const L = labSheets();
+  const s = lab2Sheet(L);
+  const board = lab2Starter();
+  const holes = chipHoles(board);
+  const given = s.steps.map(st => L.giveStep(st, holes, s.seat));
+  expect(given[5], 'step 6: the student\'s own sentence').toBeNull();
+  expect(given[4]).toMatchObject({ run: true, parts: [], wires: [] });
+  expect(given[4].says).toContain(`column ${holes.out1.slice(1)}`);
+
+  const asStage = g => ({ parts: g.parts, wires: g.wires.map(w => [w.from, w.to]) });
+  const want = lab2Finish(holes);
+  expect(asStage(given[0]), 'step 1 is the supply').toEqual(want.supply);
+  expect(asStage(given[1]).wires, 'step 2\'s wires are the input\'s').toEqual(want.input.wires);
+  expect(given[1].parts.map(p => [p.label, p.holes, p.values]), 'step 2 places Rin').toEqual(want.input.parts.map(p => [p.label, p.holes, p.values]));
+  expect(given[2].parts.map(p => [p.label, p.holes, p.values]), 'step 3 places Rf').toEqual(want.feedback.parts.map(p => [p.label, p.holes, p.values]));
+  expect(given[3].parts.map(p => [p.type, p.label, p.holes, p.values]), 'step 4: the meter, on the bench, in V mode').toEqual([['multimeter', 'MM1', null, { mode: 'V' }]]);
+  expect(given[3].wires.map(w => [w.from, w.to]), 'red to pin 1\'s column, black to ground').toEqual([['MM1.0', `g${holes.out1.slice(1)}`], ['MM1.1', 'tn_59']]);
+  for (const g of given.slice(0, 4)) {
+    for (const piece of [...g.parts, ...g.wires]) expect(piece.says, 'every piece says where it goes').toMatch(/\S/);
+  }
+  expect(given[1].parts[0].says).toContain('i35');
+
+  for (const g of given.slice(0, 4)) addGiven(board, g);
+  expect(L.evaluate(s.steps[3].check, solve(board), board, {}), 'the meter\'s probes are on').toBe('passed');
+  let top = 0;
+  timeRun(board, 2, r => { const v = out1(r); if (v !== null) top = Math.max(top, v); });
+  expect(top, 'the given circuit amplifies: OUT1 peaks at 4.975 V').toBeCloseTo(4.975, 2);
+
+  expect(L.giveStep(s.steps[1], { out1: 'f30' }), 'a chip missing pins gives nothing').toBeNull();
+});
+
+// Step 2's supply check reads U1's own pins: pin 8 (V+) at +12 V and pin 4
+// (V−) at −12 V, within 5 %. Floating (not wired yet) is pending; wired to
+// the wrong rails (PS1's + and − swapped) is failed. Solved at DC, as the
+// lab paper checks the board between runs.
+test('supply check: the starter is pending; the supply wired passes (pin 8 at +12 V, pin 4 at −12 V); half wired is pending; swapped fails', () => {
+  const L = labSheets();
+  const check = lab2Sheet(L).steps[0].check;
+  expect(check).toMatchObject({ kind: 'supply', label: 'U1', pins: { vpos: 12, vneg: -12 } });
+  const dc = b => L.evaluate(check, solve(b), b, {});
+
+  expect(dc(lab2Starter()), 'nothing wired').toBe('pending');
+  expect(dc(lab2Board(st => [st.supply])), 'the supply stage alone').toBe('passed');
+  expect(dc(finishedLab2()), 'the finished circuit').toBe('passed');
+
+  const half = lab2Starter();
+  add(half, { wires: lab2Finish(chipHoles(half)).supply.wires.filter(([, to]) => !to.startsWith('j')) });
+  expect(dc(half), 'V− (pin 4) not wired yet').toBe('pending');
+
+  const swapped = lab2Starter();
+  const sw = lab2Finish(chipHoles(swapped)).supply.wires.map(([a, to]) => [a === 'PS1.0' ? 'PS1.2' : a === 'PS1.2' ? 'PS1.0' : a, to]);
+  add(swapped, { wires: sw });
+  expect(dc(swapped), 'PS1 + and − swapped: pin 8 at −12 V').toBe('failed');
+});
+
+test('answer check: step 6 passes once 6.1 holds a sentence (four words or more), never from the board', () => {
+  const L = labSheets();
+  const check = lab2Sheet(L).steps[5].check;
+  expect(check).toEqual({ kind: 'answer', q: '6.1' });
+  const b = finishedLab2();
+  const r = solve(b);
+  expect(L.evaluate(check, r, b, {}), 'no answers').toBe('pending');
+  expect(L.evaluate(check, r, b, {}, { '6.1': 'it flips' }), 'two words').toBe('pending');
+  expect(L.evaluate(check, r, b, {}, { '6.1': 'The output must fall as the input rises.' })).toBe('passed');
+  expect(L.evaluate(check, null, null, null, { '6.1': 'The output must fall as the input rises.' }), 'needs no solve').toBe('passed');
+});
+
+// Give me needs U1 seated as the lab lays it out (pins 1–4 in row f, pin 8
+// in row e) and every hole on the board: a chip turned round (180° at e33)
+// would put +12 V on OUT1's column, and one at f60 would put R1 at i65, off
+// the 63 columns. Both give nothing.
+test('giveStep gives nothing for a chip turned round (e33, 180°) or seated so a hole falls off the board (f60)', () => {
+  const L = labSheets();
+  const s = lab2Sheet(L);
+  const legs = (at, rot) => Object.fromEntries(Parts.footprintLegs('tl072', at, rot).map(l => [l.pin, l.hole]));
+  const turned = legs('e33', 180), far = legs('f60', 0);
+  for (const n of [1, 2, 3]) expect(L.giveStep(s.steps[n - 1], turned, s.seat), `step ${n}, U1 turned round`).toBeNull();
+  expect(L.giveStep(s.steps[1], far, s.seat), 'step 2 at f60: R1 would reach i65').toBeNull();
+  expect(L.giveStep(s.steps[0], legs('f30', 0), s.seat), 'the starter\'s seat gives').not.toBeNull();
+});
+
+// Step 4's probes check, case 11's "the multimeter on the output": red on
+// U1 OUT1's net, black on ground's (PS1 COM). It reads the nets, so it
+// confirms between runs; a meter not wired, or with its probes swapped or on
+// the wrong pin, waits.
+test('probes check: the meter on the output (red on OUT1, black on ground) passes; no meter, probes swapped, or red on the wrong pin wait', () => {
+  const L = labSheets();
+  const s = lab2Sheet(L);
+  const check = s.steps[3].check;
+  expect(check).toMatchObject({ kind: 'probes', label: 'MM1', red: { label: 'U1', pin: 'out1' }, black: { label: 'PS1', pin: 'com' } });
+  const dc = b => L.evaluate(check, solve(b), b, {});
+  expect(dc(finishedLab2()), 'no meter').toBe('pending');
+  expect(dc(withMeter(finishedLab2())), 'on the output').toBe('passed');
+
+  const meterWith = wires => {
+    const b = finishedLab2();
+    b.components.push({ type: 'multimeter', label: 'MM1', values: { mode: 'V' }, holeRefs: null, pins: [{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }] });
+    return add(b, { wires });
+  };
+  const out = `g${chipHoles(lab2Starter()).out1.slice(1)}`;
+  expect(dc(meterWith([['MM1.0', 'tn_59'], ['MM1.1', out]])), 'probes swapped').toBe('pending');
+  expect(dc(meterWith([['MM1.0', 'g31'], ['MM1.1', 'tn_59']])), 'red on pin 2, not the output').toBe('pending');
+  expect(dc(meterWith([['MM1.0', out]])), 'black not wired').toBe('pending');
 });

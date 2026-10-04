@@ -46,17 +46,25 @@ async function openLab1(page) {
   await menu.click();
   await expect(labMenuItem(page)).toHaveCount(1);
   await labMenuItem(page).click();
-  await expect.poll(() => labels(page), { message: 'Lab 1 loads PS1, R1, R2 and R3' }).toEqual(['PS1', 'R1', 'R2', 'R3']);
+  // Lab 1 starts from the bench supply alone (the student builds the rest),
+  // and its lab sheet opens with it.
+  await expect.poll(() => labels(page), { message: 'Lab 1 loads its starter: PS1 alone' }).toEqual(['PS1']);
+  await expect(page.locator('#lab-sheet'), 'picking a lab opens its sheet').toBeVisible();
+  await expect(page.locator('#lab-sheet')).toContainText('LAB-01');
 }
 
-test('ENSC 220 Labs → Lab 1 loads the circuit, and Run gives the Lab 1 readings', async ({ page }) => {
+// Lab 1 as the student finishes building it (circuit3d/labs/lab1.sparky).
+const LAB1_DONE = JSON.parse(require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'circuit3d', 'labs', 'lab1.sparky'), 'utf8'));
+
+test('ENSC 220 Labs → Lab 1 loads its starter and opens its sheet; built, Run gives the Lab 1 readings', async ({ page }) => {
   const errors = watchErrors(page);
   await page.route('**/api/ask', route => route.fulfill({ json: { reply: '', actions: [] } }));
   await page.goto('/circuit3d/index.html');
   await page.waitForFunction(() => window.App && App.renderer && App.state && App.state.breadboard);
 
   await openLab1(page);
-  expect(await page.evaluate(() => App.state.components.length)).toBe(4);
+  await page.evaluate(d => App.loadCircuitData(d), LAB1_DONE);
+  await expect.poll(() => labels(page), { message: 'the finished Lab 1: PS1, R1, R2 and R3' }).toEqual(['PS1', 'R1', 'R2', 'R3']);
 
   // What the page's tools read from the solve Run triggers.
   await page.evaluate(() => {
@@ -97,5 +105,18 @@ test('loading Lab 1 over a circuit is one undo step: Ctrl/Cmd+Z puts the old boa
   await page.keyboard.press('ControlOrMeta+z');
   await expect.poll(() => labels(page), { message: 'undo brings back the demo circuit' }).toEqual(['BAT1', 'LED1', 'R1', 'SW1']);
   expect(await board(page)).toEqual(before);
+  expect(errors).toEqual([]);
+});
+
+test('ENSC 220 Labs → Lab 2 opens its sheet too (the lab paper in Edison)', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.route('**/api/ask', route => route.fulfill({ json: { reply: '', actions: [] } }));
+  await page.goto('/circuit3d/index.html?ui=edison');
+  await page.waitForFunction(() => window.App && App.renderer && App.state && App.state.breadboard);
+  await page.locator('#labs-menu-btn').click();
+  await page.getByText(/^\s*Lab 2\b/).filter({ visible: true }).click();
+  await expect(page.locator('#lab-sheet')).toBeVisible();
+  await expect(page.locator('#lab-sheet')).toContainText('LAB-02');
+  await expect(page.locator('#lab-sheet .lab-paper-sec').first(), 'the paper with its manual').toBeVisible();
   expect(errors).toEqual([]);
 });

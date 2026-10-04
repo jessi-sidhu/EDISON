@@ -31,7 +31,7 @@
 // turns Passed. The waits are on the sim clock (#sim-results "t = … s") and
 // on what the frames have shown, never on wall time: the sheet sees one
 // plugged:sim per frame, and CI draws ~3 frames a second. The 2 s run at the
-// simulator's own dt, the hand-computed 9.950 V peak and the half-built
+// simulator's own dt, the hand-computed 4.975 V peak and the half-built
 // boards are test/lab-sheets.test.js.
 const fs   = require('node:fs');
 const path = require('node:path');
@@ -39,6 +39,14 @@ const { test, expect } = require('@playwright/test');
 const { lab2FinishAll } = require('../test/fixtures/lab2-finish.js');
 
 const LAB2_FILE = path.join(__dirname, '..', 'circuit3d', 'labs', 'lab2.sparky');
+// Lab 1 starts from the bench supply alone; lab1.sparky is it finished, as a
+// student builds it (Give me on steps 1–4 builds exactly this).
+const LAB1_DONE = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'circuit3d', 'labs', 'lab1.sparky'), 'utf8'));
+const buildLab1 = async page => {
+  await expect.poll(() => labels(page), { message: '?lab=lab1 loads its starter, PS1 alone' }).toEqual(['PS1']);
+  await page.evaluate(d => App.loadCircuitData(d), LAB1_DONE);
+  await expect.poll(() => labels(page), { message: 'the finished Lab 1: PS1, R1, R2 and R3' }).toEqual(['PS1', 'R1', 'R2', 'R3']);
+};
 const CLOCK = /t = (\d+(?:\.\d+)?) s/;
 
 function watchErrors(page) {
@@ -102,8 +110,9 @@ test('?lab=lab1 loads Lab 1 and its sheet (LAB-01, every step Not yet); Run pass
   const errors = watchErrors(page);
   await openLab(page, 'lab=lab1');
 
-  // The lab loads: Lab 1's four parts, and the sheet with every step Not yet.
-  await expect.poll(() => labels(page), { message: '?lab=lab1 loads PS1, R1, R2 and R3' }).toEqual(['PS1', 'R1', 'R2', 'R3']);
+  // The lab loads its starter and its sheet; the student builds it (the
+  // finished circuit), and in classic every step waits for Run.
+  await buildLab1(page);
   await expect(page.locator('#lab-sheet'), 'the lab sheet opens').toBeVisible();
   await expect(page.locator('#lab-sheet')).toContainText('LAB-01');
   const steps = await lab1Steps(page);
@@ -123,13 +132,15 @@ test('?lab=lab1 loads Lab 1 and its sheet (LAB-01, every step Not yet); Run pass
   // Steps pass: Run solves Lab 1 and every checked step turns Passed; a
   // manual step waits for the student.
   await page.locator('#sim-run-btn').click();
-  const checked = steps.filter(s => s.kind !== 'manual');
-  await expect.poll(async () => tidy(await pills(page)).filter((_, i) => steps[i].kind !== 'manual'),
-    { message: 'after Run, every measure (and part) step reads Passed' }).toEqual(checked.map(() => 'Passed'));
-  for (const s of steps.filter(x => x.kind === 'manual')) await expect(pill(page, s.n)).toHaveText(/^\s*Not yet\s*$/);
+  // (Classic has no answer boxes: the written-answer step is ticked by hand.)
+  const byRun = x => x.kind !== 'manual' && x.kind !== 'answer';
+  const checked = steps.filter(byRun);
+  await expect.poll(async () => tidy(await pills(page)).filter((_, i) => byRun(steps[i])),
+    { message: 'after Run, every build and measure step reads Passed' }).toEqual(checked.map(() => 'Passed'));
+  for (const s of steps.filter(x => !byRun(x))) await expect(pill(page, s.n)).toHaveText(/^\s*Not yet\s*$/);
 
-  // A manual step toggles on a click.
-  const manual = steps.find(s => s.kind === 'manual');
+  // A click-to-tick step toggles on a click.
+  const manual = steps.find(s => s.kind === 'manual' || s.kind === 'answer');
   if (manual) {
     await stepItem(page, manual.n).click();
     await expect(pill(page, manual.n), 'a click ticks the manual step').toHaveText(/^\s*Passed\s*$/);
@@ -170,8 +181,8 @@ test('?lab=lab9 (no such lab): the hint "There\'s no lab9", no sheet, nothing lo
 // Lab 1 is the lab whose steps can fail. R1 goes to 4.7 kΩ through
 // App.setValues, the inspector's own call (the inspector edit itself is the
 // first case above).
-const HUD_BLUE = 'rgb(61, 123, 255)';   // #3D7BFF: Passed
-const HUD_PINK = 'rgb(255, 61, 127)';   // #FF3D7F: Check failed
+const HUD_BLUE = 'rgb(44, 92, 192)';    // #2C5CC0, the bus blue on the white lab paper: Passed
+const HUD_PINK = 'rgb(196, 51, 59)';    // #C4333B, the bus red on the white lab paper: Check failed
 
 test('Edison styling: ?lab=lab1&ui=edison gives the sheet the Lab HUD black rgb(16, 16, 16); after Run a Passed tag is square HUD blue, and R1 at 4.7 kΩ turns the I(R1) step\'s tag and dot HUD pink', async ({ page }) => {
   test.setTimeout(60_000);   // a Run on a slow CI runner (software WebGL)
@@ -181,13 +192,19 @@ test('Edison styling: ?lab=lab1&ui=edison gives the sheet the Lab HUD black rgb(
   await expect(page.locator('#lab-sheet'), 'the lab sheet opens in Edison too').toBeVisible();
   const got = await page.evaluate(() => ({
     ui: document.documentElement.dataset.ui || null,
-    background: getComputedStyle(document.getElementById('lab-sheet')).backgroundColor,
+    background: getComputedStyle(document.querySelector('#lab-sheet .lab-paper-sheet')).backgroundColor,
   }));
-  expect.soft(got, 'Edison is on, and the sheet is the HUD black (was the pad, rgb(233, 239, 226))').toEqual({ ui: 'edison', background: 'rgb(16, 16, 16)' });
+  expect.soft(got, 'Edison is on, and the sheet is the white lab paper').toEqual({ ui: 'edison', background: 'rgb(255, 255, 255)' });
 
   // Run: the measure steps pass, and a Passed tag is a square blue tag.
-  await expect.poll(() => labels(page), { message: '?lab=lab1 loads PS1, R1, R2 and R3' }).toEqual(['PS1', 'R1', 'R2', 'R3']);
+  await buildLab1(page);
   const steps = await lab1Steps(page);
+  // Between runs the lab paper checks parts and supplies, never a measurement:
+  // past its 400 ms check, the built circuit's measure steps still wait for Run.
+  await page.waitForTimeout(1000);
+  for (const st of steps.filter(x => x.kind === 'measure')) {
+    await expect(pill(page, st.n), `before Run, measure step ${st.n} is Not yet`).toHaveText(/^\s*Not yet\s*$/);
+  }
   const r1 = steps.find(s => s.kind === 'measure' && s.label === 'R1' && s.quantity === 'I');
   expect(r1, 'a step measures I(R1)').toBeTruthy();
   await page.locator('#sim-run-btn').click();
@@ -255,7 +272,10 @@ test('?lab=lab2&ui=edison loads the Lab 2 starter (unwired) and LAB-02 with ever
   const steps = await lab2Steps(page);
   expect(steps, 'the page has LabSheets.get("lab2")').toBeTruthy();
   await expect(stepItems(page), 'one item per step').toHaveCount(steps.length);
-  expect(tidy(await pills(page)), 'before Run, every step is Not yet').toEqual(steps.map(() => 'Not yet'));
+  // Before Run, the Edison lab paper checks the board between runs: U1 is in
+  // the starter, so its step confirms at once; nothing else is built yet.
+  await expect.poll(async () => tidy(await pills(page)), { message: 'before Run, only U1\'s step is Passed' })
+    .toEqual(steps.map(s => (s.kind === 'part' && s.label === 'U1' ? 'Passed' : 'Not yet')));
   const peak = steps.find(s => s.kind === 'peak');
   expect(peak, 'Lab 2 has a peak step').toBeTruthy();
 
@@ -269,6 +289,12 @@ test('?lab=lab2&ui=edison loads the Lab 2 starter (unwired) and LAB-02 with ever
   await addToBoard(page, finish);
   expect(await labels(page), 'R1 (Rin) and R2 (Rf) are placed').toEqual([...want, 'R1', 'R2'].sort());
   expect(await page.evaluate(() => App.state.wires.length), 'every wire is drawn').toBe(finish.wires.length);
+  // And the multimeter on the output, as step 4 asks (case 11): on the bench, red to pin 1's column, black to ground.
+  await page.evaluate(() => {
+    const spot = Bench.spotFor('multimeter', Bench.spotsOf(App.state.components), App.batterySpot());
+    App.placePart('multimeter', spot, { mode: 'V' });
+  });
+  await addToBoard(page, { parts: [], wires: [['MM1.0', 'g' + holes.out1.slice(1)], ['MM1.1', 'tn_59']] });
 
   // What each frame shows: the sim clock and |V(OUT1)| from the frame's readings.
   await page.evaluate(([clock, pin]) => {
@@ -290,7 +316,7 @@ test('?lab=lab2&ui=edison loads the Lab 2 starter (unwired) and LAB-02 with ever
 
   // Wait on sim time, never wall time: 2 s on the clock, and a frame that has
   // shown OUT1 at its crest (within the step's tolerance of its expected
-  // peak; OUT1 peaks at 9.950 V), since the sheet sees only what the frames show.
+  // peak; OUT1 peaks at 4.975 V), since the sheet sees only what the frames show.
   const crest = peak.expect * (1 - peak.tol);
   const seen = () => page.evaluate(() => {
     const fr = window.__lab2.filter(f => f.clock !== null);
@@ -301,13 +327,15 @@ test('?lab=lab2&ui=edison loads the Lab 2 starter (unwired) and LAB-02 with ever
     return s.clock >= 2 && s.top >= crest;
   }, { message: `the sim clock reaches 2 s and a frame shows |V(OUT1)| ≥ ${crest.toFixed(2)} V`, timeout: 90_000 }).toBe(true);
   const s = await seen();
-  expect(s.top, `OUT1's largest |V| over ${s.frames} frames (an inverting −10 on 1 Vp: 9.950 V, unclipped)`).toBeLessThan(10.2);
+  expect(s.top, `OUT1's largest |V| over ${s.frames} frames (an inverting −10 on 0.5 Vp: 4.975 V, unclipped)`).toBeLessThan(5.1);
 
   // The peak step reads Passed, and so does every checked step; the manual
   // ones wait for the student.
   await expect(pill(page, peak.n), `after ${s.clock} s of sim time the peak step reads Passed`).toHaveText(/^\s*Passed\s*$/);
-  const checked = steps.filter(x => x.kind !== 'manual');
-  expect(tidy(await pills(page)).filter((_, i) => steps[i].kind !== 'manual'), 'every checked step reads Passed').toEqual(checked.map(() => 'Passed'));
-  for (const m of steps.filter(x => x.kind === 'manual')) await expect(pill(page, m.n)).toHaveText(/^\s*Not yet\s*$/);
+  // (The written answer, step 6, is the student's: it waits.)
+  const byBoard = x => x.kind !== 'manual' && x.kind !== 'answer';
+  const checked = steps.filter(byBoard);
+  expect(tidy(await pills(page)).filter((_, i) => byBoard(steps[i])), 'every checked step reads Passed').toEqual(checked.map(() => 'Passed'));
+  for (const m of steps.filter(x => !byBoard(x))) await expect(pill(page, m.n)).toHaveText(/^\s*Not yet\s*$/);
   expect(errors).toEqual([]);
 });

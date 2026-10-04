@@ -79,7 +79,7 @@
       "id": "FG1",
       "label": "FG1",
       "values": {
-        "amplitude": 1,
+        "amplitude": 0.5,
         "frequency": 1,
         "offset": 0
       },
