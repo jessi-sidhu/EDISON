@@ -2,13 +2,16 @@
 
 **Read this first when you pick the project up on any machine.** It's the shared memory: where things stand, what's next, what we learned, and how Aarmen likes to work. Claude Code's own memory lives on one laptop only, so anything worth keeping goes here. Update it at the end of each session (Claude: do it as part of wrapping up).
 
-*Last updated: 2026-10-03 evening, Mac session.*
+*Last updated: 2026-10-03 night, Mac session.*
 
 ## Where things are
 
 - **`main`** = `dev`, promoted in PR #211: Edison UI, Lab HUD, the parts redo, the photo feature, and the 2026-10-03 bug-fix round below. This is the demo branch.
 - **`dev`** is the workspace; promote it to `main` with `/promote` at natural points.
-- **Branch `aarmen/204-opamp-repair-checks`** (pushed, not on dev): the op-amp repair checks, held until the repair loop was fixed (`docs/TODO.md` task 5; the repair loop is done in #6). It was pushed to the old `myproject` repo, not this one.
+- **One repo now: `github.com/jessi-sidhu/EDISON`** (`~/Desktop/EDISON`). The old `aarmens702-hub/myproject` checkout was removed; its GitHub repo still holds two small commits that aren't here (a Firebase-config comment and a docs line).
+- **The op-amp repair checks (`docs/TODO.md` task 5):** the old branch `aarmen/204-opamp-repair-checks` was lost with the old myproject checkout; the checks were rebuilt as #10 (on `dev` with the fixes merge).
+- **The lab paper (paused, local only):** branch `aarmen/lab-paper-design` in `.worktrees/lab-paper`, one WIP commit. In the Edison editor Lab 2's sheet becomes a white lab manual pulled from the board's left edge: it pushes the board over (the parts fold to icons), with objective, equipment, pre-lab checked as typed, a data table filled from the sim, questions, and Give me / Hint / Explain on the current step (Give me builds that step and says where each piece went). Aarmen approved the mock. Left: fix two unused constants in `e2e/edison-hud-lab.spec.js` (lint), run the full browser suite, add a Give me browser test, then `/ship`. Next after it: the ENSC 220 course page in black, then textbook and landing polish.
+- **The editor's EDISON (top left) goes to the Edison landing** in the Edison UI (it went to the classic dashboard).
 - **Reasoning is on by default** (#205, #4): 32 000 `max_tokens`, a 240 s server deadline and a 255 s page timeout. `DEEPSEEK_THINKING=0` turns it off (see "Running the AI test set" below).
 
 ### The 2026-10-03 bug-fix round (on `main` since PR #211)
@@ -67,7 +70,7 @@ From `Plugged/`, with `DEEPSEEK_API_KEY` in the environment or in `backend/.env`
 
 ## Setting up a new laptop
 
-1. Clone `github.com/aarmens702-hub/myproject`. Use the personal GitHub account `aarmens702-hub`, not the work one.
+1. Clone `github.com/jessi-sidhu/EDISON`. Use the personal GitHub account `aarmens702-hub`, not the work one.
 2. `cd Plugged && npm ci && npx playwright install chromium`.
 3. Create `Plugged/backend/.env` from `.env.example` and fill in the keys by hand: `DEEPSEEK_API_KEY` (the app's AI) and `GEMINI_API_KEY` (photo reading). Never commit it, and copy the keys over privately (not through the repo or chat). Agents are blocked from touching `.env` files.
 4. Run the app: `cd Plugged/backend && node server.js`, then open http://localhost:5001 (Edison is at `/circuit3d/index.html?ui=edison`). `AI_PROVIDER=fixture node server.js` runs with no AI cost.

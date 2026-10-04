@@ -157,3 +157,18 @@ test('?ui=edison&lab=lab2: a 40 px top strip, toggle LEDs that follow Colours, D
 
   expect(errors).toEqual([]);
 });
+
+test('EDISON, top left, goes home to the Edison landing (edison/index.html), not the classic dashboard; classic keeps its dashboard', async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.route('**/api/ask', route => route.fulfill({ json: { reply: '', actions: [] } }));
+  await page.goto('/circuit3d/index.html?ui=edison');
+  const brand = page.locator('#topbar .topbar-brand');
+  await expect(brand).toHaveAttribute('href', '../edison/index.html');
+  await brand.click();
+  await expect(page).toHaveURL(/\/edison\/index\.html$/);
+  await expect(page.locator('.ed-mark'), 'the Edison landing\'s wordmark').toBeVisible();
+
+  await page.goto('/circuit3d/index.html?ui=classic');
+  await expect(page.locator('#topbar .topbar-brand'), 'classic keeps the dashboard').toHaveAttribute('href', '../dashboard.html');
+  expect(errors).toEqual([]);
+});

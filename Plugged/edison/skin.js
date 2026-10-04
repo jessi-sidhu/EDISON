@@ -6,7 +6,8 @@
 //  names, names the chat Edison (with the Lab HUD's header row, issue
 //  #192), sends a ?ask= request once, gives the Lab HUD top bar its
 //  status LEDs and RUNNING cell (#189), and moves the inspector off the
-//  chat column into the canvas frame (#201). chat.js doesn't change; in
+//  chat column into the canvas frame (#201), and points the top bar's
+//  EDISON home at the Edison landing. chat.js doesn't change; in
 //  classic none of this runs. The look is circuit3d/css/edison-hud.css
 //  and edison-hud-chat.css. The pure half loads in Node for
 //  test/edison-skin.test.js.
@@ -126,7 +127,12 @@
   }
 
   // ── Page wiring (Edison only) ──────────────────────────────
+  // EDISON, top left, goes home to the Edison landing (edison/index.html),
+  // not the classic dashboard.
+  const HOME = '../edison/index.html';
   function rename(doc) {
+    const brand = doc.querySelector('.topbar-brand');
+    if (brand) { brand.setAttribute('href', HOME); brand.title = 'Edison home'; }
     const title = doc.querySelector('.sparky-welcome-title');
     if (title) { title.textContent = 'Edison'; title.title = NAME_LINE; }
     const input = doc.getElementById('sparky-input');
