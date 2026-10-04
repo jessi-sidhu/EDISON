@@ -1,0 +1,28 @@
+# deps / builds
+node_modules/
+.next/
+dist/
+build/
+out/
+.venv/
+__pycache__/
+
+# secrets
+.env
+.env.local
+.env.*.local
+
+# os / editor
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+# claude: personal overrides and plugin state
+.claude/settings.local.json
+.claude/tdd-guard/
+.playwright-mcp/
+
+# local scratch
+.Rhistory
+.superpowers/
+**/.claude/tdd-guard/

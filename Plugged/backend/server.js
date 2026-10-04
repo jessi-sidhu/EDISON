@@ -1,0 +1,715 @@
+/**
+ * Sparky AI Backend — Node.js (zero npm dependencies, CommonJS)
+ * Requires Node 18+
+ *
+ * Run from backend/:  node server.js
+ *
+ * POST /api/ask            { markdown, message }  →  { reply, actions[] }
+ * GET  /api/health
+ * POST /api/auth/login     { email, password }    →  { access_token, ... }
+ * POST /api/auth/signup    { email, password, name } → { access_token, ... }
+ * GET  /api/auth/me                                →  { user }
+ * GET  /api/circuits                               →  { circuits[] }
+ * POST /api/circuits       { name, circuit }       →  { id, rev }
+ * DELETE /api/circuits/:id                         →  { ok }
+ */
+
+const http = require('http');
+const fs   = require('fs');
+const path = require('path');
+const { makeAsk } = require('./ai-providers');
+
+// ── Load .env ─────────────────────────────────────────────────
+function loadEnv() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, '.env'), 'utf8');
+    raw.split('\n').forEach(line => {
+      const eq = line.indexOf('=');
+      if (eq < 1) return;
+      const k = line.slice(0, eq).trim();
+      const v = line.slice(eq + 1).trim();
+      if (k && !(k in process.env)) process.env[k] = v;
+    });
+  } catch { /* .env optional */ }
+}
+loadEnv();
+
+const GEMINI_KEY   = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+const GEMINI_URL   = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const PORT         = process.env.PORT || 5001;
+
+// Google OAuth 2.0 (free — create credentials at console.cloud.google.com)
+const GOOGLE_CLIENT_ID     = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+
+// IBM Cloudant
+const CLOUDANT_URL    = process.env.CLOUDANT_URL;
+const CLOUDANT_APIKEY = process.env.CLOUDANT_APIKEY;
+const CLOUDANT_DB     = 'sparky_circuits';
+
+if (!GEMINI_KEY) {
+  console.warn('Warning: GEMINI_API_KEY not set — /api/ask will fail');
+}
+if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+  console.warn('Warning: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set — auth endpoints will fail');
+}
+if (!CLOUDANT_URL || !CLOUDANT_APIKEY) {
+  console.warn('Warning: CLOUDANT_URL / CLOUDANT_APIKEY not set — circuit storage endpoints will fail');
+}
+
+// ── Cloudant IAM token cache ──────────────────────────────────
+let _cloudantToken = null, _cloudantTokenExpiry = 0;
+
+async function getCloudantToken() {
+  if (_cloudantToken && Date.now() < _cloudantTokenExpiry) return _cloudantToken;
+  const res = await fetch('https://iam.cloud.ibm.com/identity/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey=${CLOUDANT_APIKEY}`,
+  });
+  if (!res.ok) throw new Error(`Cloudant IAM auth failed: ${res.status}`);
+  const data = await res.json();
+  _cloudantToken = data.access_token;
+  _cloudantTokenExpiry = Date.now() + (data.expires_in - 120) * 1000;
+  return _cloudantToken;
+}
+
+async function cloudantRequest(method, dbPath, body) {
+  const token = await getCloudantToken();
+  const url = `${CLOUDANT_URL}/${CLOUDANT_DB}${dbPath}`;
+  const opts = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  return fetch(url, opts);
+}
+
+async function ensureCloudantIndex() {
+  try {
+    await cloudantRequest('POST', '/_index', {
+      index: { fields: ['userId', 'savedAt'] },
+      name: 'user-circuits-idx',
+      type: 'json',
+    });
+    console.log('   Cloudant index ready');
+  } catch (e) {
+    console.warn('   Cloudant index warning:', e.message);
+  }
+}
+
+// ── Google OAuth auth helper ─────────────────────────────────
+async function authenticateRequest(req) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7);
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const info = await res.json();
+    return { sub: info.sub, email: info.email, name: info.name };
+  } catch {
+    return null;
+  }
+}
+
+// ── Gemini system prompt ─────────────────────────────────────
+const SYSTEM_PROMPT = [
+  'You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual 700-point breadboard.',
+  '',
+  'BREADBOARD LAYOUT:',
+  '- Columns 1-50. Rows a/b/c/d/e = top half. Rows f/g/h/i/j = bottom half.',
+  '- Same column + same half = electrically connected (e.g. a14 and e14 share a node).',
+  '- The CENTER CHANNEL separates top from bottom. a14 and f14 are NOT connected unless you wire them.',
+  '- tp_N = positive power rail at column N (+9V). tn_N = GND rail at column N.',
+  '- Rails are NOT auto-connected to body holes. Always wire from tp/tn to body holes.',
+  '',
+  'BATTERY (CRITICAL):',
+  '- pin0 = positive (+), pin1 = negative (-). The battery sits off-board.',
+  '- EVERY circuit needs a battery with TWO wires:',
+  '  1. add_wire from "battery_0_pin0" to "tp_N" (red wire)',
+  '  2. add_wire from "battery_0_pin1" to "tn_N" (black wire)',
+  '- Without BOTH battery wires the circuit WILL NOT WORK. ALWAYS include them.',
+  '',
+  'COMPONENT RULES:',
+  '- LED: holeA = cathode (-) goes toward GND. holeB = anode (+) goes toward resistor/power.',
+  '- Every LED needs a resistor in series to limit current.',
+  '',
+  'SIZING (columns apart, same row):',
+  '- place_resistor: exactly 4 columns apart (e.g. a3 and a7)',
+  '- place_led: exactly 2 columns apart (e.g. cathode a9, anode a7)',
+  '- place_button: exactly 3 columns apart (e.g. a12 and a15)',
+  '- place_buzzer: exactly 2 columns apart',
+  '- No column overlap between components on the same row.',
+  '',
+  'HOLE NAMES:',
+  '- Body: "a3", "e14", "j22"',
+  '- Rail: "tp_5" (positive col 5), "tn_5" (GND col 5)',
+  '- Battery: "battery_0_pin0" (+), "battery_0_pin1" (-)',
+  '',
+  'BUILDING BEHAVIOR:',
+  '- When asked to build, fix, or create a circuit: call delete_all FIRST, then rebuild from scratch.',
+  '- Never patch an existing circuit. Always clear and rebuild the full correct circuit.',
+  '- After building, write 2-3 sentences explaining what you built and how it works.',
+  '',
+  'CRITICAL WIRING RULES:',
+  '- Placing a component on the board does NOT connect it to power or ground.',
+  '- You MUST add_wire from a power rail (tp_N) to each component that needs +9V.',
+  '- You MUST add_wire from each component that needs GND to a ground rail (tn_N).',
+  '- Without these rail-to-body wires, the circuit WILL NOT WORK.',
+  '',
+  'COMPLETE RECIPE FOR ONE LED (starting at column C):',
+  '  1. delete_all',
+  '  2. place_battery',
+  '  3. add_wire: battery_0_pin0 -> tp_C (red)       ← battery to + rail',
+  '  4. add_wire: battery_0_pin1 -> tn_{C+6} (black) ← battery to - rail',
+  '  5. place_resistor: holeA=a{C}, holeB=a{C+4}',
+  '  6. place_led: holeA=a{C+6} (cathode), holeB=a{C+4} (anode)',
+  '  7. add_wire: tp_{C} -> a{C} (red)               ← rail to resistor (REQUIRED!)',
+  '  8. add_wire: a{C+6} -> tn_{C+6} (black)         ← LED cathode to rail (REQUIRED!)',
+  'Steps 7 and 8 are REQUIRED for EVERY LED group. Without them the LED will not light up.',
+  '',
+  'FOR 3 LEDs (at C=2, C=10, C=18):',
+  '  Total calls: 1 delete_all + 1 place_battery + 2 battery wires + 3*(place_resistor + place_led + 2 rail wires) = 16 calls.',
+  '  Every LED group needs its own pair of rail-to-body wires: tp_{C}->a{C} and a{C+6}->tn_{C+6}.',
+  '',
+  'Reply style: 2-5 sentences max. Be specific with hole names. Be encouraging.',
+  'For pure questions (no building), just respond with helpful text. Do not call any tools.',
+].join('\n');
+
+// ── Gemini function declarations ─────────────────────────────
+const CIRCUIT_TOOLS = [{
+  function_declarations: [
+    {
+      name: 'delete_all',
+      description: 'Clear all components and wires from the board. Call this FIRST when building or fixing a circuit.',
+    },
+    {
+      name: 'place_battery',
+      description: 'Place a 9V battery off-board. You MUST follow this with add_wire calls to connect battery_0_pin0 to a positive rail (tp_N) and battery_0_pin1 to a negative rail (tn_N).',
+    },
+    {
+      name: 'place_resistor',
+      description: 'Place a resistor. holeA and holeB must be exactly 4 columns apart on the same row.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          holeA: { type: 'STRING', description: 'Start hole, e.g. "a3"' },
+          holeB: { type: 'STRING', description: 'End hole, 4 columns from holeA, e.g. "a7"' },
+        },
+        required: ['holeA', 'holeB'],
+      },
+    },
+    {
+      name: 'place_led',
+      description: 'Place an LED. holeA = cathode (-), holeB = anode (+). Must be exactly 2 columns apart on the same row.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          holeA: { type: 'STRING', description: 'Cathode (-) hole, e.g. "a9"' },
+          holeB: { type: 'STRING', description: 'Anode (+) hole, e.g. "a7"' },
+        },
+        required: ['holeA', 'holeB'],
+      },
+    },
+    {
+      name: 'place_buzzer',
+      description: 'Place a buzzer. holeA and holeB must be exactly 2 columns apart on the same row.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          holeA: { type: 'STRING', description: 'First hole, e.g. "a3"' },
+          holeB: { type: 'STRING', description: 'Second hole, e.g. "a5"' },
+        },
+        required: ['holeA', 'holeB'],
+      },
+    },
+    {
+      name: 'place_button',
+      description: 'Place a push button. holeA and holeB must be exactly 3 columns apart on the same row.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          holeA: { type: 'STRING', description: 'First hole, e.g. "a12"' },
+          holeB: { type: 'STRING', description: 'Second hole, e.g. "a15"' },
+        },
+        required: ['holeA', 'holeB'],
+      },
+    },
+    {
+      name: 'add_wire',
+      description: 'Add a wire between two points. Points can be body holes (e.g. "a3"), rails (e.g. "tp_5", "tn_5"), or battery pins (e.g. "battery_0_pin0").',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          from:  { type: 'STRING', description: 'Start point' },
+          to:    { type: 'STRING', description: 'End point' },
+          color: { type: 'STRING', description: 'Wire color: red, yellow, green, blue, black, or white' },
+        },
+        required: ['from', 'to', 'color'],
+      },
+    },
+  ],
+}];
+
+// ── Validate actions ─ report problems, never rewrite ────────
+// Reports what is wrong with the proposed circuit and returns the actions
+// untouched. Patching them silently hides the model's mistake and can turn a
+// backwards LED into a guaranteed-dead one, or short past a component the
+// model deliberately put in series.
+
+// Holes in the same column and same half share a node. Each power rail is one
+// node along its whole length.
+function nodeKey(hole) {
+  if (!hole) return null;
+  const rail = /^(tp|tn|bp|bn)_\d+$/.exec(hole);
+  if (rail) return rail[1];
+  const body = /^([a-j])(\d+)$/i.exec(hole);
+  if (body) return (body[1].toLowerCase() <= 'e' ? 'top' : 'bot') + body[2];
+  return hole;   // battery pins and anything unrecognised stay as themselves
+}
+
+// LEDs are left out of the graph below: they only conduct one way, so
+// treating one as a plain connection would bridge power to ground.
+const CONDUCTORS = ['place_resistor', 'place_button', 'place_buzzer'];
+
+function findCircuitProblems(actions) {
+  if (!Array.isArray(actions) || actions.length === 0) return [];
+  const problems = [];
+  const wires = actions.filter(a => a.tool === 'add_wire');
+  const wired = pin => wires.some(w => w.from === pin || w.to === pin);
+
+  let batIdx = 0;
+  for (const a of actions) {
+    if (a.tool !== 'place_battery') continue;
+    const pin0 = `battery_${batIdx}_pin0`, pin1 = `battery_${batIdx}_pin1`;
+    if (!wired(pin0)) problems.push(`${pin0} is not wired to a positive rail (tp_N), so nothing on the board is powered.`);
+    if (!wired(pin1)) problems.push(`${pin1} is not wired to a ground rail (tn_N), so the circuit has no return path.`);
+    batIdx++;
+  }
+
+  const edges = [];
+  for (const w of wires) edges.push([nodeKey(w.from), nodeKey(w.to)]);
+  for (const c of actions) {
+    if (CONDUCTORS.includes(c.tool)) edges.push([nodeKey(c.holeA), nodeKey(c.holeB)]);
+  }
+
+  function reach(seed) {
+    const seen = new Set([seed]), queue = [seed];
+    while (queue.length) {
+      const at = queue.shift();
+      for (const [x, y] of edges) {
+        if (!x || !y) continue;
+        const next = x === at ? y : (y === at ? x : null);
+        if (next && !seen.has(next)) { seen.add(next); queue.push(next); }
+      }
+    }
+    return seen;
+  }
+
+  const pos = reach('battery_0_pin0'), neg = reach('battery_0_pin1');
+
+  // holeA is the cathode (-), holeB is the anode (+).
+  for (const led of actions.filter(a => a.tool === 'place_led')) {
+    const cathode = nodeKey(led.holeA), anode = nodeKey(led.holeB);
+    const forward  = pos.has(anode) && neg.has(cathode);
+    const reversed = pos.has(cathode) && neg.has(anode);
+    // Any other complete branch makes every node reachable from both terminals,
+    // so orientation is undecidable there. Prefer saying nothing over accusing a
+    // correctly wired LED of being backwards.
+    if (!forward && reversed) {
+      problems.push(`The LED at ${led.holeA}/${led.holeB} is backwards: its cathode ${led.holeA} is on the power side and its anode ${led.holeB} is on the ground side. Swap holeA and holeB.`);
+    } else if (!forward) {
+      problems.push(`The LED at ${led.holeA}/${led.holeB} is not connected between power and ground, so it cannot light.`);
+    }
+  }
+
+  return problems;
+}
+
+// ── Call Gemini ──────────────────────────────────────────────
+const ask = makeAsk(
+  (markdown, userMsg, history) => askGemini(markdown, userMsg, history),
+  { SYSTEM_PROMPT, CIRCUIT_TOOLS }
+);
+
+async function askGemini(markdown, userMsg, history) {
+  const msg = userMsg || 'Analyze my circuit and tell me what to do next.';
+  const boardState = markdown || '**Board is EMPTY — no components or wires placed.**';
+
+  // Build multi-turn contents from conversation history
+  const contents = [];
+  if (Array.isArray(history) && history.length) {
+    for (const h of history) {
+      const role = h.role === 'model' ? 'model' : 'user';
+      if (h.text) contents.push({ role, parts: [{ text: h.text }] });
+    }
+  }
+
+  // Current user message with board state
+  contents.push({
+    role: 'user',
+    parts: [{ text: `BOARD STATE:\n${boardState}\n\nQUESTION: ${msg}` }],
+  });
+
+  const body = {
+    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents,
+    tools: CIRCUIT_TOOLS,
+    tool_config: { function_calling_config: { mode: 'AUTO' } },
+    generation_config: { temperature: 0.3, max_output_tokens: 2048 },
+  };
+
+  const res = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  const candidate = data.candidates?.[0];
+
+  // Handle blocked / empty responses
+  if (!candidate || candidate.finishReason === 'SAFETY') {
+    return { reply: "I can't help with that request. Try asking about building a circuit!", actions: [] };
+  }
+
+  const parts = candidate.content?.parts || [];
+  let reply = '';
+  let actions = [];
+
+  for (const part of parts) {
+    if (part.text) reply += part.text;
+    if (part.functionCall) {
+      const fc = part.functionCall;
+      actions.push({ tool: fc.name, ...(fc.args || {}) });
+    }
+  }
+
+  reply = reply.trim();
+
+  // If model returned only function calls with no text, provide a default
+  if (!reply && actions.length > 0) {
+    reply = "Here you go! I've built the circuit for you. Hit Run Simulation to test it out!";
+  } else if (!reply) {
+    reply = '(no response)';
+  }
+
+  // Fallback: also check text for JSON actions block (in case model embeds JSON in text)
+  if (actions.length === 0) {
+    const match = reply.match(/```(?:actions|json)\s*([\s\S]*?)```/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[1].trim());
+        if (Array.isArray(parsed)) actions = parsed;
+        reply = reply.slice(0, match.index).trim();
+      } catch { /* ignore parse errors */ }
+    }
+  }
+
+  // Filter out malformed actions (missing required fields)
+  actions = actions.filter(a => {
+    if (a.tool === 'add_wire' && (!a.from || !a.to)) return false;
+    if (['place_resistor','place_led','place_buzzer','place_button'].includes(a.tool)
+        && (!a.holeA || !a.holeB)) return false;
+    return true;
+  });
+
+  // Report problems instead of patching them, so a wrong circuit is visible
+  // rather than rewritten into a different one.
+  const problems = findCircuitProblems(actions);
+  if (problems.length) {
+    console.warn('[validate] ' + problems.join(' | '));
+    reply += `\n\nHeads up, this build has a problem:\n- ${problems.join('\n- ')}\n\nAsk me to fix it and I will rebuild the circuit.`;
+  }
+
+  return { reply, actions };
+}
+
+// ── HTTP server ───────────────────────────────────────────────
+function setCORS(res) {
+  res.setHeader('Access-Control-Allow-Origin',  '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+function sendJSON(res, status, obj) {
+  setCORS(res);
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(obj));
+}
+
+// /api/ask spends the Gemini key, so cap it per IP or it is an open proxy.
+const ASK_WINDOW_MS = 60000;
+const ASK_MAX_PER_WINDOW = 20;
+const askHits = new Map();
+
+function askRateLimited(req) {
+  const ip = req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  if (askHits.size > 5000) askHits.clear();
+  const hits = (askHits.get(ip) || []).filter(t => now - t < ASK_WINDOW_MS);
+  hits.push(now);
+  askHits.set(ip, hits);
+  return hits.length > ASK_MAX_PER_WINDOW;
+}
+
+// The OAuth popup hands its result to the opener. Payload values come from the
+// callback query string, so they are carried in a JSON block and read with
+// textContent. Interpolating them into the script itself is a reflected XSS.
+// `<` is escaped because JSON.stringify would otherwise let a value close the
+// block early with a literal </script>.
+function oauthPopupPage(payload) {
+  const json = JSON.stringify(payload).replace(/</g, '\\u003c');
+  return '<!doctype html><html><body>'
+    + '<script type="application/json" id="oauth-result">' + json + '</' + 'script>'
+    + '<script>(function(){'
+    + 'var d=JSON.parse(document.getElementById("oauth-result").textContent);'
+    + 'if(window.opener)window.opener.postMessage(d,"*");'
+    + 'window.close();})();</' + 'script>'
+    + '</body></html>';
+}
+
+function sendOAuthPopup(res, payload) {
+  res.writeHead(200, { 'Content-Type': 'text/html' });
+  res.end(oauthPopupPage(payload));
+}
+
+const server = http.createServer(async (req, res) => {
+  setCORS(res);
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  if (req.method === 'GET' && req.url === '/api/health') {
+    return sendJSON(res, 200, { status: 'ok', model: GEMINI_MODEL });
+  }
+
+  if (req.method === 'POST' && req.url === '/api/ask') {
+    if (askRateLimited(req)) {
+      return sendJSON(res, 429, { reply: 'Too many requests. Give Sparky a moment and try again.', actions: [] });
+    }
+    let body = '';
+    req.on('data', chunk => (body += chunk));
+    req.on('end', async () => {
+      try {
+        const { markdown = '', message = '', history = [] } = JSON.parse(body || '{}');
+        const { reply, actions } = await ask(markdown, message, history);
+        console.log(`[ask] "${message.slice(0,60)}" → ${actions.length} action(s)`);
+        return sendJSON(res, 200, { reply, actions });
+      } catch (e) {
+        // Upstream body can contain key/quota detail, so it stays in the log.
+        console.error('[ask] failed:', e.message);
+        return sendJSON(res, 502, { reply: 'Sparky could not reach the AI service. Please try again in a moment.', actions: [] });
+      }
+    });
+    return;
+  }
+
+  // ── Auth: Google OAuth (direct, no IBM) ─────────────────────
+  if (req.method === 'GET' && req.url === '/api/auth/google') {
+    const proto = req.headers['x-forwarded-proto'] || 'http';
+    const host = req.headers['host'] || `localhost:${PORT}`;
+    const redirectUri = `${proto}://${host}/api/auth/callback`;
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=openid+email+profile&access_type=offline&prompt=consent`;
+    res.writeHead(302, { Location: authUrl });
+    res.end();
+    return;
+  }
+
+  // ── Auth: Google OAuth callback ────────────────────────────
+  if (req.method === 'GET' && req.url.startsWith('/api/auth/callback')) {
+    try {
+      const cbProto = req.headers['x-forwarded-proto'] || 'http';
+      const cbHost = req.headers['host'] || `localhost:${PORT}`;
+      const urlObj = new URL(req.url, `${cbProto}://${cbHost}`);
+      const code = urlObj.searchParams.get('code');
+      const error = urlObj.searchParams.get('error');
+
+      if (error || !code) {
+        sendOAuthPopup(res, { error: error || 'No code received' });
+        return;
+      }
+
+      const redirectUri = `${cbProto}://${cbHost}/api/auth/callback`;
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `code=${code}&client_id=${GOOGLE_CLIENT_ID}&client_secret=${GOOGLE_CLIENT_SECRET}&redirect_uri=${encodeURIComponent(redirectUri)}&grant_type=authorization_code`,
+      });
+
+      if (!tokenRes.ok) {
+        const err = await tokenRes.text();
+        console.error('Token exchange failed:', err);
+        sendOAuthPopup(res, { error: 'Login failed' });
+        return;
+      }
+
+      const tokens = await tokenRes.json();
+      console.log('[auth] Google login successful');
+      sendOAuthPopup(res, { access_token: tokens.access_token });
+    } catch (e) {
+      console.error('Callback error:', e.message);
+      sendOAuthPopup(res, { error: 'Login failed' });
+    }
+    return;
+  }
+
+  // ── Auth: Me (validate token) ──────────────────────────────
+  if (req.method === 'GET' && req.url === '/api/auth/me') {
+    try {
+      const user = await authenticateRequest(req);
+      if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
+      return sendJSON(res, 200, { user });
+    } catch (e) {
+      return sendJSON(res, 401, { error: 'Not authenticated' });
+    }
+  }
+
+  // ── Circuits: List ─────────────────────────────────────────
+  if (req.method === 'GET' && req.url === '/api/circuits') {
+    try {
+      const user = await authenticateRequest(req);
+      if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
+
+      const queryRes = await cloudantRequest('POST', '/_find', {
+        selector: { userId: user.sub, type: 'circuit' },
+        sort: [{ savedAt: 'desc' }],
+        limit: 100,
+      });
+      const data = await queryRes.json();
+      return sendJSON(res, 200, { circuits: data.docs || [] });
+    } catch (e) {
+      console.error('List circuits error:', e.message);
+      return sendJSON(res, 500, { error: e.message });
+    }
+  }
+
+  // ── Circuits: Create ───────────────────────────────────────
+  if (req.method === 'POST' && req.url === '/api/circuits') {
+    let body = '';
+    req.on('data', chunk => (body += chunk));
+    req.on('end', async () => {
+      try {
+        const user = await authenticateRequest(req);
+        if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
+
+        const { name, circuit } = JSON.parse(body || '{}');
+        const doc = {
+          type: 'circuit',
+          userId: user.sub,
+          name: name || 'Untitled Circuit',
+          circuit,
+          savedAt: Date.now(),
+        };
+        const saveRes = await cloudantRequest('POST', '', doc);
+        const result = await saveRes.json();
+        console.log(`[circuits] saved "${doc.name}" for ${user.email}`);
+        return sendJSON(res, 201, { id: result.id, rev: result.rev });
+      } catch (e) {
+        console.error('Save circuit error:', e.message);
+        return sendJSON(res, 500, { error: e.message });
+      }
+    });
+    return;
+  }
+
+  // ── Circuits: Delete ───────────────────────────────────────
+  const delMatch = req.url.match(/^\/api\/circuits\/([^/?]+)$/);
+  if (req.method === 'DELETE' && delMatch) {
+    try {
+      const user = await authenticateRequest(req);
+      if (!user) return sendJSON(res, 401, { error: 'Not authenticated' });
+
+      const docId = decodeURIComponent(delMatch[1]);
+      const getRes = await cloudantRequest('GET', `/${docId}`, null);
+      if (!getRes.ok) return sendJSON(res, 404, { error: 'Not found' });
+      const existing = await getRes.json();
+      if (existing.userId !== user.sub) return sendJSON(res, 403, { error: 'Forbidden' });
+
+      await cloudantRequest('DELETE', `/${docId}?rev=${existing._rev}`, null);
+      console.log(`[circuits] deleted "${existing.name}" for ${user.email}`);
+      return sendJSON(res, 200, { ok: true });
+    } catch (e) {
+      console.error('Delete circuit error:', e.message);
+      return sendJSON(res, 500, { error: e.message });
+    }
+  }
+
+  // ── Static file serving ───────────────────────────────────
+  const STATIC_ROOT = path.join(__dirname, '..');
+  // Doubles as the extension allowlist: anything not listed here is never served.
+  // .json is deliberately absent, every .json in this repo is build config.
+  const MIME = {
+    '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
+    '.png': 'image/png', '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2',
+    '.glb': 'model/gltf-binary', '.sparky': 'application/octet-stream',
+  };
+  // Server code, build sources and tooling. Mirrors the ignore list in firebase.json.
+  const DENY_DIRS = new Set(['backend', 'src', 'out', 'functions', 'node_modules']);
+
+  if (req.method === 'GET') {
+    let urlPath;
+    try {
+      urlPath = decodeURIComponent(req.url.split('?')[0]);
+    } catch {
+      return sendJSON(res, 400, { error: 'Bad request path' });
+    }
+    if (urlPath === '/') urlPath = '/index.html';
+    const filePath = path.join(STATIC_ROOT, urlPath);
+    const rel = path.relative(STATIC_ROOT, filePath);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      return sendJSON(res, 403, { error: 'Forbidden' });
+    }
+    const segments = rel.split(path.sep);
+    const ext = path.extname(filePath).toLowerCase();
+    const servable = MIME[ext] &&
+      !DENY_DIRS.has(segments[0].toLowerCase()) &&
+      !segments.some(seg => seg.startsWith('.'));
+    if (servable) {
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.isFile()) {
+          res.writeHead(200, { 'Content-Type': MIME[ext] });
+          fs.createReadStream(filePath).pipe(res);
+          return;
+        }
+      } catch { /* file not found — fall through to 404 */ }
+    }
+  }
+
+  sendJSON(res, 404, { error: 'Not found' });
+});
+
+// Malformed HTTP from a client must not be fatal.
+server.on('clientError', (err, socket) => {
+  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+  else socket.destroy();
+});
+
+// Last resort: log and keep serving rather than exiting on a single bad request.
+process.on('uncaughtException', err => {
+  console.error('Uncaught exception:', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', err => {
+  console.error('Unhandled rejection:', err && err.stack ? err.stack : err);
+});
+
+server.listen(PORT, () => {
+  console.log(`⚡ Sparky AI  →  http://localhost:${PORT}`);
+  console.log(`   AI    : ${process.env.AI_PROVIDER || 'gemini'}`);
+  console.log(`   Model : ${GEMINI_MODEL}`);
+  console.log(`   Health: http://localhost:${PORT}/api/health`);
+  if (CLOUDANT_URL && CLOUDANT_APIKEY) ensureCloudantIndex();
+});

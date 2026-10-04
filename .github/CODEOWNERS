@@ -1,0 +1,17 @@
+# Shared files. Equal say: any one teammate other than the author can approve.
+# Add Manav's, Guneev's and Armaan's GitHub usernames to each line, e.g.
+#   /docs/  @aarmens702-hub @manav-handle @guneev-handle @armaan-handle
+# Until they're added, don't turn on "Require review from Code Owners" in
+# branch protection, or only Aarmen could approve. Use "Require 1 approval"
+# on main instead; that already enforces the two-agree rule.
+/docs/                  @aarmens702-hub
+/AGENTS.md              @aarmens702-hub
+/CLAUDE.md              @aarmens702-hub
+/.claude/               @aarmens702-hub
+/.github/               @aarmens702-hub
+/.mcp.json              @aarmens702-hub
+package.json            @aarmens702-hub
+*.lock                  @aarmens702-hub
+package-lock.json       @aarmens702-hub
+pnpm-lock.yaml          @aarmens702-hub
+# Add schema, root layout and global config paths once the stack exists.

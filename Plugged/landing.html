@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sparky — 3D Circuit Designer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #FAF9F6;
+      --bg-card:    #F3F1EC;
+      --bg-card-hi: #EDEAE4;
+      --border:     #E0DCD5;
+      --text:       #1A1814;
+      --text-sub:   #6B6560;
+      --text-dim:   #9C9690;
+      --accent:     #D97706;
+      --accent-hi:  #B45309;
+      --accent-lo:  #F59E0B;
+      --accent-bg:  #FEF3C7;
+      --dark:       #1A1814;
+      --dark-card:  #2A2722;
+      --dark-text:  #E8E4DE;
+      --dark-sub:   #9C9690;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* ── Dot grid background ─────────────────────────────── */
+    .dot-grid {
+      position: absolute;
+      inset: 0;
+      background-image: radial-gradient(circle, #D5D0C8 0.8px, transparent 0.8px);
+      background-size: 24px 24px;
+      opacity: 0.5;
+      pointer-events: none;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0) 70%);
+      -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0) 70%);
+    }
+
+    /* ── Nav bar ──────────────────────────────────────────── */
+    .nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.85rem 1.75rem;
+      background: rgba(250, 249, 246, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+    .nav-logo svg {
+      color: var(--accent);
+      filter: drop-shadow(0 0 4px rgba(217, 119, 6, 0.3));
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .nav-link {
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-sub);
+      text-decoration: none;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .nav-link:hover { color: var(--text); background: var(--bg-card); }
+    .nav-cta {
+      font-family: 'Inter', sans-serif;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: #fff;
+      background: var(--accent);
+      border: none;
+      padding: 0.4rem 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .nav-cta:hover { background: var(--accent-hi); transform: translateY(-1px); }
+
+    /* ── Hero ─────────────────────────────────────────────── */
+    .hero {
+      position: relative;
+      padding: 7.5rem 2rem 4rem;
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 3rem;
+    }
+    .hero-content {
+      flex: 0 0 42%;
+      min-width: 0;
+    }
+    .hero-preview {
+      flex: 1;
+      min-width: 0;
+    }
+    .hero h1 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(2.25rem, 4vw, 3.25rem);
+      font-weight: 700;
+      letter-spacing: -0.045em;
+      line-height: 1.05;
+      color: var(--text);
+      margin-bottom: 1.25rem;
+    }
+    .hero h1 .accent {
+      color: var(--accent);
+      position: relative;
+    }
+    .hero h1 .accent::after {
+      content: '';
+      position: absolute;
+      bottom: 2px;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--accent-lo);
+      border-radius: 2px;
+      opacity: 0.4;
+    }
+    .hero-desc {
+      font-size: 1.125rem;
+      color: var(--text-sub);
+      line-height: 1.7;
+      max-width: 480px;
+      margin-bottom: 2rem;
+    }
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    /* ── Buttons ──────────────────────────────────────────── */
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: #fff;
+      text-decoration: none;
+      padding: 0.7rem 1.6rem;
+      border-radius: 8px;
+      background: var(--accent);
+      border: 1px solid var(--accent);
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 0 0 0 rgba(217,119,6,0);
+    }
+    .btn-primary:hover {
+      background: var(--accent-hi);
+      border-color: var(--accent-hi);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(217,119,6,0.25);
+    }
+    .btn-primary:active { transform: translateY(0); box-shadow: none; }
+
+    /* ── Preview (inside hero) ────────────────────────────── */
+    .preview-frame {
+      border-radius: 12px;
+      overflow: hidden;
+      background: #D8D4C8;
+      box-shadow:
+        0 0 0 1px rgba(0,0,0,0.06),
+        0 4px 6px rgba(0,0,0,0.04),
+        0 20px 50px rgba(0,0,0,0.08);
+      aspect-ratio: 16/10;
+      position: relative;
+    }
+    .preview-frame iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+    .preview-label {
+      position: absolute;
+      top: 0.75rem;
+      left: 0.75rem;
+      z-index: 2;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.625rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.8);
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(8px);
+      padding: 0.25rem 0.55rem;
+      border-radius: 5px;
+    }
+    .preview-launch {
+      position: absolute;
+      bottom: 0.75rem;
+      right: 0.75rem;
+      z-index: 2;
+    }
+    .preview-launch .btn-primary {
+      font-size: 0.75rem;
+      padding: 0.4rem 0.85rem;
+      border: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    /* ── Features bento ──────────────────────────────────── */
+    .features {
+      max-width: 1100px;
+      margin: 0 auto 5rem;
+      padding: 0 2rem;
+    }
+    .features-label {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.75rem;
+    }
+    .features-heading {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+      font-weight: 700;
+      letter-spacing: -0.035em;
+      line-height: 1.1;
+      color: var(--text);
+      max-width: 500px;
+      margin-bottom: 3rem;
+    }
+
+    .bento {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .bento-card {
+      background: var(--bg-card);
+      padding: 1.75rem;
+      transition: background 0.2s;
+      position: relative;
+    }
+    .bento-card:hover { background: var(--bg-card-hi); }
+    .bento-card.wide { grid-column: span 2; }
+
+    .bento-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1rem;
+      background: var(--accent-bg);
+      color: var(--accent);
+    }
+    .bento-card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -0.01em;
+      margin-bottom: 0.4rem;
+    }
+    .bento-card p {
+      font-size: 0.8125rem;
+      color: var(--text-sub);
+      line-height: 1.6;
+    }
+
+    /* ── Footer ───────────────────────────────────────────── */
+    .footer {
+      background: var(--dark);
+      border-top: 1px solid var(--dark-card);
+      padding: 1.75rem 2rem;
+    }
+    .footer-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--dark-sub);
+    }
+    .footer-brand svg { color: var(--accent); opacity: 0.6; }
+    .footer-links {
+      display: flex;
+      gap: 1.5rem;
+    }
+    .footer-links a {
+      font-size: 0.75rem;
+      color: var(--dark-sub);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .footer-links a:hover { color: var(--dark-text); }
+    .footer-credit {
+      font-size: 0.75rem;
+      color: var(--dark-sub);
+    }
+    .footer-credit a {
+      color: var(--dark-text);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .footer-credit a:hover { color: var(--accent-lo); }
+
+    /* ── Animations ───────────────────────────────────────── */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeInRight {
+      from { opacity: 0; transform: translateX(24px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .hero-content      { animation: fadeIn 0.6s ease both 0.1s; }
+    .hero-preview      { animation: fadeInRight 0.7s ease both 0.25s; }
+
+    /* Scroll-triggered fade for features */
+    .features {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.5s ease, transform 0.5s ease;
+    }
+    .features.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* ── Auth Modal ────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(26, 24, 20, 0.55);
+      backdrop-filter: blur(6px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.18);
+      width: 100%;
+      max-width: 400px;
+      padding: 2.25rem;
+      position: relative;
+      transform: translateY(12px) scale(0.97);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .modal-overlay.open .modal-card {
+      transform: translateY(0) scale(1);
+    }
+    .modal-close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: none;
+      border: none;
+      font-size: 1.25rem;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 0.3rem;
+      line-height: 1;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .modal-close:hover { color: var(--text); background: var(--bg-card); }
+    .modal-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text);
+      margin-bottom: 0.3rem;
+    }
+    .modal-subtitle {
+      font-size: 0.8125rem;
+      color: var(--text-sub);
+      margin-bottom: 1.75rem;
+    }
+    .modal-google {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.65rem;
+      width: 100%;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.7rem;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .modal-google:hover {
+      background: var(--bg-card);
+      border-color: #c4c4c0;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .modal-error {
+      font-size: 0.8125rem;
+      color: #dc2626;
+      min-height: 1.2em;
+      text-align: center;
+      margin-top: 0.75rem;
+    }
+
+    /* ── Responsive ───────────────────────────────────────── */
+    @media (max-width: 900px) {
+      .hero {
+        flex-direction: column;
+        padding: 7rem 2rem 3rem;
+        gap: 2.5rem;
+      }
+      .hero-content {
+        flex: none;
+        width: 100%;
+      }
+      .hero-preview {
+        width: 100%;
+      }
+      .hero-preview { animation-name: fadeIn; }
+    }
+    @media (max-width: 768px) {
+      .bento {
+        grid-template-columns: 1fr;
+      }
+      .bento-card.wide { grid-column: span 1; }
+      .nav-links .nav-link { display: none; }
+    }
+    @media (max-width: 600px) {
+      .hero { padding: 6rem 1.25rem 2.5rem; }
+      .hero h1 { font-size: 2.25rem; }
+      .footer-inner { flex-direction: column; justify-content: center; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav class="nav">
+    <a href="#" class="nav-logo">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      Sparky
+    </a>
+    <div class="nav-links">
+      
+      <button class="nav-cta" id="nav-cta" onclick="openModal()">Sign in</button>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="dot-grid"></div>
+    <div class="hero-content">
+      <h1>Your 3D circuit<br /><span class="accent">workbench</span></h1>
+      <p class="hero-desc">
+        Drop components on a virtual breadboard, wire them up,
+        and hit simulate. An AI tutor watches along and helps
+        when you get stuck.
+      </p>
+      <div class="hero-actions" id="hero-actions">
+        <button class="btn-primary" onclick="openModal()" style="cursor:pointer;">
+          Start building
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="hero-preview">
+      <div class="preview-frame">
+        <span class="preview-label">Live preview</span>
+        <iframe src="circuit3d/viewer.html" loading="lazy" title="Interactive 3D circuit preview"></iframe>
+        <div class="preview-launch">
+          <button onclick="openWithDemo()" class="btn-primary" style="cursor:pointer;">Try it out &rarr;</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features">
+    <p class="features-label">How it works</p>
+    <h2 class="features-heading">Place, wire, simulate, learn.</h2>
+
+    <div class="bento">
+      <!-- Row 1 -->
+      <div class="bento-card wide">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6" y2="14"/><line x1="10" y1="10" x2="10" y2="14"/><line x1="14" y1="10" x2="14" y2="14"/><line x1="18" y1="10" x2="18" y2="14"/></svg>
+        </div>
+        <h3>3D breadboard</h3>
+        <p>830 holes, fully interactive. Spin it around, zoom in, and actually see where your components connect before you power anything on.</p>
+      </div>
+      <div class="bento-card">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <h3>AI tutor built in</h3>
+        <p>It can see your board. Ask it why your LED isn't lighting up or have it build a whole circuit for you.</p>
+      </div>
+
+      <!-- Row 2 -->
+      <div class="bento-card">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <h3>Instant simulation</h3>
+        <p>Hit play and your circuit runs. LEDs light up, currents get calculated, and it'll tell you if something's shorted.</p>
+      </div>
+      <div class="bento-card">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M5 8v2a4 4 0 0 0 4 4h2"/><path d="M19 8v2a4 4 0 0 1-4 4h-2"/></svg>
+        </div>
+        <h3>Click-to-wire</h3>
+        <p>Click two holes and a wire shows up between them. They snap to the grid and get color coded automatically.</p>
+      </div>
+      <div class="bento-card">
+        <div class="bento-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        </div>
+        <h3>Save as .sparky</h3>
+        <p>Download your circuit as a file. Send it to someone, load it back up whenever. That's it.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Sparky
+      </div>
+      
+      <div class="footer-links">
+    
+      </div>
+    </div>
+  </footer>
+
+  <!-- Auth Modal -->
+  <div class="modal-overlay" id="auth-modal">
+    <div class="modal-card">
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+      <h2 class="modal-title">Sign in to Sparky</h2>
+      <p class="modal-subtitle">Use your Google account to get started</p>
+      <button class="modal-google" onclick="signInWithGoogle()">
+        <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615Z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18Z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.997 8.997 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332Z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 2.58 9 2.58Z"/></svg>
+        Continue with Google
+      </button>
+      <div class="modal-error" id="modal-error"></div>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs (compat for vanilla JS) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDZDxmH5HHwx8N3U1FVglx6Iubh665t42s",
+      authDomain: "buildwithsparky.firebaseapp.com",
+      projectId: "buildwithsparky",
+      storageBucket: "buildwithsparky.firebasestorage.app",
+      messagingSenderId: "596770160500",
+      appId: "1:596770160500:web:8b3761e163291ab759f621"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+
+    // ── Modal ────────────────────────────────────────────────
+    function openModal() {
+      document.getElementById('auth-modal').classList.add('open');
+    }
+    function closeModal() {
+      document.getElementById('auth-modal').classList.remove('open');
+      document.getElementById('modal-error').textContent = '';
+    }
+
+    // ── Firebase Google sign-in ──────────────────────────────
+    function signInWithGoogle() {
+      const provider = new firebase.auth.GoogleAuthProvider();
+      auth.signInWithPopup(provider)
+        .then(() => {
+          closeModal();
+          window.location.href = 'dashboard.html';
+        })
+        .catch(err => {
+          document.getElementById('modal-error').textContent = err.message;
+        });
+    }
+
+    // ── Close modal on backdrop click ────────────────────────
+    document.getElementById('auth-modal').addEventListener('click', function(e) {
+      if (e.target === this) closeModal();
+    });
+
+    // ── Open designer with demo circuit ─────────────────────
+    function openWithDemo() {
+      fetch('demo.sparky')
+        .then(r => r.json())
+        .then(data => {
+          sessionStorage.setItem('sparky_load_circuit', JSON.stringify(data));
+          window.location.href = 'circuit3d/index.html';
+        })
+        .catch(() => {
+          window.location.href = 'circuit3d/index.html';
+        });
+    }
+
+    // ── Check auth state on load ─────────────────────────────
+    auth.onAuthStateChanged(user => {
+      if (!user) return;
+      // Update hero CTA
+      document.getElementById('hero-actions').innerHTML =
+        '<a href="dashboard.html" class="btn-primary">Go to Dashboard <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></a>';
+      // Update nav
+      const navCta = document.getElementById('nav-cta');
+      if (navCta) {
+        navCta.textContent = 'Dashboard';
+        navCta.onclick = function() { window.location.href = 'dashboard.html'; };
+      }
+    });
+
+    // ── Scroll reveal ────────────────────────────────────────
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15 });
+
+    document.querySelectorAll('.features').forEach(el => observer.observe(el));
+  </script>
+</body>
+</html>
