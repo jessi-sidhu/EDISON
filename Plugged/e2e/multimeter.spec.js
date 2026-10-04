@@ -72,6 +72,15 @@ function placeMeter(page, mode, red, black) {
   }, { mode, red, black });
 }
 
+// What the meter's own 3D screen shows: its LCD mesh's userData.meterLcd
+// ({ text, unit }, multimeter.js), repainted from the same reading as the panel.
+const lcd = page => page.evaluate(() => {
+  const c = App.state.components.find(x => x.type === 'multimeter');
+  let s = null;
+  if (c && c.group) c.group.traverse(o => { if (typeof o.userData.meterLcd === 'string') s = JSON.parse(o.userData.meterLcd); });
+  return s && { text: s.text, unit: s.unit };
+});
+
 const meterMode = page => page.evaluate(() => App.state.components.find(c => c.type === 'multimeter').values.mode);
 const press  = page => page.evaluate(() => App.setControls(App.state.components.find(c => c.type === 'button'), { pressed: true }));
 const setMode = (page, mode) => page.evaluate(m => App.setValues(App.state.components.find(c => c.type === 'multimeter'), { mode: m }), mode);
@@ -107,9 +116,13 @@ test('V mode, probes across R1 of the pressed demo: the display reads about 7.0 
   await expect(page.locator('#meter-reading')).toContainText('7.0');
   await expect(page.locator('#meter-reading')).toContainText('V');
   await expect(page.locator('#meter-reading')).not.toHaveClass(/meter-fuse/);
+  // The meter's own screen shows the panel's number, in V.
+  const panel = (await page.locator('#meter-reading').textContent()).trim().split(/\s+/)[0];
+  await expect.poll(() => lcd(page), { message: "the meter's LCD shows the panel's reading" }).toEqual({ text: panel, unit: 'V' });
 
   await page.locator('#sim-stop-btn').click();
   await expect(page.locator('#meter-reading'), 'not simulating: --').toHaveText(/^\s*--\s*$/);
+  await expect.poll(() => lcd(page), { message: "the meter's LCD shows dashes once stopped" }).toEqual({ text: '----', unit: 'V' });
   expect(errors).toEqual([]);
 });
 
@@ -142,6 +155,7 @@ test('A mode straight across the battery (tp to tn): FUSE, in red', async ({ pag
   await page.locator('#sim-run-btn').click();
   await expect(page.locator('#meter-reading')).toContainText('FUSE');
   await expect(page.locator('#meter-reading')).toHaveClass(/meter-fuse/);
+  await expect.poll(() => lcd(page), { message: "the meter's LCD shows FUSE too" }).toEqual({ text: 'FUSE', unit: '' });
   const colour = await page.locator('#meter-reading').evaluate(el => getComputedStyle(el).color);
   const [r, g, b] = colour.match(/\d+/g).map(Number);
   expect(r, `FUSE is shown in red (got ${colour})`).toBeGreaterThan(g + 60);
@@ -187,6 +201,8 @@ test('Ω mode on an unpowered resistor beside the running demo reads its 1 kΩ',
     const m = /([\d.]+)\s*(k?)Ω/.exec(t || '');
     return m ? Number(m[1]) * (m[2] ? 1000 : 1) : t;
   }, { message: 'the reading, in ohms' }).toBeCloseTo(1000, 0);
+  const [num, unit] = (await page.locator('#meter-reading').textContent()).trim().split(/\s+/);
+  await expect.poll(() => lcd(page), { message: "the meter's LCD shows the panel's ohms" }).toEqual({ text: num, unit });
   expect(errors).toEqual([]);
 });
 

@@ -501,9 +501,10 @@
     if (def.view !== undefined) {
       if (!isObj(def.view)) bad('view must be a ViewSpec object');
       else {
-        unknownFields(def.view, ['build', 'update'], 'view', bad);
+        unknownFields(def.view, ['build', 'update', 'show'], 'view', bad);
         if (typeof def.view.build !== 'function') bad('view.build is required (a function)');
         if (def.view.update !== undefined && typeof def.view.update !== 'function') bad('view.update must be a function');
+        if (def.view.show !== undefined && typeof def.view.show !== 'function') bad('view.show must be a function');
       }
     }
     if (def.pinout !== undefined) checkPinout(def.pinout, pins, bad);

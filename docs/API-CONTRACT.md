@@ -172,8 +172,14 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
 {
   build(ctx, values, controls, legs) → { group: THREE.Group, pinPositions: THREE.Vector3[] },
   //   One pin position per pin, in pin order. The ghost is this same build drawn with ghost materials.
-  //   ctx: { THREE, lead(from,to), mat.{body,metal,glass,label}, holeWorld(col,row), boardGeometry }
+  //   ctx: { THREE, ghost, lead(from,to), bentLead(points, r, bend), axial(A, B, len, h, r), capsule(r, len, e),
+  //          lathe([[r, y], …], segs), roundBox(w, h, d, r), paint(W, H, draw) → CanvasTexture,
+  //          print(w, h, draw, px) → label mesh, mat.{surface(hex, opts),body,metal,glass,label},
+  //          holeWorld(col,row), boardGeometry }
+  //   mat.surface is a physical material (roughness, metalness, clearcoat, opacity…) lit by scene.js's
+  //   studio reflections; every mat.* is see-through in the ghost.
   update?(obj, measured, r) → void,   // glow, spin, sound; called after every simulation
+  show?(obj, reading) → void,         // a part-specific display a tool drives (the multimeter's LCD, below)
 }
 ```
 
@@ -268,6 +274,9 @@ The example is `Plugged/circuit3d/js/parts/bench_supply.js` (#34), the first off
 - **Pin refs are `LABEL.k`**, `k` = the pin's index: `PS1.0` (+), `PS1.1` (COM), `PS1.2` (−). The i-th `place_<type>` in a build is `PREFIX<i+1>`. The battery's old `battery_n_pinK` form stays battery-only.
 - **Board markdown:** a 2-pin off-board part prints as the battery always has. A 3+-pin one lists every pin, `off-board pos → wire ref: PS1.0`, and its wiring cheat-sheet line (`- **PS1**: …`) names every ref.
 - **A limit that only warns:** `measure` gives each rail's mA and an over flag; `warnings` says `+ rail would current-limit: …`, and `view.update` lights a mesh named `limit-light`. There is no constant-current mode.
+
+### The multimeter's 3D screen
+- `view.show(comp, { text })` paints the meter model's LCD with the panel's own text (`'7.00 V'`, `'14.9 mA'`, `'FUSE'`, `'1.00 kΩ'`, `'OL'`, `'--'`). `tools/meter-display.js` calls it for every meter on each `plugged:sim` (a short's result and Ω mode included) and with `'--'` on `plugged:sim-stop`, so the LCD and `#meter-reading` always agree. The part reads no page state; its LCD mesh carries `userData.meterLcd` (JSON `{ text, unit, dc }`, what it shows).
 
 ### Pattern: off-board wave source
 The example is `Plugged/circuit3d/js/parts/function_generator.js` (#120), a sine generator beside the board.

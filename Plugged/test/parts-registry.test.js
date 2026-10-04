@@ -704,3 +704,13 @@ describe('legsOf', () => {
                      [['a', 'a12'], ['b', null], ['old', 'a16']]);
   });
 });
+
+// view.show (parts redo): an optional, part-specific display a tool drives
+// (the multimeter's LCD, from tools/meter-display.js). A function is
+// accepted; anything else is refused by name.
+test('view.show: an optional function is accepted; a non-function is refused', () => {
+  const define = need('define');
+  define(variant(testSpan, d => { d.view = { build: d.view.build, show: () => {} }; }));
+  rejects(variant(testSpan, d => { d.type = 'test_show_bad'; d.view = { build: d.view.build, show: 'paint' }; }),
+          [/view\.show must be a function/]);
+});

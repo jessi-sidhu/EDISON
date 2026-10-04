@@ -429,13 +429,13 @@
           hoverSphere.visible  = false;
           hoverSphereB.visible = false;
           holeLabel.style.display = 'none';
-          // Position ghost at cursor, clamped outside the board
+          // Position ghost at cursor, kept off the board: App.offboardSpot,
+          // the same BATTERY_MARGIN clamp placement uses
           const pt  = new THREE.Vector3();
           const hit = raycaster.ray.intersectPlane(boardPlane, pt);
           if (hit && ghostGroup) {
-            const margin  = state.breadboard.BOARD_W / 2 + App.BATTERY_MARGIN;
-            const clampX  = pt.x >= 0 ? Math.max(pt.x, margin) : Math.min(pt.x, -margin);
-            ghostGroup.position.set(clampX, App.BENCH_Y || 0, pt.z);   // on the bench, as placed (#187)
+            const spot = App.offboardSpot(pt.x, pt.z, true);
+            ghostGroup.position.set(spot.x, App.BENCH_Y || 0, spot.z);   // on the bench, as placed (#187)
             ghostGroup.visible = true;
           } else if (ghostGroup) {
             ghostGroup.visible = false;
@@ -579,7 +579,7 @@
         if (isOffboard(type)) {
           const pt  = new THREE.Vector3();
           const hit = raycaster.ray.intersectPlane(boardPlane, pt);
-          if (hit) App.placePart(type, { x: pt.x, z: pt.z });
+          if (hit) App.placePart(type, App.offboardSpot(pt.x, pt.z, true));   // where the ghost showed it
           return;
         }
 

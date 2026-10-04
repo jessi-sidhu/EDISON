@@ -14,7 +14,7 @@
 //
 //  The definition half is pure: no THREE, no page. The view half
 //  (view.build) runs only in the browser; tools/meter-display.js (#97)
-//  is its screen, and the model's LCD shows the same reading (view.update).
+//  is its screen, and hands the model's LCD the same reading (view.show).
 //
 //  LOADING
 //  ───────
@@ -117,7 +117,7 @@
   //  moved to the model's own group: the dial is its only nested group
   //  (tools/meter-display.js turns the mode on a click inside it), every
   //  other piece a direct child. While simulating the LCD shows the
-  //  meter's own reading (update).
+  //  meter's own reading (show).
   const DIAL = { V: -0.6, A: 0, 'Ω': 0.6 };   // pointer angle per mode, radians
 
   const W = 2.5, D = 3.6, T = 0.6;     // the holster: width, length (top end at −z), thickness
@@ -147,19 +147,15 @@
                  '-': 0x40, O: 0x3f, L: 0x38, F: 0x71, U: 0x3e, S: 0x6d, E: 0x79 };
   const LCD_UNIT = { V: 'V', A: 'mA', 'Ω': 'Ω' };
 
-  // What the LCD shows: the same reading as meter-display's panel. m is
-  // measure()'s ({} when not simulating: dashes), o is ohms()'s in Ω mode.
-  function screen(mode, m, o) {
+  // What the LCD shows for the panel's own text (meter-display's reading():
+  // '7.00 V', '14.9 mA', 'FUSE', '1.00 kΩ', 'OL', '--'): its number and unit.
+  function lcdShows(mode, text) {
     const unit = LCD_UNIT[mode] || 'V', dc = mode !== 'Ω';
-    if (m && m.fuse) return { text: 'FUSE', unit: '', dc: false };
-    if (mode === 'Ω' && o && typeof o.reading === 'number') {
-      const r = o.reading;
-      if (r >= 1e6) return { text: (r / 1e6).toFixed(2), unit: 'MΩ', dc };
-      if (r >= 1e3) return { text: (r / 1e3).toFixed(2), unit: 'kΩ', dc };
-      return { text: r.toFixed(1), unit: 'Ω', dc };
-    }
-    if (mode === 'Ω' && o && o.reading === 'OL') return { text: 'OL', unit, dc };
-    if (mode !== 'Ω' && m && typeof m.reading === 'number') return { text: m.reading.toFixed(mode === 'A' ? 1 : 2), unit, dc };
+    const t = String(text == null ? '--' : text).trim();
+    if (t === 'FUSE') return { text: 'FUSE', unit: '', dc: false };
+    if (t === 'OL') return { text: 'OL', unit, dc };
+    const n = /^(-?[\d.]+)\s*(\S+)$/.exec(t);
+    if (n) return { text: n[1], unit: n[2], dc };
     return { text: '----', unit, dc };
   }
 
@@ -322,17 +318,17 @@
                      ctx.mat.surface(0x161719, { roughness: 0.7, clearcoat: 0.1 }), 0, 0.06 + (FACE - 0.06) / 2, 0);
     body.castShadow = true;
 
-    // The LCD: a dark bezel, the reading (a canvas update() repaints) and a glass sheen
+    // The LCD: a dark bezel, the reading (a canvas show() repaints) and a glass sheen
     put(ctx.roundBox(LCD.w + 0.2, 0.05, LCD.d + 0.2, 0.06), ctx.mat.surface(0x1d1e21, { roughness: 0.4, clearcoat: 0.5 }),
         0, FACE + 0.015, LCD.z);
-    const shows = screen(mode, {}, null);
+    const shows = lcdShows(mode, '--');
     const lcd = put(new THREE.PlaneGeometry(LCD.w, LCD.d),
                     ctx.ghost ? ctx.mat.surface(0x7b8572)
                               : ctx.mat.surface(0xc4cabd, { map: ctx.paint(680, 310, (g, Wc, Hc) => drawLcd(g, Wc, Hc, shows)), roughness: 0.5 }),
                     0, FACE + 0.042, LCD.z);
     lcd.rotation.x = -Math.PI / 2;
     if (!ctx.ghost) {
-      lcd.userData.meterLcd = JSON.stringify(shows);   // what it shows: update() repaints it
+      lcd.userData.meterLcd = JSON.stringify(shows);   // what it shows: show() repaints it
       const glass = put(new THREE.PlaneGeometry(LCD.w, LCD.d),
                         ctx.mat.surface(0xffffff, { roughness: 0.06, clearcoat: 1, opacity: 0.1, depthWrite: false }), 0, FACE + 0.046, LCD.z);
       glass.rotation.x = -Math.PI / 2;
@@ -406,14 +402,14 @@
     return { group, pinPositions };
   }
 
-  // While simulating the LCD shows the meter's reading, as meter-display's
-  // panel does; with {} (stopped, or no reading) it shows dashes. A canvas
-  // is repainted only when what it shows changes.
-  function update(obj, m) {
+  // Paints the LCD with the panel's reading, r = { text }: tools/meter-display.js
+  // calls it for every meter on each run (a short's FUSE and Ω mode included)
+  // and with '--' on Stop, so the LCD and #meter-reading always agree. A
+  // canvas is repainted only when what it shows changes.
+  function show(obj, r) {
     const group = obj && obj.group;
     if (!group) return;
-    const mode = (m && m.mode) || (obj.values && obj.values.mode) || 'V';
-    const s = screen(mode, m, mode === 'Ω' && m && m.mode ? ohmsNow(obj.label) : null);
+    const s = lcdShows((obj.values && obj.values.mode) || 'V', r && r.text);
     const key = JSON.stringify(s);
     group.traverse(o => {
       if (typeof o.userData.meterLcd !== 'string' || o.userData.meterLcd === key) return;
@@ -423,13 +419,6 @@
       tex.needsUpdate = true;
       o.userData.meterLcd = key;
     });
-  }
-
-  // Ω mode's reading, as meter-display gets it: ohms() on the board as it stands.
-  function ohmsNow(label) {
-    const App = typeof window !== 'undefined' ? window.App : null;
-    if (!App || !App.state) return null;
-    try { return ohms(App.state.components, App.state.wires, label); } catch { return null; }
   }
 
   const def = {
@@ -475,7 +464,7 @@
       },
     },
 
-    view: { build, update },
+    view: { build, show },
 
     examples: [
       {

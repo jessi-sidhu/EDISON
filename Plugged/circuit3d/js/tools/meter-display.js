@@ -7,7 +7,8 @@
 //  result.parts[label].m (the meter's own measure, which a short's
 //  result still carries): "7.00 V", "14.9 mA", or "FUSE" in red. In Ω
 //  mode it is Multimeter.ohms(), or "--" and why (#meter-note). Not
-//  simulating: "--".
+//  simulating: "--". Every meter's own 3D LCD gets the same text
+//  (multimeter.js view.show), so the two always agree.
 //
 //  A click on the meter in 3D (select mode) turns the dial V → A → Ω → V
 //  through App.setValues when it lands on the dial knob, or on the body of
@@ -83,12 +84,24 @@
     return comp;
   }
 
+  // Every meter's own 3D screen shows its panel text (multimeter.js view.show).
+  const meters = () => (window.App && App.state ? App.state.components.filter(c => c.type === 'multimeter') : []);
+  function lcd(comp, r) {
+    const def = window.Parts && window.Parts.get('multimeter');
+    if (def && def.view && typeof def.view.show === 'function') def.view.show(comp, r);
+  }
+
   document.addEventListener('plugged:sim', e => {
-    const comp = sync();
-    if (comp) show(reading(comp, e.detail && e.detail.result));
+    const comp = sync(), result = e.detail && e.detail.result;
+    meters().forEach(m => {
+      const r = reading(m, result);
+      if (m === comp) show(r);
+      lcd(m, r);
+    });
   });
   document.addEventListener('plugged:sim-stop', () => {
     if (sync()) show({ text: '--' });
+    meters().forEach(m => lcd(m, { text: '--' }));
   });
   setInterval(sync, POLL_MS);
 

@@ -137,8 +137,10 @@ test('the battery margin is one named constant, not "BOARD_W / 2 + 2.5" in each 
   const defs = copiesOf(/BATTERY_MARGIN\s*=/);
   assert.equal(total(defs), 1, 'BATTERY_MARGIN defined in: ' + where(defs));
   assert.equal(total(copiesOf(/App\.batterySpot\s*=/)), 1, 'App.batterySpot must be defined once');
-  assert.match(read('circuit3d/js/interaction.js'), /BATTERY_MARGIN|batterySpot\(/,
-    'the user-placement clamp must share the margin');
+  assert.match(read('circuit3d/js/interaction.js'), /App\.offboardSpot\(/,
+    'the user-placement clamp must share the margin: App.offboardSpot, as placement uses');
+  assert.match(read('circuit3d/js/app.js'), /App\.offboardSpot = function[\s\S]{0,800}BATTERY_MARGIN/,
+    'App.offboardSpot keeps parts BATTERY_MARGIN clear of the board');
 });
 
 test('chat.js has no battery spot of its own, and the preview asks for the same spot Accept uses', () => {

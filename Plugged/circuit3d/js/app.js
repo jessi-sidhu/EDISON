@@ -225,11 +225,20 @@
     return out;
   }
 
-  // An off-board part sits at least BATTERY_MARGIN past either end of the board.
-  function offboardX(wx) {
-    const margin = state.breadboard.BOARD_W / 2 + App.BATTERY_MARGIN;
-    return wx >= 0 ? Math.max(wx, margin) : Math.min(wx, -margin);
-  }
+  // Where an off-board part sits for (x, z): in front of or behind the
+  // board, at least BATTERY_MARGIN clear of its long edge, anywhere along
+  // it; level with the board, at least BATTERY_MARGIN past either end (a
+  // saved or AI spot, always level with the rails, lands as it always has).
+  // pointer: a spot under the mouse, so one just in front of or behind the
+  // board moves out to that clear line rather than round to the end.
+  App.offboardSpot = function (x, z, pointer) {
+    const { BOARD_W, BOARD_D } = App.BOARD_GEOMETRY;
+    const clearZ = BOARD_D / 2 + App.BATTERY_MARGIN;
+    if (Math.abs(z) >= clearZ) return { x, z };
+    if (pointer && Math.abs(z) > BOARD_D / 2) return { x, z: Math.sign(z) * clearZ };
+    const margin = BOARD_W / 2 + App.BATTERY_MARGIN;
+    return { x: x >= 0 ? Math.max(x, margin) : Math.min(x, -margin), z };
+  };
 
   // An off-board model is drawn around (0, 0, 0): move it, and its pins, to
   // (x, z) on the bench: App.BENCH_Y in Edison (scene-env.js), 0 in classic.
@@ -274,7 +283,8 @@
     const o    = Object.assign({}, opts, { controls: ctl });
     if (def.place.kind === 'offboard') {
       const built = App.buildPart(type, Parts.legsOf({ type, holeRefs: null }), vals, { controls: ctl });
-      return addPart(type, atSpot(built, offboardX(where.x), where.z), vals, null, o);
+      const spot = App.offboardSpot(where.x, where.z);
+      return addPart(type, atSpot(built, spot.x, spot.z), vals, null, o);
     }
     const holeRefs = where.map(h => ({ col: h.col, row: h.row }));
     return addPart(type, App.buildPart(type, Parts.legsOf({ type, holeRefs }), vals, { controls: ctl }), vals, holeRefs, o);
@@ -295,6 +305,20 @@
   // Each changes one part in place, keeping its label, holes and wires, and
   // records one undo step (inside an AI build's batch, the build's one step).
 
+  // Frees a model's GPU copies (its geometries, materials and their canvas
+  // textures) once it has left the board for good: redrawn, deleted or
+  // cleared. Undo and redo rebuild from saved data, so nothing reuses it.
+  function disposeModel(group) {
+    if (!group) return;
+    group.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      for (const m of [].concat(o.material || [])) {
+        for (const key of ['map', 'emissiveMap']) if (m[key]) m[key].dispose();
+        m.dispose();
+      }
+    });
+  }
+
   // Draws a part's model again, for its current values, where it stands.
   // A selected part stays selected (the inspector stays on it).
   function redrawPart(comp) {
@@ -303,7 +327,8 @@
     const wasSelected = !!(state.selected && state.selected.item === comp);
     if (wasSelected) App.deselect();
     (comp.pinMeshes || []).forEach(pm => App.scene.remove(pm));
-    if (comp.group) App.scene.remove(comp.group);
+    const old = comp.group;
+    if (old) App.scene.remove(old);
     let built;
     if (def.place.kind === 'offboard') {
       const at = comp.group ? comp.group.position : { x: 0, z: 0 };
@@ -314,6 +339,7 @@
     }
     App.scene.add(built.group);
     comp.group = built.group;
+    disposeModel(old);
     comp.pins = built.pinPositions;
     comp.pinMeshes = [];
     addPinMarkers(comp);
@@ -360,6 +386,7 @@
     pushHistory();
     if (state.selected && state.selected.item === wire) App.deselect();
     App.scene.remove(wire.group);
+    disposeModel(wire.group);
     state.wires = state.wires.filter(w => w !== wire);
     refreshCounts();
     if (App.simRunning) App.runSimulation();
@@ -635,6 +662,7 @@
   function removeComponent(item) {
     (item.pinMeshes || []).forEach(pm => App.scene.remove(pm));
     if (item.group) App.scene.remove(item.group);
+    disposeModel(item.group);
     state.components = state.components.filter(c => c !== item);
     state.unknownWires = state.unknownWires.filter(w => w.startComp !== item && w.endComp !== item);
     // Wires anchored to this component's pins would keep pointing at the
@@ -642,6 +670,7 @@
     state.wires = state.wires.filter(w => {
       if (w.startComp !== item && w.endComp !== item) return true;
       App.scene.remove(w.group);
+      disposeModel(w.group);
       return false;
     });
   }
@@ -656,6 +685,7 @@
       removeComponent(item);
     } else if (kind === 'wire') {
       App.scene.remove(item.group);
+      disposeModel(item.group);
       state.wires = state.wires.filter(w => w !== item);
     }
     refreshCounts();
@@ -1110,8 +1140,9 @@
     state.components.forEach(c => {
       (c.pinMeshes || []).forEach(pm => App.scene.remove(pm));
       if (c.group) App.scene.remove(c.group);
+      disposeModel(c.group);
     });
-    state.wires.forEach(w => App.scene.remove(w.group));
+    state.wires.forEach(w => { App.scene.remove(w.group); disposeModel(w.group); });
     state.components   = [];
     state.wires        = [];
     state.unknownWires = [];   // unknown parts go with the rest of the board

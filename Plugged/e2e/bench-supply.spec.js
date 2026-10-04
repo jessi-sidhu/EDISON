@@ -294,3 +294,23 @@ test('guard (passes today): ESC still cancels a pick', async ({ page }) => {
   await page.keyboard.press('Escape');
   expect((await picked(page)).mode).toBe('select');
 });
+
+// A value change redraws the supply's model; the old one's geometries,
+// materials and canvas textures are freed (App's disposeModel), so five
+// changes don't pile up GPU textures. Counted through
+// App.renderer.info.memory.textures, after the frame that uploads them.
+test('changing the bench supply\'s voltage five times frees each old model: GPU textures do not pile up', async ({ page }) => {
+  const errors = watchErrors(page);
+  await openEditor(page);
+  const frames = () => page.evaluate(() => new Promise(r => { App.requestRender(); requestAnimationFrame(() => requestAnimationFrame(r)); }));
+  await page.evaluate(() => App.placePart('bench_supply', App.batterySpot()));
+  await frames();
+  const textures = () => page.evaluate(() => App.renderer.info.memory.textures);
+  const before = await textures();
+  for (let v = 1; v <= 5; v++) {
+    await page.evaluate(v => App.setValues(App.state.components.find(c => c.type === 'bench_supply'), { voltage: v }), v);
+    await frames();
+  }
+  expect(await textures(), `GPU textures went from ${before}`).toBeLessThanOrEqual(before);
+  expect(errors).toEqual([]);
+});
