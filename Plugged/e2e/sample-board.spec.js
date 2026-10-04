@@ -32,6 +32,8 @@ const DEFAULT_Q = "What's wrong with my circuit?";
 const READ_MS   = 1000;                                   // photo.js SAMPLE_READ_MS
 const BUILT_NOTE = n => `Built ${n} parts from your photo. Undo (Ctrl+Z) brings back the empty board.`;
 // Photo 2's own size: the sample file is a byte copy of it (test/sample-boards.test.js).
+// A photo of her own, for the corner step after a board sample.
+const CHOSEN = path.join(__dirname, 'fixtures', 'photo.jpg');
 const PHOTO = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'test', 'fixtures', 'photo', 'web', 'photos.json'), 'utf8')).p2_leds_buttons;
 
 function watchErrors(page) {
@@ -99,6 +101,7 @@ test('Use sample photo shows a picker of 2 tiles, demo-board and leds-buttons, e
   // Escape during the reading second: nothing is built, Edison isn't asked.
   await tile(page, ID).click();
   await expect(page.locator('#photo-status'), 'the tile shows the reading status').toHaveText(READING);
+  await expect(page.locator('#photo-corners'), 'its photo is up: the reading second has begun').toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('#photo-modal'), 'Escape closes the overlay').toBeHidden();
   await page.waitForTimeout(READ_MS * 2);                // well past the reading second
@@ -110,7 +113,7 @@ test('Use sample photo shows a picker of 2 tiles, demo-board and leds-buttons, e
 
 // ── Photo, then board ──────────────────────────────────────────────────────
 
-test('the leds-buttons tile shows its photo with "Reading your board…", then builds its board (3 LEDs, 3 buttons, R1 and the battery) with no /api/photo and no console error; Edison is asked; one Ctrl+Z empties the board', async ({ page }) => {
+test('the leds-buttons tile shows its photo with "Reading your board…", then builds its board (3 LEDs, 3 buttons, R1 and the battery) with no /api/photo and no console error; Edison is asked; one Ctrl+Z empties the board; a photo chosen next gets its corner step back', async ({ page }) => {
   test.setTimeout(90_000);   // software WebGL
   const errors = watchErrors(page);
   const api = await watchApi(page);
@@ -199,5 +202,17 @@ test('the leds-buttons tile shows its photo with "Reading your board…", then b
   await page.locator('#canvas').click({ position: { x: 5, y: 5 } });   // focus the board, not the chat box
   await page.keyboard.press('ControlOrMeta+z');
   expect(await boardNow(page), 'one Ctrl+Z empties the board').toEqual({ parts: [], wires: [] });
+
+  // A photo chosen next gets its whole corner step back: the board sample's
+  // photo hid the prompt and the Redo / Looks right buttons (photo.js showPhoto).
+  await page.locator('#photo-btn').click();
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('#photo-choose').click()]);
+  await chooser.setFiles(CHOSEN);
+  await expect(page.locator('#photo-corners'), 'a chosen photo opens the corner step').toBeVisible();
+  await expect(page.locator('#photo-prompt'), 'the prompt is back').toBeVisible();
+  await expect(page.locator('#photo-prompt'), 'it asks for a1 first').toContainText(/\ba1\b/);
+  await expect(page.locator('#photo-redo'), 'Redo is back').toBeVisible();
+  await expect(page.locator('#photo-ok'), 'Looks right is back').toBeVisible();
+  await expect(page.locator('#photo-ok'), 'Looks right waits for 4 taps').toBeDisabled();
   expect(errors).toEqual([]);
 });
