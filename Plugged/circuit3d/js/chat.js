@@ -389,8 +389,25 @@ if (typeof window !== 'undefined') (function (App, Chat, Parts) {
     return pm ? { world: pm.userData.world.clone(), holeRef: null, pinMesh: pm } : null;
   }
 
+  // A rehearsed photo's canned answers (#17), window.PhotoCanned from photo.js:
+  // the first ask gets `explain`, a later one asking to fix it gets `fix`,
+  // each once, after CANNED_MS of typing. Anything else: null, the real AI.
+  const CANNED_MS = 1200;
+  const FIX_ASK   = /fix|correct|repair|solve/i;
+  function cannedAnswer(msg) {
+    const c = window.PhotoCanned;
+    if (!c) return null;
+    if (c.explain != null) { const reply = c.explain; c.explain = null; return { reply, actions: [] }; }
+    if (!c.fix || !FIX_ASK.test(msg)) return null;
+    const fix = c.fix;
+    c.fix = null;
+    return { reply: fix.reply, actions: JSON.parse(JSON.stringify(fix.actions || [])) };
+  }
+
   // explain (issue #169): an answer only, so the server offers the AI no tools.
   async function askSparky(markdown, userMsg, history, board, explain) {
+    const canned = cannedAnswer(userMsg);
+    if (canned) { await new Promise(r => setTimeout(r, CANNED_MS)); return canned; }
     // A stalled AI ends in a clear message, not a minutes-long spinner (#129).
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Chat.ASK_TIMEOUT_MS);

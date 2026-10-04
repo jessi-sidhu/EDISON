@@ -3,7 +3,7 @@
 //  Contract: docs/API-CONTRACT.md → "Page additions" (window.PhotoSamples).
 //  A plain script, not .json: the static server never serves .json.
 //
-//  Each entry: { file, cols, taps, title, credit, offered?, board? }. taps are the corner
+//  Each entry: { file, cols, taps, title, credit, offered?, board?, match?, explain?, fix? }. taps are the corner
 //  holes a1, aN, jN, j1 (N = cols) in the file's own pixels (a corner may
 //  lie off the image); the key is the `sample` sent to /api/photo, and the
 //  key of its recording (test/fixtures/photo/<key>.json, leads/<key>.json).
@@ -17,6 +17,15 @@
 //  about a second, then builds this exactly (photo.js), with no /api/photo
 //  and no confirm screen. Such an entry needs no taps and no recording.
 //  test/sample-boards.test.js checks each board applies and simulates.
+//
+//  match, explain, fix (#17): a rehearsed upload. match lists the SHA-256
+//  (hex) of the photo files that are this board; a chosen photo whose bytes
+//  match gets the corner step as usual (the sample's own file if the browser
+//  can't decode it, a HEIC), then on Looks right this board, as a tile does.
+//  explain is Edison's canned answer to the first question after it; fix
+//  { reply, actions } the canned answer to a later one asking to fix it,
+//  previewed with Accept like any AI edit (chat.js askSparky). Each is used
+//  once; a new photo or a cleared board drops them (photo.js).
 //
 //  demo-board.jpg is a placeholder until #144: test/fixtures/photo/web/
 //  p6_piranha.jpg (lungstruck, CC BY 2.0), its a1/a24/j24/j1 taps used as
@@ -102,6 +111,55 @@ window.PhotoSamples = {
       { tool: 'add_wire', from: 'j60', to: 'bn_60', color: 'green' },
       { tool: 'add_wire', from: 'g41', to: 'h58', color: 'green' },
     ],
+  },
+  // Thandi's real board (#17), the photoexample op-amp blinker as she built it.
+  // PLACEHOLDER board and text until the decode of her photo: docs/boards/README.md's
+  // list with R4 at i20–i23 (ground j23 → bn_23) and pin 4's j17 → bn_17 left out.
+  'thandi-blinker': {
+    file: 'samples/thandi-blinker.jpg',
+    cols: 63,
+    match: [
+      'd976b9346ff0b6009331eeb057233ed09a39538d844bb4d68b5212a42c7f99e0',   // thandi-board-1.jpg
+      '335600b887ac38f3a27e8286d644bc9534bc14616646cc6ed25d3f7778f7c443',   // thandi-board-2.jpg
+      '82fc1b4c628ac54ffb85a36c7b1fae91c0e6cb3a4d44f5cb37619d0ad0bb7587',   // thandi-board-3.jpg
+      'a49349f12145750f4c3ae48e387906be99d0b2a2271afe2bf8a97cd47a4e517b',   // IMG_2011.heic
+      'e95966be941be4c00f3f421da47601a9b8e82992bc1e77eabbfe1146258ae831',   // IMG_2012.heic
+      'c31d115dbceee4d6954cf1e6da7456707d84b5346b58c2a891c65ed1113f528e',   // IMG_2013.heic
+    ],
+    title: 'Op-amp blinker (Thandi)',
+    credit: 'Photo: Thandi',
+    board: [
+      { tool: 'place_battery' },
+      { tool: 'place_tl072', hole: 'f14', direction: 'right' },
+      { tool: 'place_potentiometer', hole: 'f9', direction: 'right', resistance: 10000 },
+      { tool: 'place_capacitor', holeA: 'g15', holeB: 'g13', capacitance: '100µF' },   // holeA the + lead
+      { tool: 'place_resistor', holeA: 'i11', holeB: 'i15', resistance: 1000 },
+      { tool: 'place_resistor', holeA: 'e20', holeB: 'f20', resistance: 10000 },
+      { tool: 'place_resistor', holeA: 'h20', holeB: 'h24', resistance: 10000 },
+      { tool: 'place_resistor', holeA: 'i20', holeB: 'i23', resistance: 10000 },
+      { tool: 'place_resistor', holeA: 'g24', holeB: 'g27', resistance: 1000 },
+      { tool: 'place_led', holeA: 'h28', holeB: 'h27', color: 'red' },                // holeA the cathode
+      { tool: 'add_wire', from: 'BAT1.0', to: 'tp_1', color: 'red' },
+      { tool: 'add_wire', from: 'BAT1.1', to: 'tn_2', color: 'black' },
+      { tool: 'add_wire', from: 'tp_13', to: 'a14', color: 'red' },
+      { tool: 'add_wire', from: 'tn_18', to: 'a17', color: 'black' },
+      { tool: 'add_wire', from: 'tp_21', to: 'a20', color: 'red' },
+      { tool: 'add_wire', from: 'b15', to: 'b16', color: 'green' },
+      { tool: 'add_wire', from: 'tp_30', to: 'bp_30', color: 'red' },
+      { tool: 'add_wire', from: 'tn_29', to: 'bn_29', color: 'black' },
+      { tool: 'add_wire', from: 'g10', to: 'g11', color: 'green' },
+      { tool: 'add_wire', from: 'h9', to: 'h14', color: 'blue' },
+      { tool: 'add_wire', from: 'g16', to: 'g20' },
+      { tool: 'add_wire', from: 'j14', to: 'j24', color: 'blue' },
+      { tool: 'add_wire', from: 'j13', to: 'bn_14', color: 'black' },
+      { tool: 'add_wire', from: 'j23', to: 'bn_23', color: 'black' },
+      { tool: 'add_wire', from: 'j28', to: 'bn_27', color: 'black' },
+    ],
+    explain: 'Two things are off: … (placeholder)',
+    fix: {
+      reply: "Here's the fix: … (placeholder)",
+      actions: [{ tool: 'add_wire', from: 'j17', to: 'bn_17', color: 'black' }],
+    },
   },
   piranha: {
     file: 'samples/piranha.jpg',
