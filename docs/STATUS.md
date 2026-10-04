@@ -2,7 +2,16 @@
 
 **Read this first when you pick the project up on any machine.** It's the shared memory: where things stand, what's next, what we learned, and how Aarmen likes to work. Claude Code's own memory lives on one laptop only, so anything worth keeping goes here. Update it at the end of each session (Claude: do it as part of wrapping up).
 
-*Last updated: 2026-10-03 night, Mac session.*
+*Last updated: 2026-10-04 early morning, Mac session.*
+
+## In progress (2026-10-04): hard-coded photo samples and Thandi's upload
+Aarmen's call: the photo samples are **hard-coded** (no Gemini read). The rectifier and the 555 are dropped. The course labs (hard-coded lab steps) are a separate, later job.
+- **#15, `leds-buttons` (photo 2):** on `dev`. It adds the `board` field: a sample shows its photo with "Reading your board…" for 1 s, then builds a fixed action list.
+- **#16, `ensc-lab` (photo 11, Aarmen's ENSC 220 bench, a TL072 comparator):** built on `aarmens702-hub/16-ensc-lab-sample` (`.worktrees/16`). Its browser specs, review and ship are next. The server checker flags R3 (the 470 Ω into IN1+) as "not between power and ground"; that's a false alarm for a comparator input.
+- **Next: Thandi's upload.** His real board photos (IMG_2011–2013, in Messages) are the op-amp LED blinker from the "photoexample" sketch (`docs/boards/` on the lab-paper branch), with the op-amp one spot off and one wire missing.
+  - Uploading that exact photo file (grid taps as usual) builds the hard-coded broken board.
+  - Edison's fix is hard-coded too, giving the sketch's working circuit.
+  - The simulator can't run this oscillator yet: it sticks about 0.5 s in. That's a separate fix.
 
 ## Where things are
 
@@ -19,7 +28,7 @@
 - **#198 one supply, wired the lab way:** CH1 + to the red rail, CH1 COM to the blue rail, CH2's white COM2 grounded, one wire per post. An op-amp's input comes from FG1 (its offset as the DC input), never a second supply.
 - **#199 whole or nothing:** a fix that names wires or parts not on the board is refused (the model hears why) or dropped whole. If Accept fails on any step, the whole build is undone and the chat names the failed steps. The model is told the build failed, not that the student declined it.
 - **Named pins:** the page now resolves `MM1.red` / `MM1.black` / `PS1.com2` like the server does. Before, AI meter probes never landed in the browser (the eval didn't notice, because it applies builds in Node).
-- **#200 photo samples:** only `demo-board` is offered; the button goes straight to it.
+- **#200 photo samples:** only `demo-board` was offered, and the button went straight to it. #15 adds `leds-buttons`, so the picker shows.
 - **#201:** the inspector sits inside the canvas frame, not over the chat. Result callouts never draw lines off the canvas.
 - **#202 the AI test set:** Aarmen's 16 prompts (`docs/AI-TEST-SET.md`) with a grader that checks the wiring as well as the readings.
 
