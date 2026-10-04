@@ -196,6 +196,14 @@
       </div>
 
       <div id="sparky-input-row">
+        <div id="photo-wrap">
+          <button id="photo-btn" title="Read a photo of your breadboard" aria-label="Read a photo of your breadboard">📷</button>
+          <div id="photo-menu" hidden>
+            <button id="photo-choose">Choose photo</button>
+            <button id="photo-sample">Use sample photo</button>
+          </div>
+          <input type="file" id="photo-file" accept="image/*" hidden>
+        </div>
         <textarea id="sparky-input" rows="1" placeholder="Ask Sparky anything…"></textarea>
       </div>
 
@@ -215,6 +223,29 @@
       <div class="lpm-btns">
         <button class="btn-simulate" id="lpm-confirm">Load Circuit</button>
         <button class="btn-secondary" onclick="document.getElementById('load-preview-modal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Photo capture: corner taps, then /api/photo (js/photo.js) -->
+  <div id="photo-modal" style="display:none">
+    <div class="photo-card">
+      <div id="photo-corners">
+        <div id="photo-prompt"></div>
+        <canvas id="photo-canvas"></canvas>
+        <div class="photo-btns">
+          <select id="photo-cols" aria-label="Board size">
+            <option value="63">63 columns</option>
+            <option value="30">30 columns</option>
+          </select>
+          <button class="btn-secondary" id="photo-redo">Redo</button>
+          <button class="btn-simulate" id="photo-ok" disabled>Looks right</button>
+        </div>
+      </div>
+      <div id="photo-status"></div>
+      <div class="photo-btns">
+        <button class="btn-simulate" id="photo-error-sample" hidden>Use sample photo</button>
+        <button class="btn-secondary" id="photo-cancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -272,6 +303,8 @@
 <script src="js/tools/labs.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/ids.js"></script>
+<script src="js/photo-grid.js"></script>
+<script src="js/photo-import.js"></script>
 <script src="js/history.js"></script>
 <script src="js/gestures.js"></script>
 <script src="js/board-io.js"></script>
@@ -279,6 +312,8 @@
 <script src="js/inspector.js"></script>
 <script src="js/app.js"></script>
 <script src="js/chat.js"></script>
+<script src="samples/samples.js"></script>
+<script src="js/photo.js"></script>
 
 </body>
 </html>

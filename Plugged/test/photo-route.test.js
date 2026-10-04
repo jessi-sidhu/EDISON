@@ -254,6 +254,76 @@ test('PHOTO_RECORD=1 saves a live Reading as { sample, sha256, reading, provider
   }
 });
 
+// ── The response's key (#139) ───────────────────────────────────────────────
+
+test('a 200 carries key: the sample id when sent, else the image\'s SHA-256', async () => {
+  process.env.PHOTO_PROVIDERS = 'fixture';
+  const bySample = await postPhoto(demoBody());
+  assert.equal(bySample.status, 200, `status ${bySample.status}: ${bySample.raw.slice(0, 200)}`);
+  assert.equal(bySample.body.key, 'demo-board', `key: ${JSON.stringify(bySample.body.key)}`);
+
+  register('works-key', async () => ({ reading: clone(MOCK_READING), model: 'works-1' }));
+  process.env.PHOTO_PROVIDERS = 'works-key';
+  const img = photo(2048, 'k');
+  const byHash = await postPhoto({ image: img.dataUrl, grid: GRID });
+  assert.equal(byHash.status, 200, `status ${byHash.status}: ${byHash.raw.slice(0, 200)}`);
+  assert.equal(byHash.body.key, img.sha256, `key: ${JSON.stringify(byHash.body.key)}`);
+});
+
+// ── The live readers through the route (#139) ───────────────────────────────
+
+// Fake AI keys for one test, so the live readers get as far as fetch.
+function withAiKeys() {
+  const saved = { GEMINI_API_KEY: process.env.GEMINI_API_KEY, DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY };
+  process.env.GEMINI_API_KEY = 'test-gemini-key';
+  process.env.DEEPSEEK_API_KEY = 'test-deepseek-key';
+  return () => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  };
+}
+
+// A global fetch that answers `status` per service and keeps every call.
+function stubAi(statusFor) {
+  const calls = [];
+  vi.stubGlobal('fetch', vi.fn(async (url, opts = {}) => {
+    const u = String(url);
+    const service = u.includes('generativelanguage.googleapis.com') ? 'gemini' : u.includes('api.deepseek.com') ? 'deepseek' : u;
+    let body = null;
+    try { body = JSON.parse(opts.body); } catch { /* not JSON */ }
+    calls.push({ service, model: body && body.model });
+    return new Response(JSON.stringify({ error: { code: statusFor[service] } }), { status: statusFor[service] || 500 });
+  }));
+  return calls;
+}
+
+test('live readers: Gemini 503 and deepseek-flash 503, no fixture → 502 AI_FAILED after trying both, in order', async () => {
+  const restore = withAiKeys();
+  try {
+    const calls = stubAi({ gemini: 503, deepseek: 503 });
+    const res = await postPhoto({ image: photo(2048, 'f').dataUrl, grid: GRID });
+    assertError(res, 502, 'AI_FAILED', REPLY.AI_FAILED);
+    assert.deepStrictEqual(calls.map(c => c.service), ['gemini', 'deepseek'], `calls: ${JSON.stringify(calls)}`);
+    assert.equal(calls[1].model, 'deepseek-flash');
+  } finally {
+    restore();
+  }
+});
+
+test('live readers: Gemini 400 → 502 AI_FAILED without ever asking deepseek', async () => {
+  const restore = withAiKeys();
+  try {
+    const calls = stubAi({ gemini: 400, deepseek: 503 });
+    const res = await postPhoto({ image: photo(2048, 'x').dataUrl, grid: GRID });
+    assertError(res, 502, 'AI_FAILED', REPLY.AI_FAILED);
+    assert.deepStrictEqual(calls.map(c => c.service), ['gemini'], `a 400 must not fall back: ${JSON.stringify(calls)}`);
+  } finally {
+    restore();
+  }
+});
+
 // ── Body cap ────────────────────────────────────────────────────────────────
 
 test('/api/photo: a body over 4 MB → 413 TOO_LARGE; a 3.5 MB photo is read', async () => {

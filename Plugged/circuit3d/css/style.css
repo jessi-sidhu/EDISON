@@ -190,6 +190,87 @@ html, body {
 .lpm-btns .btn-simulate,
 .lpm-btns .btn-secondary { flex: 1; justify-content: center; }
 
+/* ── Photo capture (js/photo.js) ─────────────── */
+
+#photo-wrap { position: relative; flex-shrink: 0; }
+
+#photo-btn {
+  width: 30px;
+  height: 30px;
+  background: #F3F1EC;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 15px;
+  cursor: pointer;
+}
+#photo-btn:hover { border-color: var(--accent); }
+
+#photo-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 50;
+}
+#photo-menu button {
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+#photo-menu button:hover { background: var(--selected-bg); }
+
+#photo-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(26,24,20,0.5);
+  backdrop-filter: blur(4px);
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.photo-card,
+#photo-corners {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.photo-card {
+  min-width: 320px;
+  padding: 16px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+}
+
+#photo-prompt { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+
+/* The photo fills this box exactly: no border, padding or letterbox. */
+#photo-canvas { display: block; position: static; border: 0; padding: 0; cursor: crosshair; }
+
+.photo-btns { display: flex; justify-content: flex-end; gap: 8px; }
+#photo-cols { margin-right: auto; font-family: inherit; font-size: 12px; }
+#photo-ok:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+
+#photo-status { max-width: 420px; font-size: 13px; color: var(--text-primary); }
+#photo-status:empty,
+#photo-menu[hidden],
+#photo-modal [hidden] { display: none; }
+
 .topbar-center {
   display: flex;
   align-items: center;

@@ -4,28 +4,34 @@
 //  readPhoto({ image, grid, sample }, opts) tries each provider in
 //  PHOTO_PROVIDERS (default gemini,deepseek) under one overall
 //  deadline, PHOTO_TIMEOUT_MS (default 45 s), and resolves
-//  { reading, provider, model }. It rejects with code AI_FAILED or
+//  { reading, provider, model, key }. It rejects with code AI_FAILED or
 //  AI_TIMEOUT.
 //
 //  A provider is { name, read(input, ctx) }: ctx has { signal, fetch }
-//  and read resolves { reading, model }; throwing means it failed.
-//  Every reading goes through validateReading().
+//  and read resolves { reading, model }; throwing means it failed, and
+//  the next one is tried, unless the error is .fatal (a 400/401/403: a
+//  bad request or key, which the next provider can't fix). Every reading
+//  goes through validateReading().
 //
 //  Fixtures (test/fixtures/photo/<key>.json, key = the sample id, else
 //  the SHA-256 of the image bytes):
 //    PHOTO_PROVIDERS=fixture   replays only.
 //    live mode                 a fixture answers only after every
-//                              provider failed or the deadline passed.
+//                              provider failed, a fatal error, or the
+//                              deadline passed.
 //    PHOTO_RECORD=1            saves each live Reading.
-//  The live Gemini/DeepSeek readers are #139; until then those names
-//  have no entry here and count as failed. Never deepseek-v4-pro: it
-//  has no vision.
+//
+//  The live readers (#139) ask for a box per part and wire (photo-prompt.js)
+//  and start each one's 2 legs at the ends of its box, hole '?', for the
+//  page to snap. gemini: PHOTO_GEMINI_MODEL, 25 s per attempt. deepseek:
+//  deepseek-flash only, never deepseek-v4-pro: it has no vision.
 // ─────────────────────────────────────────────────────────────
 
 const crypto = require('crypto');
 const fs     = require('fs');
 const path   = require('path');
 const { withDeadline } = require('./ai-providers');
+const { PHOTO_PROMPT, PHOTO_SCHEMA } = require('./photo-prompt');
 
 const FIXTURES_DIR = path.join(__dirname, '..', 'test', 'fixtures', 'photo');
 
@@ -69,8 +75,159 @@ const fixtureProvider = {
   },
 };
 
-// Name → provider. #139 adds gemini and deepseek.
-const PROVIDERS = { fixture: fixtureProvider };
+// ── The live readers' answer ─────────────────────────────────
+// The JSON in a model's reply, forgiving what the models write around it:
+// a markdown fence, prose before or after, stray closing braces, trailing
+// commas. A bare list stays a list. Throws when there is no JSON, or it
+// is cut off (that isn't repaired). Its errors never quote the reply: they
+// end up in the logs.
+function parseLooseJSON(text) {
+  let s = String(text == null ? '' : text);
+  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(s);
+  if (fence) s = fence[1];
+  const start = s.search(/[[{]/);
+  if (start < 0) throw failed('no JSON in the reply');
+  let out = '', depth = 0, inString = false, escaped = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') { out = out.replace(/,\s*$/, ''); depth--; }
+    out += ch;
+    if (depth === 0) {
+      try { return JSON.parse(out); } catch { throw failed('the reply is not valid JSON'); }
+    }
+  }
+  throw failed('the JSON in the reply is cut off');
+}
+
+const round1 = v => Math.round(v * 10) / 10;
+
+// A resistor's value guess in Ω: 470, "470", "4.7k", "1M". Else 0.
+function ohms(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const m = /^\s*(\d+(?:\.\d+)?)\s*([kKM]?)/.exec(typeof v === 'string' ? v : '');
+  return m ? Number(m[1]) * ({ k: 1e3, K: 1e3, M: 1e6 }[m[2]] || 1) : 0;
+}
+
+// The box answer → Reading v1. box_2d [ymin, xmin, ymax, xmax] on 0–1000
+// over the flattened image → a pixel box [x0, y0, x1, y1]; the 2 legs (or
+// wire ends) start at the midpoints of its short edges, hole '?', and
+// 'leads' goes in unsure: placeholders the page and the next step replace.
+function boxesToReading(answer, grid) {
+  const items = Array.isArray(answer) ? answer : obj(answer).items;
+  if (!Array.isArray(items)) throw failed('the reply has no items');
+  const parts = [], wires = [], count = {};
+  const nextId = prefix => `${prefix}${(count[prefix] = (count[prefix] || 0) + 1)}`;
+
+  for (const it of items.map(obj)) {
+    const b = it.box_2d;
+    if (!Array.isArray(b) || b.length !== 4 || !b.every(Number.isFinite)) continue;
+    const x0 = round1(Math.min(b[1], b[3]) / 1000 * grid.width),  x1 = round1(Math.max(b[1], b[3]) / 1000 * grid.width);
+    const y0 = round1(Math.min(b[0], b[2]) / 1000 * grid.height), y1 = round1(Math.max(b[0], b[2]) / 1000 * grid.height);
+    const mx = round1((x0 + x1) / 2), my = round1((y0 + y1) / 2);
+    const ends = x1 - x0 >= y1 - y0 ? [[x0, my], [x1, my]] : [[mx, y0], [mx, y1]];
+    const type = str(it.type).trim().toLowerCase();
+    const said  = typeof it.value === 'number' ? String(it.value) : str(it.value).trim();
+    const guess = /^null$/i.test(said) ? '' : said;
+
+    if (type === 'wire') {
+      wires.push({ id: nextId('W'), color: '', ends: ends.map(pt => ({ hole: '?', pt })), confidence: num(it.conf), unsure: ['leads'] });
+      continue;
+    }
+    const kind = type === 'resistor' || type === 'led' ? type : 'other';
+    parts.push({
+      id: nextId({ resistor: 'R', led: 'LED', other: 'X' }[kind]), type: kind,
+      what: guess ? `${guess} ${type || 'part'}` : type || 'part', value: kind === 'resistor' ? ohms(it.value) : 0,
+      bands: [], color: '', leads: ends.map(pt => ({ hole: '?', pt, role: 'unknown' })),
+      box: [x0, y0, x1, y1], confidence: num(it.conf), unsure: ['leads'],
+    });
+  }
+
+  const rails = obj(obj(answer).rails);
+  const sign  = v => oneOf(v, RAIL_SIGNS, '?');
+  return {
+    board: { visible: obj(answer).visible !== false, cols: grid.cols,
+             rails: { aOuter: sign(rails.aOuter), aInner: sign(rails.aInner), jInner: sign(rails.jInner), jOuter: sign(rails.jOuter) },
+             split: false },
+    parts, wires, power: [],
+  };
+}
+
+// POSTs JSON; a non-2xx throws, fatal on 400/401/403 (a bad request or key).
+// No error quotes the upstream body: they end up in the logs.
+async function postJSON(ctx, signal, who, url, headers, body) {
+  const res = await ctx.fetch(url, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const e = failed(`${who} ${res.status}`);
+    if ([400, 401, 403].includes(res.status)) e.fatal = true;
+    throw e;
+  }
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { throw failed(`${who}: the reply is not JSON`); }
+}
+
+// ── gemini ───────────────────────────────────────────────────
+const GEMINI_BASE       = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const GEMINI_ATTEMPT_MS = 25000;
+const photoGeminiModel  = () => process.env.PHOTO_GEMINI_MODEL || 'gemini-robotics-er-2-preview';
+
+const geminiProvider = {
+  name: 'gemini',
+  read: async (input, ctx) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw failed('GEMINI_API_KEY is not set');
+    const model = photoGeminiModel();
+    const image = String(input.image);
+    const mime  = (/^data:([^;,]+)/.exec(image) || [])[1] || 'image/jpeg';
+    const body  = {
+      contents: [{ role: 'user', parts: [
+        { text: PHOTO_PROMPT },
+        { inline_data: { mime_type: mime, data: image.slice(image.indexOf(',') + 1) }, mediaResolution: { level: 'MEDIA_RESOLUTION_ULTRA_HIGH' } },
+      ] }],
+      generationConfig: { responseMimeType: 'application/json', responseSchema: PHOTO_SCHEMA, temperature: 1, maxOutputTokens: 32768 },
+    };
+    const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(GEMINI_ATTEMPT_MS)].filter(Boolean));
+    const data = await postJSON(ctx, signal, `gemini ${model}`, `${GEMINI_BASE}${model}:generateContent`, { 'x-goog-api-key': apiKey }, body);
+    const cand = (data && data.candidates && data.candidates[0]) || {};
+    if (cand.finishReason === 'MAX_TOKENS') throw failed(`gemini ${model}: the answer was cut off`);
+    const text = list(obj(cand.content).parts).filter(p => p && typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
+    if (!text.trim()) throw failed(`gemini ${model}: empty reply`);
+    return { reading: boxesToReading(parseLooseJSON(text), input.grid), model };
+  },
+};
+
+// ── deepseek (deepseek-flash only) ───────────────────────────
+const DEEPSEEK_URL         = 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_PHOTO_MODEL = 'deepseek-flash';   // never DEEPSEEK_MODEL / the #130 fallback: deepseek-v4-pro has no vision
+
+const deepseekProvider = {
+  name: 'deepseek',
+  read: async (input, ctx) => {
+    const apiKey = process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) throw failed('DEEPSEEK_API_KEY is not set');
+    const body = {
+      model:    DEEPSEEK_PHOTO_MODEL,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: PHOTO_PROMPT },
+        { type: 'image_url', image_url: { url: input.image } },
+      ] }],
+      response_format: { type: 'json_object' },
+      max_tokens:      4096,
+    };
+    const data = await postJSON(ctx, ctx.signal, DEEPSEEK_PHOTO_MODEL, DEEPSEEK_URL, { Authorization: `Bearer ${apiKey}` }, body);
+    const text = str(obj(obj(list(obj(data).choices)[0]).message).content);
+    if (!text.trim()) throw failed(`${DEEPSEEK_PHOTO_MODEL}: empty reply`);
+    return { reading: boxesToReading(parseLooseJSON(text), input.grid), model: DEEPSEEK_PHOTO_MODEL };
+  },
+};
+
+// Name → provider.
+const PROVIDERS = { fixture: fixtureProvider, gemini: geminiProvider, deepseek: deepseekProvider };
 
 // ── Reading v1 ───────────────────────────────────────────────
 const RAIL_SIGNS  = ['+', '-', '?'];
@@ -140,8 +297,9 @@ function record(dir, key, input, out) {
   }
 }
 
-// Resolves { reading, provider, model, fallback, notes }; fallback is true
-// when the answer didn't come from the first provider listed.
+// Resolves { reading, provider, model, fallback, notes, key }; fallback is
+// true when the answer didn't come from the first provider listed, and key
+// is the fixture key (null when the sample isn't a plain id).
 async function readPhoto(input, opts = {}) {
   const names       = opts.providers || photoProviders();
   const fixturesDir = opts.fixturesDir || FIXTURES_DIR;
@@ -153,7 +311,7 @@ async function readPhoto(input, opts = {}) {
     const file = loadFixture(fixturesDir, key);
     if (!file) return null;
     const { reading, notes } = validateReading(file.reading);
-    return { reading, provider: 'fixture', model: file.model, fallback: true, notes };
+    return { reading, provider: 'fixture', model: file.model, fallback: true, notes, key };
   };
 
   let out;
@@ -165,16 +323,18 @@ async function readPhoto(input, opts = {}) {
         try {
           const got = await p.read(input, { ...ctxBase, signal });
           const { reading, notes } = validateReading(got && got.reading);
-          return { reading, provider: p.name, model: got.model, fallback: i > 0, notes };
+          return { reading, provider: p.name, model: got.model, fallback: i > 0, notes, key };
         } catch (e) {
-          if (signal.aborted) throw e;
+          console.warn(`photo: ${p.name} failed: ${e.message}`);
+          if (signal.aborted || e.fatal) throw e;
         }
       }
       return null;
     });
   } catch (e) {
-    // Past the deadline a live read still falls back to a recording, for the stage.
-    const fixed = e.code === 'AI_TIMEOUT' && !replayOnly && fromFixture();
+    // Past the deadline, or after a bad request or key, a live read still
+    // falls back to a recording, for the stage.
+    const fixed = (e.code === 'AI_TIMEOUT' || e.fatal) && !replayOnly && fromFixture();
     if (fixed) return fixed;
     throw e;
   }
@@ -188,4 +348,4 @@ async function readPhoto(input, opts = {}) {
   throw failed('every photo provider failed');
 }
 
-module.exports = { readPhoto, validateReading, PROVIDERS, isSafeId };
+module.exports = { readPhoto, validateReading, parseLooseJSON, PROVIDERS, isSafeId };

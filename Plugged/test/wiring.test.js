@@ -612,3 +612,53 @@ test('docs/QA.md has an AI case for "Make an LED dimmer with a potentiometer"', 
   assert.equal(rows.length, 1, 'one QA row sends the dimmer prompt');
   assert.match(rows[0], /^\| AI-\d+ \|/, 'it is an AI prompt check (AI-NN)');
 });
+
+// ── Photo capture, issue #140 ─────────────────────────────────────
+//  photo-grid.js is a UMD module app.js's page uses, so it loads after ids.js
+//  and before app.js. photo.js is the DOM layer on top of the chat, after
+//  chat.js, with the sample photos' stored taps (samples/samples.js) before
+//  it. board-model.js stays off the page (the nets are checked in Node).
+//  photo-import.js uses Parts, Ids and App.BOARD_GEOMETRY, so it loads after
+//  the part files, board-geometry.js and ids.js, and before app.js.
+
+// The HTML of the element with this id, its own nested <div>s included.
+function elementHtml(html, id) {
+  const start = html.search(new RegExp(`<(\\w+)[^>]*\\bid="${id}"`));
+  if (start < 0) return null;
+  const tag = /^<(\w+)/.exec(html.slice(start))[1];
+  const re = new RegExp(`<${tag}\\b|</${tag}>`, 'g');
+  re.lastIndex = start;
+  let depth = 0, m;
+  while ((m = re.exec(html))) {
+    depth += m[0].startsWith('</') ? -1 : 1;
+    if (depth === 0) return html.slice(start, m.index + m[0].length);
+  }
+  return null;
+}
+
+test('the editor loads photo-grid.js and photo-import.js between ids.js and app.js, and samples/samples.js then photo.js after chat.js', () => {
+  const order = scriptOrder(read('circuit3d/index.html'));
+  const at = f => order.indexOf(f);
+  const list = order.join(', ');
+  for (const f of ['js/parts/registry.js', 'js/board-geometry.js', 'js/ids.js', 'js/photo-grid.js', 'js/photo-import.js',
+                   'js/app.js', 'js/chat.js', 'samples/samples.js', 'js/photo.js']) {
+    assert.ok(at(f) >= 0, `circuit3d/index.html loads ${f}: ${list}`);
+  }
+  assert.ok(at('js/ids.js') < at('js/photo-grid.js') && at('js/photo-grid.js') < at('js/app.js'),
+    `photo-grid.js loads after ids.js and before app.js: ${list}`);
+  assert.ok(at('js/ids.js') < at('js/photo-import.js') && at('js/photo-import.js') < at('js/app.js'),
+    `photo-import.js loads after ids.js and before app.js: ${list}`);
+  const lastPart = Math.max(...order.map((x, i) => (x.startsWith('js/parts/') ? i : -1)));
+  assert.ok(lastPart < at('js/photo-import.js') && at('js/board-geometry.js') < at('js/photo-import.js'),
+    `photo-import.js loads after every part file and board-geometry.js: ${list}`);
+  assert.ok(at('js/chat.js') < at('js/photo.js'), `photo.js loads after chat.js: ${list}`);
+  assert.ok(at('samples/samples.js') < at('js/photo.js'), `samples/samples.js loads before photo.js: ${list}`);
+  assert.ok(!order.some(f => /board-model\.js$/.test(f)), `board-model.js is not on the page: ${list}`);
+});
+
+test('the 📷 button sits in the chat input row', () => {
+  const row = elementHtml(read('circuit3d/index.html'), 'sparky-input-row');
+  assert.ok(row, 'circuit3d/index.html has #sparky-input-row');
+  assert.match(row, /<button\b[^>]*\bid="photo-btn"[^>]*>[\s\S]*?📷[\s\S]*?<\/button>/,
+    '#sparky-input-row holds <button id="photo-btn">📷</button>');
+});

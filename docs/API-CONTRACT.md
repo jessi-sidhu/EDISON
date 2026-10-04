@@ -415,7 +415,7 @@ photo.js  pick / drop / sample, corner taps → PhotoGrid.homography → PhotoGr
   - `image`: a JPEG, PNG or WebP data URL of the flattened image, at most 2,048 px wide.
   - `grid`: `{ cols, pitch, x0, y0, width, height }`, the flattened image's frame (the `PhotoGrid` grid's fields of the same names).
   - `sample`: a rehearsed photo's id (a `window.PhotoSamples` key, e.g. `'demo-board'`), when **Use sample photo** sent it.
-- **Response 200:** `{ reading, provider, model, ms }`. `reading` is a Reading v1 (below), with no actions. `provider` is `'gemini'`, `'deepseek'` or `'fixture'`; `model` the model that read it (a fixture gives the model it recorded); `ms` the server's time for the request.
+- **Response 200:** `{ reading, provider, model, ms, key }`. `reading` is a Reading v1 (below), with no actions. `provider` is `'gemini'`, `'deepseek'` or `'fixture'`; `model` the model that read it (a fixture gives the model it recorded); `ms` the server's time for the request; `key` the photo's fixture key (the `sample` id, else the hex SHA-256 of the image bytes; `null` for a sample that isn't a plain id).
 - **Errors:** body `{ reply, code }` (429 has no `code`). The page shows `reply` with the **Use sample photo** button.
 
 | Status | `code` | When | `reply` |
@@ -431,16 +431,17 @@ photo.js  pick / drop / sample, corner taps → PhotoGrid.homography → PhotoGr
 - **Body cap:** the body read moves into `readBody(req, res, max)`. `/api/photo` allows 4 MB (`4 * 1024 * 1024`); **`/api/ask` stays at 256 KB**.
 - **Rate limit:** `askRateLimited` becomes `rateLimited(req, hits, max)`; photos get their own map, 6 a minute per IP (`TRUST_PROXY` as for `/api/ask`).
 - **Providers:** `PHOTO_PROVIDERS`, tried in order, default `gemini,deepseek`. The names are in `.env.example`.
-  - `gemini`: model `PHOTO_GEMINI_MODEL` (a pinned version, never a `-latest` alias), key `GEMINI_API_KEY` in the `x-goog-api-key` header, JSON output with a response schema, the highest media resolution, 25 s per attempt.
+  - `gemini`: model `PHOTO_GEMINI_MODEL`, default `gemini-robotics-er-2-preview` (a pinned version, never a `-latest` alias), key `GEMINI_API_KEY` in the `x-goog-api-key` header, JSON output with a response schema, `MEDIA_RESOLUTION_ULTRA_HIGH` on the image, temperature 1, `maxOutputTokens` 32768 (its thinking counts toward it), 25 s per attempt.
+  - **The box prompt** (`backend/photo-prompt.js`, golden `test/fixtures/prompts/photo.txt`), the same for both readers: every part and wire with its type, a value guess, `conf` and a `box_2d [ymin, xmin, ymax, xmax]` on 0–1000 enclosing the item including its metal legs, plus each rail's printed sign by side. No leg points: each part's 2 leads and each wire's 2 ends **start at the midpoints of its box's short edges** (in pixels), `hole: '?'`, with `'leads'` in `unsure`; the page snaps them. Types other than resistor, LED and wire become `other`. A forgiving parser (`parseLooseJSON`) takes a fence, prose, stray braces, trailing commas or a bare list, but not cut-off JSON.
   - `deepseek`: `deepseek-flash` only, `json_object`, whatever time is left of `PHOTO_TIMEOUT_MS`. **Never `deepseek-v4-pro`**: it has no vision, so the #130 fallback (`DEEPSEEK_FALLBACK_MODEL`) never applies to this route.
   - **Falls back to the next provider** on a timeout, 5xx, 429, network error, empty reply, or invalid JSON or Reading. **Never** on a 4xx bad request or bad key.
-  - Each provider converts its own output to Reading v1 (Gemini answers `[y, x]` on 0–1000), then everything goes through `validateReading()`.
+  - Each provider converts its own output to Reading v1 (`box_2d` on 0–1000 → pixels: x = xn / 1000 · `grid.width`, y = yn / 1000 · `grid.height`), then everything goes through `validateReading()`.
 - **Fixtures** (`Plugged/test/fixtures/photo/<key>.json`): the key is the `sample` id, else the hex SHA-256 of the image bytes decoded from the data URL.
   - `PHOTO_PROVIDERS=fixture` replays only: no fixture for the key → 502 `AI_FAILED`.
-  - In live mode, when every provider fails and a fixture exists for the key, it is returned with `provider: 'fixture'`.
+  - In live mode, when every provider fails (or one fails on a bad request or key) and a fixture exists for the key, it is returned with `provider: 'fixture'`.
   - `PHOTO_RECORD=1` saves each live Reading as `{ sample, sha256, reading, provider, model }` (`sample` null when none). Fixtures store the **Reading**, so `PhotoImport` changes never make them stale.
 - **Logging:** one line per request, e.g. `[photo] sample=demo-board provider=gemini model=… 8.2s parts=3 wires=3 fallback=no 612KB`. Never the image or an upstream body.
-- **Mock:** `{ reading: <the mock Reading below>, provider: 'fixture', model: 'deepseek-flash', ms: 12 }`.
+- **Mock:** `{ reading: <the mock Reading below>, provider: 'fixture', model: 'deepseek-flash', ms: 12, key: 'demo-board' }`.
 
 ### Reading v1 (what `/api/photo` returns)
 The reader's first guess at the board. On the confirm screen Maya moves every wrong dot; the confirmed Reading (same shape) goes to `PhotoImport.build`.

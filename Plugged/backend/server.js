@@ -5,7 +5,7 @@
  * Run from backend/:  node server.js
  *
  * POST /api/ask            { markdown, message, history }  →  { reply, actions[] }
- * POST /api/photo          { image, grid, sample? }        →  { reading, provider, model, ms }
+ * POST /api/photo          { image, grid, sample? }        →  { reading, provider, model, ms, key }
  * GET  /api/health
  * GET  anything else       the app's static files
  */
@@ -1476,7 +1476,7 @@ async function handlePhoto(req, res) {
   }
   if (out.reading.board.visible === false) return fail('NO_BOARD', out);
   logPhoto({ sample, out, started, bytes });
-  return sendJSON(res, 200, { reading: out.reading, provider: out.provider, model: out.model, ms: Date.now() - started });
+  return sendJSON(res, 200, { reading: out.reading, provider: out.provider, model: out.model, ms: Date.now() - started, key: out.key });
 }
 
 // A sent board in the board-model shape; anything else is ignored, as

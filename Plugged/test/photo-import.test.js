@@ -1,5 +1,6 @@
-// PhotoImport core (issue #136): a confirmed photo Reading → the app's
-// actions, rails by printed sign, the battery, and the same circuit.
+// PhotoImport (issues #136, #137): a confirmed photo Reading → the app's
+// actions, rails by printed sign, the battery, the bridge, and the same
+// circuit.
 //
 // Contract these tests are written against (docs/API-CONTRACT.md → "Photo →
 // circuit (#134)" → "Reading v1", "Mock Reading (the demo board)" and
@@ -22,62 +23,33 @@
 //   running hole map (wire ends included) and Board.apply gives no errors;
 //   the built board's nets equal the Reading's; LED polarity is never changed.
 //
-// #136 scope: a part is placed only when both leads are body holes in one
-// half with the span in range (resistor 3–5, LED 1–3). Anything that needs
-// the bridge (a lead in a rail, span out of range, diagonal across the gap,
-// both leads in one node) is not built yet: a `mismatch` flag and listed in
-// `skipped`. The bridge is #137, which flips the "not built yet" tests.
+// The bridge (#137; the photo spec → "From Reading to board", step 6): a
+// part that can't sit on its two nodes (a lead in a rail, span out of range,
+// diagonal across the gap, both leads in one node) keeps one lead on its
+// real node, puts the other in a free helper column-half H (one the Reading
+// doesn't use) within span, and an add_wire jumper joins H to the other real
+// node. Both legs in rails → two helpers. Search order for H: the same half,
+// both sides, within span; then the same column across the gap. A bridged
+// part is flagged `moved` (`shorted` when both leads share a node); no free
+// helper → `mismatch`, not built. A 6th lead into a full column-half →
+// `position`, not built. A part standing straight across the gap in one
+// column is placed vertically as it is. Jumpers come after the battery
+// leads and before the Reading's wires.
 //
-// Everything below runs the app's real code: Parts, Board.apply, toSim,
+// The checks (checkInvariants, assertSameNets, …) live in
+// fixtures/photo-import-helpers.js, shared with photo-import-truth.test.js.
+// Everything runs the app's real code: Parts, Board.apply, toSim,
 // Sim.analyze, Readings. Nothing is mocked.
 
 const assert = require('node:assert');
 const fs     = require('node:fs');
 const path   = require('node:path');
 
-const Parts    = require('../circuit3d/js/parts');
-const Board    = require('../circuit3d/js/board-model.js');
-const Sim      = require('../circuit3d/js/simulate.js');
-const Readings = require('../circuit3d/js/readings.js');
-const GEOMETRY = require('../circuit3d/js/board-geometry.js');
-
-// Loaded lazily so each test reports on its own while the module is missing.
-let PhotoImport = null;
-try {
-  PhotoImport = require('../circuit3d/js/photo-import.js');
-} catch (e) {
-  if (!(e && e.code === 'MODULE_NOT_FOUND' && /photo-import/.test(e.message))) throw e;
-}
-
-function build(reading, components = []) {
-  assert.ok(PhotoImport, 'circuit3d/js/photo-import.js does not exist yet (#136)');
-  return PhotoImport.build(reading, { components });
-}
-
-// ── Reading v1 builders ──────────────────────────────────────────────────
-
-const BB830 = { aOuter: '+', aInner: '-', jInner: '+', jOuter: '-' };
-
-const lead = (hole, role = 'none') => ({ hole, pt: [0, 0], role });
-const end  = hole => ({ hole, pt: [0, 0] });
-
-const resistor = (id, a, b, value = 470) => ({
-  id, type: 'resistor', what: `${value} Ω resistor`, value, bands: [], color: '',
-  leads: [lead(a), lead(b)], box: [0, 0, 0, 0], confidence: 0.8, unsure: [],
-});
-// Leads in the order given; each { hole, role }.
-const ledOf = (id, leads, color = 'red') => ({
-  id, type: 'led', what: `${color} 5 mm LED`, value: 0, bands: [], color,
-  leads: leads.map(l => lead(l.hole, l.role)), box: [0, 0, 0, 0], confidence: 0.7, unsure: [],
-});
-const led = (id, cathode, anode, color = 'red') =>
-  ledOf(id, [{ hole: cathode, role: 'cathode' }, { hole: anode, role: 'anode' }], color);
-const wire = (id, color, a, b) => ({ id, color, ends: [end(a), end(b)], confidence: 0.9, unsure: [] });
-const battery = (plus, minus, volts = 9, kind = 'battery_9v') => ({ kind, volts, plus: end(plus), minus: end(minus), unsure: [] });
-
-function reading({ parts = [], wires = [], power = [], rails = BB830, cols = 63 } = {}) {
-  return { board: { visible: true, cols, rails: Object.assign({}, rails), split: false }, parts, wires, power };
-}
+const {
+  Board, build, BB830, lead, end, resistor, ledOf, led, wire, battery, reading,
+  ref, wiresOf, placesOf, kinds, skippedIds, hasFlag, jumpersOf,
+  checkInvariants, builtNets, assertSameNets, simulate, backwardsFor,
+} = require('./fixtures/photo-import-helpers.js');
 
 // The stage board (the photo spec's stage-board rule, #144): a 9 V battery
 // on the a-side rails, 470 Ω fully in the main holes with a jumper from the
@@ -100,133 +72,6 @@ function contractMockReading() {
   assert.ok(m, 'the Mock Reading section has no ```json block');
   return JSON.parse(m[1]);
 }
-
-// ── Checks ───────────────────────────────────────────────────────────────
-
-const HOLE = /^(?:([a-j])(\d+)|(tp|tn|bn|bp)_(\d+))$/;
-const ref  = h => { const m = HOLE.exec(String(h)); if (!m) return null; return m[1] ? { col: +m[2] - 1, row: m[1] } : { col: +m[4] - 1, row: m[3] }; };
-const BOARD = { cols: GEOMETRY.COLS, bodyRows: GEOMETRY.BODY_ROWS };
-const toolOf = def => (def.ai && def.ai.tool) || 'place_' + def.type;
-const defFor = tool => Parts.all().find(d => toolOf(d) === tool) || null;
-
-const wiresOf  = out => out.actions.filter(a => a.tool === 'add_wire');
-const placesOf = out => out.actions.filter(a => a.tool !== 'add_wire' && a.tool !== 'place_battery');
-const kinds    = out => out.flags.map(f => `${f.kind}:${f.id}`);
-const skippedIds = out => out.skipped.map(s => s.id);
-const hasFlag  = (out, kind, id) => out.flags.some(f => f.kind === kind && f.id === id);
-
-// The contract's invariants on any build: the order (battery, parts, wires;
-// no delete_all), zero refusals (every place_* passes Parts.checkPlacement in
-// order against the running hole map, wire ends included; no hole holds two
-// leads), and Board.apply gives no errors. → the built board.
-function checkInvariants(out) {
-  const { actions } = out;
-  assert.ok(Array.isArray(actions), `actions is not an array: ${JSON.stringify(out)}`);
-  assert.ok(!actions.some(a => a.tool === 'delete_all'), 'a photo build never emits delete_all');
-
-  const rank = a => (a.tool === 'place_battery' ? 0 : a.tool === 'add_wire' ? 2 : 1);
-  const ranks = actions.map(rank);
-  assert.deepStrictEqual(ranks, ranks.slice().sort((p, q) => p - q),
-    `actions must be the battery, then every part, then every wire; got ${actions.map(a => a.tool).join(', ')}`);
-
-  const map = new Map();
-  actions.forEach((a, i) => {
-    if (a.tool === 'add_wire') {
-      for (const h of [a.from, a.to]) {
-        const r = ref(h);
-        if (!r) continue;   // a BAT1.0-style pin end
-        assert.ok(!map.has(h), `action ${i} add_wire ${a.from}→${a.to}: ${h} already holds ${JSON.stringify(map.get(h))}`);
-        map.set(h, { wire: i });
-      }
-      return;
-    }
-    const def = defFor(a.tool);
-    assert.ok(def, `action ${i}: unknown tool ${a.tool}`);
-    if (def.place.kind !== 'span') return;
-    const legs = [a.holeA, a.holeB].map((h, k) => Object.assign({ pin: def.pins[k], hole: h }, ref(h)));
-    const check = Parts.checkPlacement(def.type, legs, map, BOARD);
-    assert.ok(check.ok, `action ${i} ${a.tool} ${a.holeA}/${a.holeB} refused: ${check.reason}`);
-    for (const l of legs) map.set(l.hole, { label: def.type, pin: l.pin });
-  });
-
-  const { board, errors } = Board.apply(Board.empty(), actions);
-  assert.deepStrictEqual(errors, [], `Board.apply errors: ${JSON.stringify(errors)}`);
-  return board;
-}
-
-// A Reading endpoint's node: column + half for a body hole, the strip for a
-// rail (each rail is one node). Truth only needs strips one to one, so the
-// Reading's own strip names do.
-function readingNode(hole) {
-  let m = /^([a-j])(\d+)$/.exec(hole);
-  if (m) return ('abcde'.includes(m[1]) ? 'top:' : 'bot:') + m[2];
-  m = /^rail:(\w+):\d+$/.exec(hole);
-  if (m) return 'rail:' + m[1];
-  return null;
-}
-
-// The Reading's terminals with the app pin each becomes: a resistor's
-// leads[k] → pin k (holeA, holeB); an LED's cathode → pin 'cathode', anode
-// → 'anode' (unknown roles: the first dot is the anode); a battery's plus
-// → pin 0, minus → pin 1.
-function terminals(rd, out) {
-  const terms = [];
-  const ledPins = Parts.get('led').pins;
-  for (const p of rd.parts) {
-    const label = out.labels[p.id];
-    if (!label || skippedIds(out).includes(p.id)) continue;
-    p.leads.forEach((l, k) => {
-      let pin = k;
-      if (p.type === 'led') {
-        const role = l.role === 'anode' || l.role === 'cathode' ? l.role : (k === 0 ? 'anode' : 'cathode');
-        pin = ledPins.indexOf(role);
-      }
-      terms.push({ name: `${p.id}.${k}`, node: readingNode(l.hole), label, pin });
-    });
-  }
-  rd.power.forEach((s, i) => {
-    const label = out.labels[`power:${i}`];
-    if (!label) return;
-    terms.push({ name: `power:${i}.plus`, node: readingNode(s.plus.hole), label, pin: 0 });
-    terms.push({ name: `power:${i}.minus`, node: readingNode(s.minus.hole), label, pin: 1 });
-  });
-  return terms;
-}
-
-// Same nets: two terminals are joined in the Reading (union-find over its
-// nodes through its built wires) exactly when they are joined on the built
-// board (the solver's own graph).
-function assertSameNets(rd, out, board) {
-  const parent = new Map();
-  const find = x => { if (!parent.has(x)) parent.set(x, x); while (parent.get(x) !== x) x = parent.get(x); return x; };
-  for (const w of rd.wires) {
-    if (skippedIds(out).includes(w.id)) continue;
-    parent.set(find(readingNode(w.ends[0].hole)), find(readingNode(w.ends[1].hole)));
-  }
-  const sim = Board.toSim(board);
-  const built = {};
-  Sim.buildGraph(sim.components, sim.wires).forEach(g => { built[g.comp.label] = g.nodes.slice(); });
-
-  const terms = terminals(rd, out);
-  assert.ok(terms.length >= 2, `no built terminals to compare: labels ${JSON.stringify(out.labels)}`);
-  const bad = [];
-  for (let i = 0; i < terms.length; i++) for (let j = i + 1; j < terms.length; j++) {
-    const a = terms[i], b = terms[j];
-    assert.ok(built[a.label], `${a.label} is not on the built board`);
-    const t = find(a.node) === find(b.node);
-    const g = built[a.label][a.pin] === built[b.label][b.pin];
-    if (t !== g) bad.push(`${a.name} & ${b.name}: Reading ${t ? 'joined' : 'apart'}, built ${g ? 'joined' : 'apart'}`);
-  }
-  assert.deepStrictEqual(bad, [], 'the built board must have the Reading\'s nets');
-}
-
-function simulate(board) {
-  const sim = Board.toSim(board);
-  const r = Sim.analyze(sim.components, sim.wires);
-  return { r, problems: Readings.from(r, sim).problems() };
-}
-
-const backwardsFor = (problems, label) => problems.some(p => p.kind === 'backwards' && p.labels.includes(label));
 
 // ── The stage board: exact output, the same circuit, what it simulates ──
 
@@ -300,23 +145,37 @@ test('an LED whose leads have unknown roles takes the first dot as the anode, fl
   assertSameNets(rd, out, checkInvariants(out));
 });
 
-// ── The contract's mock Reading, in #136 (no bridge yet) ─────────────────
+// ── The contract's mock Reading: R1's rail lead takes the bridge ─────────
 
-test('the contract\'s mock Reading (#136, no bridge yet): R1\'s rail lead leaves it unbuilt with a mismatch flag; LED1 still built backwards', () => {
+test('the contract\'s mock Reading builds to the contract\'s mock output: R1 bridged with a white jumper (W3), flagged moved', () => {
   const rd = contractMockReading();
   const out = build(rd);
   assert.deepStrictEqual(out.actions, [
     { tool: 'place_battery', voltage: 9 },
-    { tool: 'place_led', holeA: 'c14', holeB: 'c17', color: 'red' },
-    { tool: 'add_wire', from: 'BAT1.0', to: 'tp_3', color: 'red' },
-    { tool: 'add_wire', from: 'BAT1.1', to: 'tn_3', color: 'black' },
-    { tool: 'add_wire', from: 'b17', to: 'tn_19', color: 'black' },
+    { tool: 'place_resistor', holeA: 'a10', holeB: 'a14', resistance: 470 },   // bridged: its + lead is in a rail
+    { tool: 'place_led', holeA: 'c14', holeB: 'c17', color: 'red' },           // cathode c14: backwards, as photographed
+    { tool: 'add_wire', from: 'BAT1.0', to: 'tp_3', color: 'red' },           // W1
+    { tool: 'add_wire', from: 'BAT1.1', to: 'tn_3', color: 'black' },         // W2
+    { tool: 'add_wire', from: 'b10', to: 'tp_10', color: 'white' },           // W3, the bridge jumper
+    { tool: 'add_wire', from: 'b17', to: 'tn_19', color: 'black' },           // W4, the Reading's W1
   ]);
-  // R1 is not built, so it has no app label; the Reading's W1 is the third add_wire.
-  assert.deepStrictEqual(out.labels, { 'power:0': 'BAT1', LED1: 'LED1', W1: 'W3' });
-  assert.deepStrictEqual(kinds(out), ['mismatch:R1']);
-  assert.deepStrictEqual(out.skipped.map(s => [s.id, s.type]), [['R1', 'resistor']]);
+  assert.deepStrictEqual(out.labels, { 'power:0': 'BAT1', R1: 'R1', LED1: 'LED1', W1: 'W4' });
+  assert.deepStrictEqual(kinds(out), ['moved:R1']);
+  assert.match(String(out.flags[0].why), /jumper/i, 'the contract\'s why: "…drawn with a jumper…"');
+  assert.deepStrictEqual(out.skipped, []);
   assertSameNets(rd, out, checkInvariants(out));
+});
+
+test('the contract\'s mock Reading simulates with LED1 dark and backwards; flipped in the app, about 14.9 mA', () => {
+  const board = checkInvariants(build(contractMockReading()));
+  const back = simulate(board);
+  const m = back.r.parts.LED1.m;
+  assert.ok(!m.on && Math.abs(m.current) < 0.01, `backwards LED1 expected dark, got on=${m.on} ${m.current}`);
+  assert.ok(backwardsFor(back.problems, 'LED1'), `expected a backwards problem for LED1, got ${JSON.stringify(back.problems)}`);
+  const flipped = JSON.parse(JSON.stringify(board));
+  flipped.parts.find(p => p.label === 'LED1').holes.reverse();
+  const f = simulate(flipped).r.parts.LED1.m;
+  assert.ok(f.on && f.current > 14.8 && f.current < 15.0, `flipped LED1 expected on at 14.8–15.0 mA, got on=${f.on} ${f.current}`);
 });
 
 // ── Rails by side and printed sign ───────────────────────────────────────
@@ -493,22 +352,268 @@ test('a part of type other is not built: flagged type, listed in skipped, later 
   checkInvariants(out);
 });
 
-// #136 only: these all need the bridge (#137), which builds them instead.
+// ── The bridge (#137) ────────────────────────────────────────────────────
+
+const BAT_A = () => [battery('rail:aOuter:3', 'rail:aInner:3')];
+const R_MA  = 9 / 470 * 1000;   // 9 V across 470 Ω: 19.15 mA
+const amps  = (board, label) => Math.abs(simulate(board).r.parts[label].m.current);
+const builtOk = (out, id) => assert.ok(out.labels[id],
+  `${id} must be built; got flags ${JSON.stringify(kinds(out))}, skipped ${JSON.stringify(out.skipped.map(s => s.id))}`);
+
+// These were "not built yet" (mismatch) in #136; the bridge builds them.
 test.each([
-  { name: 'a lead in a rail',                id: 'R1', part: resistor('R1', 'rail:aOuter:10', 'a14') },
-  { name: 'leads 8 columns apart',            id: 'R1', part: resistor('R1', 'a10', 'a18') },
-  { name: 'diagonal across the centre gap',   id: 'R1', part: resistor('R1', 'a10', 'h13') },
-  { name: 'both leads in one column-half',    id: 'LED1', part: led('LED1', 'a14', 'c14') },
-])('#136, no bridge yet: a part that needs one is not built, flagged mismatch and listed in skipped ($name)', ({ id, part }) => {
-  const rd = reading({ parts: [part, resistor('R2', 'a30', 'a34')], wires: [wire('W1', 'red', 'rail:aOuter:30', 'b30')],
-                       power: [battery('rail:aOuter:3', 'rail:aInner:3')] });
+  { name: 'a lead in a rail',                id: 'R1',   flag: 'moved',   part: resistor('R1', 'rail:aOuter:10', 'a14') },
+  { name: 'leads 8 columns apart',            id: 'R1',   flag: 'moved',   part: resistor('R1', 'a10', 'a18') },
+  { name: 'diagonal across the centre gap',   id: 'R1',   flag: 'moved',   part: resistor('R1', 'a10', 'h13') },
+  { name: 'both leads in one column-half',    id: 'LED1', flag: 'shorted', part: led('LED1', 'a14', 'c14') },
+])('a part that needs the bridge is built with one white jumper between the battery leads and the Reading\'s wires, flagged $flag ($name)', ({ id, flag, part }) => {
+  const rd = reading({ parts: [part, resistor('R2', 'a30', 'a34')], wires: [wire('W1', 'red', 'rail:aOuter:30', 'b30')], power: BAT_A() });
   const out = build(rd);
-  assert.deepStrictEqual(placesOf(out), [{ tool: 'place_resistor', holeA: 'a30', holeB: 'a34', resistance: 470 }]);
-  assert.ok(hasFlag(out, 'mismatch', id), `expected a mismatch flag for ${id}, got ${JSON.stringify(kinds(out))}`);
+  builtOk(out, id);
+  assert.deepStrictEqual(out.skipped, []);
+  assert.ok(hasFlag(out, flag, id), `expected a ${flag} flag for ${id}, got ${JSON.stringify(kinds(out))}`);
+  assert.ok(!out.flags.some(f => f.kind === 'mismatch'), `no mismatch: a helper is free; got ${JSON.stringify(kinds(out))}`);
+  assert.ok(placesOf(out).some(a => a.holeA === 'a30' && a.holeB === 'a34'), 'R2 still sits where it was photographed');
+  const jumpers = jumpersOf(out);
+  assert.deepStrictEqual(jumpers.map(w => w.color), ['white'], `one white jumper; got ${JSON.stringify(wiresOf(out))}`);
+  assert.strictEqual(wiresOf(out).indexOf(jumpers[0]), 2, 'the jumper comes right after the two battery leads');
+  assert.strictEqual(out.labels.W1, 'W4', 'the Reading\'s W1 counts the battery leads and the jumper first');
+  assertSameNets(rd, out, checkInvariants(out));
+});
+
+// Pin (already in #136): the bridge must not take over a part that fits.
+test('pin: a diagonal resistor c10→e14 in one half sits on one row of columns 10 and 14, no jumper, flagged moved', () => {
+  const rd = reading({ parts: [resistor('R1', 'c10', 'e14')], power: BAT_A(),
+                       wires: [wire('W1', 'red', 'rail:aOuter:10', 'a10'), wire('W2', 'black', 'a14', 'rail:aInner:14')] });
+  const out = build(rd);
+  const [p] = placesOf(out);
+  const A = ref(p.holeA), B = ref(p.holeB);
+  assert.ok(A.row === B.row && 'abcde'.includes(A.row) && A.col === 9 && B.col === 13, `R1 expected on one a–e row, columns 10 and 14; got ${p.holeA}/${p.holeB}`);
+  assert.deepStrictEqual(jumpersOf(out), []);
+  assert.ok(hasFlag(out, 'moved', 'R1'), `expected a moved flag for R1, got ${JSON.stringify(kinds(out))}`);
+  const board = checkInvariants(out);
+  assertSameNets(rd, out, board);
+  assert.ok(Math.abs(amps(board, 'R1') - R_MA) < 0.05, `R1 expected ${R_MA.toFixed(2)} mA, got ${amps(board, 'R1')}`);
+});
+
+test('an 8-column resistor a10→a18 is bridged: one white jumper, flagged moved, 9 V / 470 Ω flows; a corrupted jumper breaks the nets check', () => {
+  const rd = reading({ parts: [resistor('R1', 'a10', 'a18')], power: BAT_A(),
+                       wires: [wire('W1', 'red', 'rail:aOuter:10', 'b10'), wire('W2', 'black', 'b18', 'rail:aInner:18')] });
+  const out = build(rd);
+  builtOk(out, 'R1');
+  assert.ok(hasFlag(out, 'moved', 'R1'), `expected a moved flag for R1, got ${JSON.stringify(kinds(out))}`);
+  assert.deepStrictEqual(jumpersOf(out).map(w => w.color), ['white']);
+  const board = checkInvariants(out);
+  assertSameNets(rd, out, board);
+  assert.ok(Math.abs(amps(board, 'R1') - R_MA) < 0.05, `R1 expected ${R_MA.toFixed(2)} mA, got ${amps(board, 'R1')}`);
+
+  // Negative control: move the jumper's body end one column; the nets check must catch it.
+  const bad = JSON.parse(JSON.stringify(out));
+  const j = jumpersOf(bad)[0];
+  const next = h => h.replace(/\d+$/, n => String(+n + 1));
+  if (/^[a-j]\d+$/.test(j.to)) j.to = next(j.to); else j.from = next(j.from);
+  assert.throws(() => assertSameNets(rd, bad, Board.apply(Board.empty(), bad.actions).board), /nets/);
+});
+
+test('an LED with both legs in one column-half is bridged, flagged shorted: its pins share one net and it simulates dark', () => {
+  const rd = reading({ parts: [resistor('R1', 'b16', 'b20'), led('LED1', 'c20', 'd20')], power: BAT_A(),
+                       wires: [wire('W1', 'red', 'rail:aOuter:16', 'a16'), wire('W2', 'black', 'e20', 'rail:aInner:20')] });
+  const out = build(rd);
+  builtOk(out, 'LED1');
+  assert.ok(hasFlag(out, 'shorted', 'LED1'), `expected a shorted flag for LED1, got ${JSON.stringify(kinds(out))}`);
+  assert.deepStrictEqual(jumpersOf(out).map(w => w.color), ['white']);
+  const board = checkInvariants(out);
+  assertSameNets(rd, out, board);
+  const n = builtNets(board).LED1;
+  assert.strictEqual(n[0], n[1], 'LED1\'s two pins must be on one net');
+  const m = simulate(board).r.parts.LED1.m;
+  assert.ok(!m.on && Math.abs(m.current) < 0.01, `shorted LED1 expected dark, got on=${m.on} ${m.current}`);
+  assert.ok(Math.abs(amps(board, 'R1') - R_MA) < 0.05, `R1 expected ${R_MA.toFixed(2)} mA through the short, got ${amps(board, 'R1')}`);
+});
+
+test('a resistor with both legs in rails (+ to −) is bridged through two helpers: two white jumpers, flagged moved, 9 V / 470 Ω flows', () => {
+  const rd = reading({ parts: [resistor('R1', 'rail:aOuter:10', 'rail:aInner:14')], power: BAT_A() });
+  const out = build(rd);
+  builtOk(out, 'R1');
+  assert.ok(hasFlag(out, 'moved', 'R1'), `expected a moved flag for R1, got ${JSON.stringify(kinds(out))}`);
+  assert.deepStrictEqual(jumpersOf(out).map(w => w.color), ['white', 'white']);
+  const board = checkInvariants(out);
+  assertSameNets(rd, out, board);
+  assert.ok(Math.abs(amps(board, 'R1') - R_MA) < 0.05, `R1 expected ${R_MA.toFixed(2)} mA, got ${amps(board, 'R1')}`);
+});
+
+test('a resistor with both legs in one rail is built, flagged shorted, its pins on one net', () => {
+  const rd = reading({ parts: [resistor('R1', 'rail:aOuter:10', 'rail:aOuter:14')], power: BAT_A() });
+  const out = build(rd);
+  builtOk(out, 'R1');
+  assert.ok(hasFlag(out, 'shorted', 'R1'), `expected a shorted flag for R1, got ${JSON.stringify(kinds(out))}`);
+  const board = checkInvariants(out);
+  assertSameNets(rd, out, board);
+  const n = builtNets(board).R1;
+  assert.strictEqual(n[0], n[1], 'R1\'s two pins must be on one net');
+});
+
+// Column 30 a–e holds five leads (R1–R5); one more can't fit.
+const FIVE = () => [resistor('R1', 'a30', 'a26'), resistor('R2', 'b30', 'b27'), resistor('R3', 'c30', 'c35'),
+                    resistor('R4', 'd30', 'd34'), resistor('R5', 'e30', 'e33')];
+test.each([
+  { name: 'a sixth resistor lead', id: 'R6', parts: [resistor('R6', 'c30', 'c25')], wires: [] },
+  { name: 'pin: a wire end',       id: 'W1', parts: [], wires: [wire('W1', 'green', 'c30', 'rail:aInner:30')] },
+])('a 6th lead into a full column-half is not built, flagged position (not mismatch); the five are built ($name)', ({ id, parts, wires }) => {
+  const rd = reading({ parts: FIVE().concat(parts), wires, power: BAT_A() });
+  const out = build(rd);
+  assert.ok(hasFlag(out, 'position', id), `expected a position flag for ${id}, got ${JSON.stringify(kinds(out))}`);
+  assert.ok(!out.flags.some(f => f.kind === 'mismatch'), `a full column-half is position, not mismatch; got ${JSON.stringify(kinds(out))}`);
   assert.deepStrictEqual(skippedIds(out), [id]);
   assert.strictEqual(out.labels[id], undefined);
-  assert.strictEqual(out.labels.R2, 'R1', 'a skipped part shifts later numbers');
+  for (const k of ['R1', 'R2', 'R3', 'R4', 'R5']) assert.strictEqual(out.labels[k], k);
   assertSameNets(rd, out, checkInvariants(out));
+});
+
+// A part straight across the gap in one column is legal as it is (the
+// registry allows a vertical placement across the gap, e.g. e3→f3).
+test.each([
+  { name: 'a resistor e10–f10',            part: resistor('R1', 'e10', 'f10'), want: { tool: 'place_resistor', holeA: 'e10', holeB: 'f10', resistance: 470 } },
+  { name: 'a resistor c10–h10',            part: resistor('R1', 'c10', 'h10'), want: { tool: 'place_resistor', holeA: 'c10', holeB: 'h10', resistance: 470 } },
+  { name: 'an LED, cathode e3, anode f3',  part: led('LED1', 'e3', 'f3'),      want: { tool: 'place_led', holeA: 'e3', holeB: 'f3', color: 'red' } },
+])('a part standing straight across the gap in one column is placed vertically as it is: no jumper, no flags ($name)', ({ part, want }) => {
+  const rd = reading({ parts: [part], power: BAT_A() });
+  const out = build(rd);
+  assert.deepStrictEqual(placesOf(out), [want]);
+  assert.deepStrictEqual(out.flags, []);
+  assert.deepStrictEqual(out.skipped, []);
+  assert.deepStrictEqual(jumpersOf(out), []);
+  assertSameNets(rd, out, checkInvariants(out));
+});
+
+test('pin: a wire e10 → f10 across the gap is built as given and joins the halves: R1 and R2 in series, 9 V / 940 Ω', () => {
+  const rd = reading({
+    parts: [resistor('R1', 'a6', 'a10'), resistor('R2', 'j10', 'j14')],
+    wires: [wire('W1', 'yellow', 'e10', 'f10'), wire('W2', 'red', 'rail:aOuter:6', 'b6'), wire('W3', 'black', 'i14', 'rail:jOuter:14')],
+    power: [battery('rail:aOuter:2', 'rail:jOuter:2')],
+  });
+  const out = build(rd);
+  assert.ok(wiresOf(out).some(w => w.from === 'e10' && w.to === 'f10'), `expected add_wire e10 → f10: ${JSON.stringify(wiresOf(out))}`);
+  assert.deepStrictEqual(jumpersOf(out), []);
+  assert.deepStrictEqual(out.skipped, []);
+  const board = checkInvariants(out);
+  assertSameNets(rd, out, board);
+  assert.ok(Math.abs(amps(board, 'R1') - 9 / 940 * 1000) < 0.05, `R1 expected 9.57 mA, got ${amps(board, 'R1')}`);
+});
+
+test('on a 30-column board the bridge stays within the board\'s 30 columns (on 63 it may use column 31)', () => {
+  // R1's rail lead (− rail, column 30) needs a helper 3–5 columns from
+  // column 28: toward the rail end that is 31, past a 30-column board, so
+  // there the helper is 25.
+  const at = cols => reading({
+    cols,
+    parts: [resistor('R1', 'a28', 'rail:aInner:30')],
+    power: [battery('rail:aOuter:2', 'rail:aInner:2')],
+  });
+  const rd = at(30);
+  const out = build(rd);
+  builtOk(out, 'R1');
+  assert.deepStrictEqual(out.skipped, []);
+  assert.deepStrictEqual(placesOf(out), [{ tool: 'place_resistor', holeA: 'a28', holeB: 'a25', resistance: 470 }]);
+  const jumpers = jumpersOf(out);
+  assert.strictEqual(jumpers.length, 1);
+  assert.strictEqual(ref(jumpers[0].from).col + 1, 25, `the jumper starts at the helper, column 25: ${JSON.stringify(jumpers[0])}`);
+  const cols = out.actions.flatMap(a => [a.holeA, a.holeB, a.from, a.to]).map(ref).filter(Boolean).map(r => r.col + 1);
+  assert.ok(cols.every(c => c <= 30), `every hole must be in columns 1–30; got columns ${cols.join(', ')}`);
+  assertSameNets(rd, out, checkInvariants(out));
+
+  // The same Reading on a 63-column board takes the helper at 31: the limit is what moved it.
+  const wide = build(at(63));
+  const [p] = placesOf(wide);
+  assert.strictEqual(ref(p.holeB).col + 1, 31, `on 63 columns the helper is column 31; got ${p.holeA}/${p.holeB}`);
+});
+
+test('when no same-half helper is free within span, the helper is the same column across the gap: the part stands vertically', () => {
+  // Every top column-half 3–5 away from column 10 or 18 is in use.
+  const wires = [5, 6, 7, 13, 14, 15, 21, 22, 23].map(c => wire('X' + c, 'yellow', 'e' + c, 'f' + c));
+  const rd = reading({ parts: [resistor('R1', 'a10', 'a18')], wires, power: BAT_A() });
+  const out = build(rd);
+  builtOk(out, 'R1');
+  const [p] = placesOf(out);
+  const A = ref(p.holeA), B = ref(p.holeB);
+  assert.ok(A.col === B.col && [9, 17].includes(A.col) && 'abcde'.includes(A.row) !== 'abcde'.includes(B.row),
+    `R1 expected vertical across the gap in column 10 or 18; got ${p.holeA}/${p.holeB}`);
+  assert.strictEqual(jumpersOf(out).length, 1);
+  assert.ok(hasFlag(out, 'moved', 'R1'), `expected a moved flag for R1, got ${JSON.stringify(kinds(out))}`);
+  assertSameNets(rd, out, checkInvariants(out));
+});
+
+// Passes before the bridge exists (nothing is bridged yet); guards the
+// no-helper path once it does.
+test('no free helper column-half anywhere: the part is not built, flagged mismatch, listed in skipped', () => {
+  const wires = [];
+  for (let c = 1; c <= 63; c++) wires.push(wire('X' + c, 'yellow', 'e' + c, 'f' + c));   // every column-half in use
+  const rd = reading({ parts: [resistor('R1', 'b10', 'b18'), resistor('R2', 'a40', 'a44')], wires });
+  const out = build(rd);
+  assert.ok(hasFlag(out, 'mismatch', 'R1'), `expected a mismatch flag for R1, got ${JSON.stringify(kinds(out))}`);
+  assert.deepStrictEqual(skippedIds(out), ['R1']);
+  assert.strictEqual(out.labels.R1, undefined);
+  assert.strictEqual(out.labels.R2, 'R1', 'a skipped part shifts later numbers');
+  assert.deepStrictEqual(jumpersOf(out), []);
+  assertSameNets(rd, out, checkInvariants(out));
+});
+
+// ── Property: 200 random Readings (seeded, so the same every run) ────────
+// Resistors and LEDs with random holes (body columns 1–40, a fifth in a
+// rail), spans 0–6 columns, any rows, random polarity (sometimes unknown),
+// random wires, a battery on random rail strips. Zero refusals and the
+// Reading's nets always (stronger than the issue's "unless `type` or
+// `mismatch`": unbuilt parts are left out of the terminals); and the bridge
+// must actually build: at least 97% of the parts (the prototype built all).
+
+function mulberry32(a) {
+  return () => {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+test('property: 200 random Readings build with zero refusals and the Reading\'s nets, and nearly every part is built', () => {
+  const next = mulberry32(137);
+  const rnd  = n => Math.floor(next() * n);
+  const STRIPS = ['aOuter', 'aInner', 'jInner', 'jOuter'], ROWS = 'abcdefghij';
+  const rail = () => `rail:${STRIPS[rnd(4)]}:${1 + rnd(63)}`;
+  const hole = () => (rnd(5) === 0 ? rail() : ROWS[rnd(10)] + (1 + rnd(40)));
+  const near = h => (h.startsWith('rail') ? hole() : ROWS[rnd(10)] + Math.max(1, Math.min(63, +h.slice(1) + rnd(13) - 6)));
+
+  const fails = [];
+  let parts = 0, built = 0, jumpers = 0;
+  for (let k = 0; k < 200; k++) {
+    const ps = [], ws = [];
+    for (let i = 0, n = 2 + rnd(8); i < n; i++) {
+      const a = hole(), b = near(a);
+      if (rnd(2)) { ps.push(resistor('R' + i, a, b)); continue; }
+      const roles = rnd(4) === 0 ? ['unknown', 'unknown'] : rnd(2) ? ['cathode', 'anode'] : ['anode', 'cathode'];
+      ps.push(ledOf('L' + i, [{ hole: a, role: roles[0] }, { hole: b, role: roles[1] }]));
+    }
+    for (let i = 0, n = rnd(6); i < n; i++) { const a = hole(); ws.push(wire('W' + i, 'yellow', a, near(a))); }
+    const rd = reading({ parts: ps, wires: ws, power: [battery(rail(), rail())] });
+
+    let out;
+    try { out = build(rd); } catch (e) { fails.push(`#${k} threw ${e.message}`); continue; }
+    try {
+      const board = checkInvariants(out);
+      assertSameNets(rd, out, board);   // every Reading: unbuilt parts are left out of the terminals
+    } catch (e) {
+      fails.push(`#${k}: ${String(e.message).split('\n')[0]} ${JSON.stringify(rd.parts.map(p => [p.id, p.leads.map(l => l.hole)]))}`);
+    }
+    for (const p of ps) {
+      if (out.labels[p.id]) built++;
+      else if (!skippedIds(out).includes(p.id)) fails.push(`#${k}: ${p.id} is neither built nor listed in skipped`);
+    }
+    parts += ps.length;
+    jumpers += jumpersOf(out).length;
+  }
+  assert.deepStrictEqual(fails, [], fails.slice(0, 5).join('\n'));
+  assert.ok(built / parts >= 0.97, `only ${built} of ${parts} parts built (${(100 * built / parts).toFixed(1)}%); the bridge should build at least 97%`);
+  assert.ok(jumpers > 0, 'the random Readings must exercise the bridge');
 });
 
 // ── Malformed input, missing ids and duplicates ──────────────────────────
