@@ -730,3 +730,86 @@ test(`docs/QA.md has one AI case for "${QA_PROMPT}"`, () => {
   assert.equal(rows.length, 1, 'one QA row sends the Zener prompt');
   assert.match(rows[0], /^\| AI-\d+ \|/, 'it is an AI prompt check (AI-NN)');
 });
+
+// ── #74: a reversed Zener in series with an LED (the threshold indicator) ──
+// findCircuitProblems' path search let every D conduct forward only, so a
+// Zener in breakdown (cathode → anode) cut the LED off: "LED1 has no forward
+// path from + to −". The simulator lights it. A D with a vz conducts both
+// ways in the path search; a plain diode (no vz) still does not.
+//
+// Hand-computed, red LED (vf 2.0, 0.1 Ω), 470 Ω, 5.1 V Zener (0.1 Ω):
+//   12 V bench supply: I = (12 − 2.0 − 5.1) / 470.2 = 4.9 / 470.2 = 10.421 mA,
+//                      the Zener holds 5.1 + 0.1 × 0.010421 = 5.10104 V;
+//   9 V battery:       I = (9 − 2.0 − 5.1) / 470.2 = 1.9 / 470.2 = 4.0408 mA,
+//                      the Zener holds 5.10040 V.
+// With the bench supply the ground rail is also the + of its com → neg
+// source, so today the Zener-first order reads as a false "backwards" LED
+// rather than "no forward path"; either is the false Heads up.
+
+// The LED, cathode in holeA, anode in holeB.
+const placeLed = (cathode, anode) => ({ tool: 'place_led', holeA: cathode, holeB: anode });
+const problemsOf = actions => Server.findCircuitProblems(actions.map(a => ({ ...a })));
+const noForwardPath = at => `The LED at ${at} has no forward path from + to −`;
+
+// tp_2 → a2; R1 470 Ω b2–b6; then `chain` from column 6 to `end`; a<end> → tn_<end>.
+const indicator = (chain, end, source = supply()) => source.concat([
+  wire('tp_2', 'a2', 'red'),
+  { tool: 'place_resistor', holeA: 'b2', holeB: 'b6', resistance: 470 },
+  ...chain,
+  wire(`a${end}`, `tn_${end}`, 'black'),
+]);
+
+// LED first: LED anode c6, cathode c8; Zener cathode d8 (toward the LED), anode d12.
+const LED_THEN_ZENER = [placeLed('c8', 'c6'), placeZener('d8', 'd12')];
+// Zener first: Zener cathode c6 (toward +), anode c10; LED anode d10, cathode d12.
+const ZENER_THEN_LED = [placeZener('c6', 'c10'), placeLed('d12', 'd10')];
+
+for (const [name, chain, at] of [
+  ['+ → R → LED → Zener (reversed) → −', LED_THEN_ZENER, 'c8/c6'],
+  ['+ → R → Zener (reversed) → LED → −', ZENER_THEN_LED, 'd12/d10'],
+]) {
+  for (const [src, source, mA, volts] of [
+    ['12 V bench supply', supply(), 10.421, 5.10104],
+    ['9 V battery', battery(), 4.0408, 5.10040],
+  ]) {
+    test(`#74 threshold indicator ${name}, ${src}: the LED lights at ${mA} mA and findCircuitProblems says nothing`, () => {
+      const build = indicator(chain, 12, source);
+      const { r } = solveBuild(build);
+      const led = part(r, 'LED1'), z = part(r, 'ZD1');
+      assert.equal(led.m.on, true, `LED1 lights in the simulator: ${JSON.stringify(led.m)}`);
+      near(led.m.current, mA, 0.02, 'LED1 mA: (V − 2.0 − 5.1) / 470.2');
+      assert.equal(z.m.mode, 'breakdown', JSON.stringify(z.m));
+      near(z.m.voltage, volts, 0.001, 'ZD1 V');
+      const got = problemsOf(build);
+      assert.ok(!got.some(p => p.includes(noForwardPath(at))), `false "no forward path" for a lit LED: ${JSON.stringify(got)}`);
+      assert.deepStrictEqual(got, [], 'no Heads up for a lit LED');
+    });
+  }
+}
+
+// Pins (pass today): the fix must key on vz, not let every diode conduct
+// backwards, and must not hide a truly backwards LED.
+test('#74 pin: an LED behind a reversed 1N4148 (no vz) is dark and still gets "no forward path"', () => {
+  // LED anode c6, cathode c8; D1 cathode d8 (toward the LED), anode d12.
+  const build = indicator([placeLed('c8', 'c6'), { tool: 'place_diode', holeA: 'd8', holeB: 'd12' }], 12);
+  const { r } = solveBuild(build);
+  assert.equal(part(r, 'LED1').m.on, false, 'the reversed 1N4148 blocks the LED');
+  const got = problemsOf(build);
+  assert.ok(got.some(p => p.includes(noForwardPath('c8/c6'))), JSON.stringify(got));
+});
+
+test('#74 pin: a backwards LED in series with a reversed Zener still gets a problem naming it', () => {
+  // LED cathode c6 (toward +), anode c8; Zener cathode d8, anode d12.
+  const got = problemsOf(indicator([placeLed('c6', 'c8'), placeZener('d8', 'd12')], 12));
+  assert.ok(got.some(p => p.includes('The LED at c6/c8')), JSON.stringify(got));
+});
+
+for (const [name, chain, end] of [
+  ['+ → R → LED → −', [placeLed('c8', 'c6')], 8],
+  ['+ → R → LED → 1N4148 (forward) → −', [placeLed('c8', 'c6'), { tool: 'place_diode', holeA: 'd12', holeB: 'd8' }], 12],
+]) {
+  test(`#74 pin: a correctly wired LED (${name}) has no circuit problems`, () => {
+    zener();
+    assert.deepStrictEqual(problemsOf(indicator(chain, end)), []);
+  });
+}

@@ -530,9 +530,27 @@ test('the built system prompt says "Columns 1-63"', () => {
   assert.doesNotMatch(prompt, /Columns 1-50\b/, 'the old 50-column line is still there');
 });
 
-test('the built system prompt has no 50 left in it', () => {
-  const hits = promptText().split('\n').filter(l => /\b50\b/.test(l));
-  assert.deepEqual(hits, [], 'lines still mentioning 50');
+// A leftover of the OLD 50-column board: 50 as a column or board count
+// ("50 columns", "column 50", "Columns 1-50", "a 50-column board", "tp_50",
+// "_50"). Not a part's value: 50 followed by a unit ("default 50 mA", the
+// motor's start current, #37) is fine. Not part of a longer number (500, 150,
+// 0.50) either.
+const OLD_BOARD_50 = /(?<![\d.])50(?!\d)(?!\s?(?:(?:mA|µA|uA|A|V|W|ohms?)(?![A-Za-z])|[Ω%°]))/;
+
+test('OLD_BOARD_50 catches 50 as a column or board count, and lets 50 with a unit through', () => {
+  for (const line of ['on a 50-column board', 'wire to tp_50', 'tn_50', 'bp_50 and bn_50', 'column 50',
+    'the board has 50 columns', '- Columns 1-50. Rows a/b/c/d/e = top half.', 'holes a50 to e50']) {
+    assert.match(line, OLD_BOARD_50, `a board leftover: "${line}"`);
+  }
+  for (const line of ['- place_motor startCurrent: 1 mA–2 A, in amps (default 50 mA)', 'a 50 Ω resistor', '50Ω',
+    'at 50%', 'at 50 °C', '50 V', '50 W', '0.05 A', 'default 500 mA', 'R 150 ohm', '0.50 V', 'tp_63']) {
+    assert.doesNotMatch(line, OLD_BOARD_50, `a value, not the board: "${line}"`);
+  }
+});
+
+test('the built system prompt has no 50 left in it as a column or board count (the old 50-column board)', () => {
+  const hits = promptText().split('\n').filter(l => OLD_BOARD_50.test(l));
+  assert.deepEqual(hits, [], 'lines still mentioning the 50-column board');
 });
 
 test('the separate-branches note puts the battery wires on tp_63 and tn_63 of a 63-column board', () => {

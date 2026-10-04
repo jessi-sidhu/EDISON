@@ -761,9 +761,11 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
 
   // Diodes conduct forward only: from + that is anode -> cathode, from - it
   // is cathode -> anode. So a series chain reaches both ends, and a reversed
-  // LED is still no path.
-  const fromPlus  = edges.concat(diodes.map(d => [d.anode, d.cathode, true]));
-  const fromMinus = edges.concat(diodes.map(d => [d.cathode, d.anode, true]));
+  // LED is still no path. A diode with a breakdown voltage (vz, a Zener)
+  // also conducts cathode -> anode in breakdown, so it joins both ways (#74).
+  const oneWay    = d => d.el.vz === undefined;
+  const fromPlus  = edges.concat(diodes.map(d => [d.anode, d.cathode, oneWay(d)]));
+  const fromMinus = edges.concat(diodes.map(d => [d.cathode, d.anode, oneWay(d)]));
 
   // Every source the build places or wires to, as "<type>|<n>".
   const sources = new Map();
