@@ -351,11 +351,15 @@
   //  removed) is grounded at the ref pin of its earliest-placed source.
   //  Every circuit with a source is live: its nodes are readings, a lone
   //  battery included. Only a circuit with no ref pin reads null.
+  //  Given the settled modes (modeOf), an off mode block joins nothing
+  //  either, so a node cut off from every source by off diodes reads null
+  //  in the results, not the 0 V GMIN leaves it at (bug #73).
   const isSource = g => !!(g.part && g.part.def.ref !== undefined);
   const refNode  = g => g.nodes[g.part.def.pins.indexOf(g.part.def.ref)];
-  const conducts = el => !(el.kind === 'SW' && !el.closed);
+  const conducts = (e, modeOf) => !(e.el.kind === 'SW' && !e.el.closed) &&
+    !(modeOf && modeOf.get(e) === 'off');
 
-  function groundCircuits(graph) {
+  function groundCircuits(graph, modeOf) {
     const uf = new UnionFind();
     graph.forEach(g => {
       g.nodes.forEach(n => uf.make(n));
@@ -363,7 +367,7 @@
       if (!g.part) { g.nodes.forEach(n => uf.union(g.nodes[0], n)); return; }
       g.part.els.forEach(e => {
         e.nodes.forEach(n => uf.make(n));
-        if (conducts(e.el)) e.nodes.forEach(n => uf.union(e.nodes[0], n));
+        if (conducts(e, modeOf)) e.nodes.forEach(n => uf.union(e.nodes[0], n));
       });
     });
 
@@ -388,12 +392,35 @@
   // { r: PartResult, m: measured, warnings } per graph entry, null for a
   // part not in the registry. PartResult currents are mA; floating pins
   // null; open = volts across each mode block with every mode block off.
+  // pinMax, only for floating pins: the highest the node could rise before
+  // an off diode with its anode there would conduct, min over them of
+  // V(cathode) + vf, the cathode driven or itself capped (a chain of off
+  // diodes); null if none caps it (#73). Each pass that lowers a cap adds
+  // vf > 0 along a chain, so it settles within one pass per diode.
   function partResults(graph, sol, live, modeOf, openSol) {
+    const cap = new Map();   // floating node → its lowest cap
+    const offEls = [...modeOf].filter(([, mode]) => mode === 'off').map(([e]) => e);
+    for (let pass = 0; pass <= offEls.length; pass++) {
+      let dropped = false;
+      offEls.forEach(({ el, nodes: [a, c] }) => {
+        if (live.has(a)) return;
+        const base = live.has(c) ? sol.v(c) : cap.get(c);
+        if (base === undefined) return;
+        const v = base + el.vf;
+        if (!cap.has(a) || v < cap.get(a)) { cap.set(a, v); dropped = true; }
+      });
+      if (!dropped) break;
+    }
     return graph.map((g, i) => {
       if (!g.part) return null;
       const { nodes, part: { def, els } } = g;
       const r = bareResult(graph, i);
       def.pins.forEach((pin, k) => { r.pins[pin] = live.has(nodes[k]) ? sol.v(nodes[k]) : null; });
+      def.pins.forEach((pin, k) => {
+        if (r.pins[pin] !== null) return;
+        r.pinMax = r.pinMax || {};
+        r.pinMax[pin] = cap.has(nodes[k]) ? cap.get(nodes[k]) : null;
+      });
       els.forEach((e, k) => {
         const id = e.el.id !== undefined ? e.el.id : k;
         const mode = modeOf.get(e);
@@ -552,7 +579,7 @@
     }
 
     // Every mode block (D element) in board order, and the loop that settles them.
-    const { grounds, live } = groundCircuits(graph);
+    const { grounds } = groundCircuits(graph);
     const blockEls = els.filter(e => e.el.kind === 'D');
     const blocks   = blockEls.map(e => ({ initial: 'off', check: (sol, mode) => checkDiode(e, sol, mode) }));
     const modesOf  = modes => new Map(blockEls.map((e, i) => [e, modes[i]]));
@@ -569,6 +596,8 @@
     }
     const { sol } = solved;
     const modeOf  = modesOf(solved.modes);
+    // The nodes a source reaches through the settled modes: these read volts.
+    const { live } = groundCircuits(graph, modeOf);
     // Amps through each stamped source, read before the split below, so a
     // parallel group counts its total (a short is a short however shared).
     const sourceAmps = [...sol.vCurrent.values()].map(Math.abs);

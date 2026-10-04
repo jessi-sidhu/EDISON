@@ -329,7 +329,19 @@ const PART_PARAM = { type: 'STRING', description: 'The part\'s label from the Co
 function editTool(name, description, params) {
   return { name, description, parameters: { type: 'OBJECT', properties: { part: PART_PARAM, ...params }, required: ['part'] } };
 }
-const whose = key => PARTS.filter(d => d.values && aiValues(d).includes(key)).map(partName).join(', ');
+// A key several parts share, with different choices or ranges, lists each
+// part's: "New model. diode: 1N4148, 1N4001; zener diode: 3.3V, 5.1V, 12V."
+const owners = key => PARTS.filter(d => d.values && aiValues(d).includes(key));
+const plainText = p => p.description.replace(/^Optional\. /, '').replace(/ Only when the user names one\.$/, '');
+const choicesOrRange = spec => (spec.choices ? Object.keys(spec.choices).join(', ') : rangeOf(spec));
+function valueDescription(key) {
+  const defs = owners(key);
+  const texts = defs.map(d => plainText(valueParam(key, d.values[key])));
+  if (texts.every(t => t === texts[0])) return `New ${key} (${defs.map(partName).join(', ')}). ${texts[0]}`;
+  const units = [...new Set(defs.map(d => d.values[key].choices ? null : d.values[key].unit))];
+  const unit  = units.length === 1 && units[0] ? ` in ${UNIT_WORDS[units[0]] || units[0]}` : '';
+  return `New ${key}${unit}. ${defs.map(d => `${partName(d)}: ${choicesOrRange(d.values[key])}`).join('; ')}.`;
+}
 const valueParams = {};
 for (const def of PARTS) {
   for (const key of aiValues(def)) {
@@ -337,7 +349,7 @@ for (const def of PARTS) {
     const had = valueParams[key];
     if (had && had.enum && p.enum) had.enum = [...new Set([...had.enum, ...p.enum])];
     if (had) continue;
-    valueParams[key] = { ...p, description: `New ${key} (${whose(key)}). ${p.description.replace(/^Optional\. /, '').replace(/ Only when the user names one\.$/, '')}` };
+    valueParams[key] = { ...p, description: valueDescription(key) };
   }
 }
 const controlParams = {};
@@ -832,12 +844,15 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // its own problem. Any other complete branch makes every node reachable
   // from both terminals, so orientation is undecidable there: prefer saying
   // nothing over accusing a correctly wired LED of being backwards.
+  // A diode with a breakdown voltage (vz, a Zener) is used reversed: its
+  // cathode on + and anode on − is how it regulates, not a mistake.
+  const reversedZener = d => d.el.vz !== undefined && pos.has(d.cathode) && neg.has(d.anode);
   for (const { i, a, def, holeOf, pinNodes } of fullRebuild ? placedParts : []) {
     if (def.place.kind === 'footprint') {
       problems.push(...footprintProblems(i, a, def, holeOf, pinNodes));
       continue;
     }
-    const backwards = diodes.find(d => d.i === i && d.outer
+    const backwards = diodes.find(d => d.i === i && d.outer && !reversedZener(d)
       && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode));
     if (backwards) {
       const { el, holeOf } = backwards;
@@ -853,7 +868,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
     }
     // On a path, but a diode on it faces the wrong way (e.g. both LEDs of a
     // series pair flipped, so neither reads as backwards on its own).
-    const stuck = diodes.find(d => d.i === i && d.outer && !(pos.has(d.anode) && neg.has(d.cathode)));
+    const stuck = diodes.find(d => d.i === i && d.outer && !reversedZener(d) && !(pos.has(d.anode) && neg.has(d.cathode)));
     if (stuck) {
       problems.push(`The ${partName(def)} at ${a.holeA}/${a.holeB} has no forward path from + to −, so it cannot light. Check each diode on its path: cathode (holeA) toward −, anode (holeB) toward +.`);
     }

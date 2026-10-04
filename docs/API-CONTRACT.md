@@ -114,6 +114,8 @@ If it doesn't settle, the status is `'unsettled'`. It never reports wrong number
 {
   label: 'LED1', values, controls,
   pins:    { cathode: 0.00, anode: 2.00 },   // volts vs ground, null if floating
+  pinMax?: { anode: 2.00 },                   // floating pins only: the highest the node could rise before an off diode on it
+                                              // conducts (min over off D with anode there, cathode driven or itself capped, of V(cathode) + vf); null if uncapped
   current: { d: 14.9 },                       // mA, by element id (or index), + in pin order
   modes:   { d: 'on' },                       // mode blocks only
   open:    { d: 9.00 },                       // volts across each mode block with every mode block off

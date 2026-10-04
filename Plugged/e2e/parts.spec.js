@@ -12,10 +12,10 @@ const { test, expect } = require('@playwright/test');
 const Parts = require('../circuit3d/js/parts');
 
 // The resistor (#23), the LED (#25), the battery, buzzer and button (#26),
-// the potentiometer (#31), the light sensor (#40) and the thermistor (#41)
-// are listed even before their files exist, so this spec fails (rather than running nothing) until
-// each is registered.
-const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', 'ldr', 'thermistor', ...Parts.all().map(d => d.type)])];
+// the potentiometer (#31), the light sensor (#40), the thermistor (#41)
+// and the diode (#33) are listed even before their files exist, so this spec fails (rather than
+// running nothing) until each is registered.
+const TYPES = [...new Set(['resistor', 'led', 'battery', 'buzzer', 'button', 'potentiometer', 'ldr', 'thermistor', 'diode', 'zener', ...Parts.all().map(d => d.type)])];
 
 // Resistor colours, as the model has always drawn them.
 const BODY = 0xd4a96a, LEAD = 0xc0c0c0, GHOST_LEAD = 0xcccccc;

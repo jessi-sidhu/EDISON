@@ -79,7 +79,13 @@
               `Needs at least ${a.minR} ohm in series, so use ${a.stock} ohm.`];
     }
     if (mode !== 'on') {
-      const reverse = volts(r.pins.cathode) - volts(r.pins.anode);
+      // Backwards only when a source drives the cathode above the anode. A
+      // floating anode counts at its pinMax, the most an off diode on its
+      // node lets it rise; uncapped, the LED is only dark (#73).
+      if (r.pins.cathode == null) return [];
+      const anode = r.pins.anode != null ? r.pins.anode : r.pinMax && r.pinMax.anode;
+      if (typeof anode !== 'number') return [];
+      const reverse = volts(r.pins.cathode) - volts(anode);
       return reverse >= r.values.vf ? ['LED is backwards. Current cannot flow from cathode to anode. Flip it around.'] : [];
     }
     // On, but under the threshold. Below OPEN_MA the "current" is only GMIN
