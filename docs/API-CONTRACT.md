@@ -199,6 +199,14 @@ The example is `Plugged/circuit3d/js/parts/bench_supply.js` (#34), the first off
 - **Board markdown:** a 2-pin off-board part prints as the battery always has. A 3+-pin one lists every pin, `off-board pos → wire ref: PS1.0`, and its wiring cheat-sheet line (`- **PS1**: …`) names every ref.
 - **A limit that only warns:** `measure` gives each rail's mA and an over flag; `warnings` says `+ rail would current-limit: …`, and `view.update` lights a mesh named `limit-light`. There is no constant-current mode.
 
+### Pattern: multi-element straddling part
+The example is `Plugged/circuit3d/js/parts/seven_segment.js` (#43), the first part made of many elements that sits across the centre gap. DIP chips copy it.
+- **Pins and footprint:** pins in datasheet order, `pins: ['e','d','com1','c','dp','b','a','com2','f','g']`. `place: { kind: 'footprint', straddle: true, rotations: [0, 180], legs: [[0,0],[1,0],[2,0],[3,0],[4,0],[4,-1],[3,-1],[2,-1],[1,-1],[0,-1]] }`: pins 1–5 run along the anchor's row (f) and pins 6–10 come back along the row across the gap (e), as a DIP is numbered. `Parts.checkPlacement` refuses any spot whose legs are not all in rows e and f with the straddle message.
+- **Many elements, one internal node:** 8 × `D(<segment>, '#com', vf 2.0)` with `id` = the segment name, so `r.current.b` is segment b's mA and `r.modes.b` its mode. `SW(com1, '#com', closed)` and `SW(com2, '#com', closed)` tie the two common pins inside the part, so grounding either one works. Internal nodes (`'#name'`) never appear in the hole map or the AI's pins.
+- **Measure reads every element:** a segment is lit when its `D` is `on` and carries ≥ 1 mA. `measure` → `{ segments: 'bc', digit: '1', dp: false }`; the digit comes from a pure table (with the common variants of 6, 7 and 9), `'?'` when nothing matches. `warnings` gives one line per element over its rating (`segment b is at 69.9 mA, …`), and `line` says `🔢 7-SEGMENT DISPLAY shows 1`.
+- **The view:** leads stand in every hole, and the body and face are drawn in a group turned so its +x runs pin 1 → pin 5; the readout (the digit) is on the top face, facing the camera, with nothing tall in front of it. Each element that lights is its own mesh (`seg-a` … `seg-g`, `seg-dp`) in a `ctx.mat.*` material, so the ghost is see-through; `view.update` sets each one's emissive from `measure`, and darkens all of them on Stop.
+- **AI:** `place_seven_segment { hole, direction }` like any footprint part. The guide gives one known-good layout (hole f30, right) and names `place_resistor`, so the resistor's tool is sent with it.
+
 ## Interfaces
 
 ### `Parts.define(def)`

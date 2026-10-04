@@ -10,14 +10,14 @@ BREADBOARD LAYOUT:
 - Rails are NOT auto-connected to body holes. Always wire from tp/tn to body holes.
 
 PARTS:
-- Every part (type: name): potentiometer: Potentiometer, resistor: Resistor, battery: Battery, bench_supply: Bench supply, led: LED, buzzer: Buzzer, ldr: Light sensor, button: Push Button, thermistor: Thermistor.
+- Every part (type: name): potentiometer: Potentiometer, resistor: Resistor, battery: Battery, bench_supply: Bench supply, led: LED, seven_segment: 7-segment display, buzzer: Buzzer, ldr: Light sensor, button: Push Button, thermistor: Thermistor.
 - If a part's place_ tool is not in your tools, call use_parts with its type first.
 
 PART LABELS:
-- Every part has a label that never changes: its prefix and a number, e.g. R1, R2. Prefixes: RV = potentiometer, R = resistor, BAT = battery, PS = bench supply, LED = LED, BZ = buzzer, LDR = light sensor, SW = push button, TH = thermistor.
+- Every part has a label that never changes: its prefix and a number, e.g. R1, R2. Prefixes: RV = potentiometer, R = resistor, BAT = battery, PS = bench supply, LED = LED, DS = 7-segment display, BZ = buzzer, LDR = light sensor, SW = push button, TH = thermistor.
 - The board state lists parts by label, so you can talk about them as R1, LED1 and so on.
 - Only an off-board part's pins can be wire ends by label, by pin index: "BAT1.0" (+) or "BAT1.1" (-) on a battery, and the same LABEL.k form for any other off-board part (its guide names them).
-- Parts on the board (RV, R, LED, BZ, LDR, SW, TH) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.
+- Parts on the board (RV, R, LED, DS, BZ, LDR, SW, TH) are wired through the breadboard holes they sit in, which the Components table lists. Never use "R1.0" or "LED1.1" as a wire end.
 - A new part gets the next free number for its type. After delete_all, numbering starts again at 1, so the first place_battery is BAT1.
 - Without delete_all, a battery added next to BAT1 is BAT2.
 

@@ -21,6 +21,8 @@ process.env.AI_PROVIDER = 'deepseek';
 process.env.RECORD_FIXTURES = '0';     // never write fixture files from here
 const Server  = require('../backend/server.js');
 const Recipes = require('./fixtures/recipes.js');
+const Parts   = require('../circuit3d/js/parts');
+const { recipeActions, parseRecipeSteps } = require('./fixtures/recipe-steps.js');
 
 
 // A DeepSeek stand-in: answers each request with the next message in the
@@ -203,3 +205,39 @@ for (const [message, tool, control] of [
       'expected the BUILDING BEHAVIOR rule (slider, scroll, simulation) in the prompt sent');
   });
 }
+
+// Pin (passes today), #43 follow-up: the 7-segment recipe also reaches the
+// model when it asks for the display with use_parts (partTools), not only
+// when the display's tool is sent from round 1. The demo request, which
+// never calls use_parts, gets no recipe anywhere.
+test('pin: use_parts {types:[seven_segment]} answers with the 7-segment recipe block once; the demo request gets none', async () => {
+  const def = Parts.get('seven_segment');
+  const fetch = scriptedDeepSeek([
+    { content: '', tool_calls: [call('u7', 'use_parts', { types: ['seven_segment'] })] },
+    { content: 'Here you go.', tool_calls: null },
+  ]);
+  vi.stubGlobal('fetch', fetch);
+  await ask('add a part');
+
+  const said = resultFor(fetch.calls[1], 'u7');
+  const block = parseRecipeSteps(said, def);
+  assert.ok(block, `the use_parts result has no 7-segment recipe block: ${said}`);
+  const want = recipeActions(def.ai.recipe);
+  const places = xs => xs.filter(a => a.tool !== 'add_wire');
+  const wires  = xs => xs.filter(a => a.tool === 'add_wire').map(a => `${a.from} -> ${a.to}`).sort();
+  assert.deepStrictEqual(places(block.steps), places(want), 'the delete_all and place_* steps, in order');
+  assert.deepStrictEqual(wires(block.steps), wires(want), 'the add_wire steps');
+  assert.equal(block.steps.length, want.length);
+  const rest = said.split('\n').slice(said.split('\n').indexOf(block.heading) + 1).join('\n');
+  assert.equal(parseRecipeSteps(rest, def), null, `the recipe block appears more than once: ${said}`);
+
+  const demo = scriptedDeepSeek([
+    { content: '', tool_calls: asCalls('a', Recipes.ONE_LED) },
+    { content: 'Built it.', tool_calls: null },
+  ]);
+  vi.stubGlobal('fetch', demo);
+  await ask('Build a single LED circuit with a current-limiting resistor.');
+  for (const m of demo.calls[1].messages) {
+    assert.equal(parseRecipeSteps(m.content || '', def), null, `the demo request's ${m.role} message has a 7-segment recipe block`);
+  }
+});

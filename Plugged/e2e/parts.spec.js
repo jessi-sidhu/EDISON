@@ -118,14 +118,15 @@ for (const type of TYPES) {
     await openEditor(page);
     const def = await page.evaluate(t => {
       const d = window.Parts && Parts.get(t);
-      return d && { kind: d.place.kind, span: d.place.span ? d.place.span.default : null };
+      return d && { kind: d.place.kind, span: d.place.span ? d.place.span.default : null, straddle: !!d.place.straddle };
     }, type);
     expect(def, `window.Parts.get('${type}') in the editor`).toBeTruthy();
 
     await page.locator(`#sidebar .comp-item[data-type="${type}"]`).click();
+    // A chip that straddles the gap (#43) only fits with its anchor in row f.
     const at = def.kind === 'offboard'
       ? await screenPoint(page, await page.evaluate(() => App.batterySpot()))
-      : await screenPoint(page, 'c30');
+      : await screenPoint(page, def.straddle ? 'f30' : 'c30');
     await page.mouse.move(at.x - 3, at.y);
     await page.mouse.move(at.x, at.y);
 

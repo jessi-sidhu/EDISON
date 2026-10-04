@@ -63,6 +63,34 @@ const controlLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(Bo
   .flatMap(def => Object.entries(def.controls || {}).filter(([, c]) => c.type === 'slider')
     .map(([key, c]) => `- ${toolName(def)}: the user adjusts ${key} (${c.unit}) with a slider or by scrolling over it`));
 
+// A part's ai.recipe (an Example) as numbered tool calls with exact holes:
+// delete_all, each part in order, then each wire.
+function recipeSteps(ex) {
+  const steps = ['delete_all'];
+  for (const p of ex.parts) {
+    const def = Parts.get(p.type);
+    const args = [];
+    if (def.place.kind === 'span') args.push(`holeA=${p.holes[0]}`, `holeB=${p.holes[1]}`);
+    else if (def.place.kind === 'footprint') {
+      const dir = Object.keys(ROTATION).find(d => def.place.rotations.includes(ROTATION[d])
+        && (Parts.footprintLegs(def.type, p.holes[0], ROTATION[d]) || []).map(l => l.row + (l.col + 1)).join(' ') === p.holes.join(' '));
+      args.push(`hole=${p.holes[0]}`, `direction=${dir}`);
+    }
+    for (const [k, v] of Object.entries(p.values || {})) args.push(`${k}=${v}`);
+    steps.push(toolName(def) + (args.length ? `: ${args.join(', ')}` : ''));
+  }
+  for (const [from, to] of ex.wires) steps.push(`add_wire: ${from} -> ${to}`);
+  return steps;
+}
+
+// The recipe block of one part: a heading, then its steps numbered from 1.
+const recipeBlock = def => [`RECIPE FOR THE ${def.name.toUpperCase()} (${toolName(def)}, use these exact holes): ${def.ai.recipe.name}`,
+  ...recipeSteps(def.ai.recipe).map((s, i) => `  ${i + 1}. ${s}`)];
+
+// The recipe blocks of the tools sent that have one.
+const recipeLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(def => def && def.ai.recipe)
+  .flatMap(def => ['', ...recipeBlock(def)]);
+
 // The prompt for a request that sends `tools`: only their guides go in.
 const buildPrompt = tools => [
   `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
@@ -191,6 +219,7 @@ const buildPrompt = tools => [
   '  13. place_led: holeA=c22 (cathode), holeB=c20 (anode)',
   '  14. add_wire: a22 -> tn_22 (black)',
   '  More branches: repeat steps 11-14 at the next C (+8 columns), feeding each from another free hole (d5, e5) in column 5.',
+  ...recipeLines(tools),
   '',
   'Reply style: 2-5 sentences max. Be specific with hole names. Be encouraging.',
   'For pure questions (no building), just respond with helpful text. Do not call any tools.',
@@ -411,6 +440,7 @@ function partTools(types, sentNames) {
   for (const d of added) {
     const def = PART_BY_TOOL.get(d.name);
     if (def && def.ai.guide) said.push(`${d.name}: ${def.ai.guide}`);
+    if (def && def.ai.recipe) said.push(`\n${recipeBlock(def).join('\n')}\n`);
   }
   if (unknown.length) said.push(`No part type ${unknown.join(', ')}. Part types: ${PARTS.map(d => d.type).join(', ')}.`);
   return { added, text: said.join(' ') };
