@@ -1542,10 +1542,14 @@ async function handleLeads(req, res) {
     res.flushHeaders();
   }
   const onItem = stream ? e => { sent.add(e.id); line(e); } : undefined;
+  // #177: the page went away (Cancel, close, Build it abort its fetch)
+  // before the answer finished: stop the round's Gemini calls.
+  const ac = new AbortController();
+  res.on('close', () => { if (!res.writableFinished) ac.abort(); });
 
   let out;
   try {
-    out = await readLeads({ key, items }, { onItem });
+    out = await readLeads({ key, items }, { onItem, signal: ac.signal });
   } catch (e) {   // readLeads never rejects; if it ever does, every item failed
     console.error('photo-leads: readLeads failed:', e.message);
     out = { items: items.map(it => ({ id: it.id, error: 'AI_FAILED' })), provider: null, model: null };
@@ -1554,7 +1558,7 @@ async function handleLeads(req, res) {
   if (!stream) return sendJSON(res, 200, { items: out.items, provider: out.provider, model: out.model, ms: Date.now() - started });
   for (const e of out.items) if (!sent.has(e.id)) line(e);   // every id gets its line
   line({ done: true, provider: out.provider, model: out.model, ms: Date.now() - started });
-  if (!res.writableEnded) res.end();
+  if (!res.writableEnded && !res.destroyed) res.end();
 }
 
 // A sent board in the board-model shape; anything else is ignored, as

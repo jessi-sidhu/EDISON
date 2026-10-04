@@ -83,6 +83,14 @@
 //       (Gemini failed, deepseek read the boxes): 'gemini' and 'fixture'
 //       run it, so a recorded sample replayed as 'fixture' still merges its
 //       saved leads.
+//   - #177, a landing line never eats her typing or closes her dropdown:
+//       PhotoConfirm.place(id, entry) updates that item's row and the canvas
+//       AT ONCE (its dots, its holes, its .photo-placing, the count, Build
+//       it's state), but never replaces the control she is using: an input
+//       or select in #photo-parts that has focus stays the same element,
+//       keeps its focus, its typed value and (a select) its open picker,
+//       while another item's line lands. (These tests choose "at once" over
+//       the issue's other option, a full relist deferred to focusout.)
 const fs   = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
@@ -886,4 +894,128 @@ test('#173: PhotoConfirm.place(id, entry) with the crops still out: two calls at
   await expect(page.locator('#photo-modal'), 'Build it closes the overlay').toBeHidden();
   expect(await page.evaluate(() => window.PhotoConfirm.built), 'Build it builds the Reading as it is').toEqual(await expectedBuild(page, snap));
   expect(errors.filter(e => !/\/api\/photo\/leads|ERR_ABORTED|ERR_FAILED/.test(e))).toEqual([]);
+});
+
+// ── #177: a landing line never eats her typing or closes her dropdown ──────
+
+// The demo board's 9 V battery, + in rail:aOuter:3 and − in rail:aInner:3,
+// added to a box round.
+const BAT_HOLES = ['rail:aOuter:3', 'rail:aInner:3'];
+function withBattery(c, reading) {
+  reading.power = [{ kind: 'battery_9v', volts: 9, plus: { hole: BAT_HOLES[0], pt: c[BAT_HOLES[0]] },
+                     minus: { hole: BAT_HOLES[1], pt: c[BAT_HOLES[1]] }, unsure: [] }];
+  return reading;
+}
+
+// Keeps the control that has focus now as window.__mine.
+const holdFocused = page => page.evaluate(() => { window.__mine = document.activeElement; return window.__mine.tagName; });
+// That control: its value, whether it is still in the parts list (not
+// replaced), whether it still has focus, and whether its picker is open
+// (a select; :open, Chromium 133+).
+const mine = page => page.evaluate(() => {
+  const el = window.__mine;
+  let open = null;
+  try { open = el.matches(':open'); } catch { /* no :open here */ }
+  return { value: el.value, inList: el.isConnected && document.getElementById('photo-parts').contains(el),
+           focused: document.activeElement === el, open };
+});
+
+test('#177 bug: with the crops still out she types a battery\'s volts: "1", LED1\'s line lands, "2" → the field reads 12 (the same input, still focused) and Build it builds a 12 V battery; LED1\'s dots, row, the count and the canvas update at once', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = watchErrors(page);
+  await openEditor(page);
+  const c = await sampleCentres(page, [...HOLES, ...BAT_HOLES]);
+  const reading = withBattery(c, boxRound(c)), ANSWERS = answers(c);
+  await page.route('**/api/photo', fromBoxRound({ reading }));
+  await streamLeads(page);
+  const line = id => `${JSON.stringify(ANSWERS[id])}\n`;
+  const row  = id => page.locator(`#photo-parts [data-id="${id}"]`);
+
+  await openSample(page);
+  await expect.poll(() => leadsCalls(page).then(x => x.length), { message: 'the crops are sent' }).toBe(1);
+  await expect(page.locator('#photo-confirm'), 'open while the crops are out').toBeVisible();
+  const volts = row('power:0').locator('input.photo-volts');
+  await expect(volts, 'the battery\'s volts as read').toHaveValue('9');
+  await expect(page.locator('#photo-build'), 'test check: LED1\'s + is unknown until its line lands').toBeDisabled();
+
+  // She types 12 over the 9: the "1" first.
+  await volts.focus();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('1');
+  expect(await holdFocused(page), 'test check: the volts input has focus').toBe('INPUT');
+  expect(await mine(page), 'test check: she has typed "1"').toEqual({ value: '1', inList: true, focused: true, open: false });
+
+  // LED1's line lands meanwhile. Its row, its dots, the count, Build it and
+  // the canvas update at once, while she is still in the volts field.
+  const kept = await placeholdersOf(page, reading);
+  const spot = LANDS.LED1.find(h => !endsOf(itemOf(kept, 'LED1')).some(e => e.hole === h));
+  expect(spot, 'test check: a hole LED1\'s line lands in that its placeholder is not in').toBeTruthy();
+  const before = await patch(page, c[spot]);
+  await push(page, line('LED1'));
+  await expect.poll(() => ptsOf(page, 'LED1'), { message: 'LED1\'s dots move when its line lands' }).toEqual(ANSWERS.LED1.leads.map(l => l.pt));
+  await expect(row('LED1'), 'LED1\'s row lists its new holes at once').toContainText(LANDS.LED1.join(' → '));
+  expect(await placingState(page), 'LED1 is placed at once; the other crops are still out: 1 of 4')
+    .toEqual({ placing: ['R1', 'R2', 'W1'], rows: ['R1', 'R2', 'W1'], count: expect.stringMatching(/^Placing legs 1\/4/) });
+  await expect(page.locator('#photo-build'), 'LED1 came back with its roles: Build it is ready at once').toBeEnabled();
+  expect(patchDiff(before, await patch(page, c[spot])), `the canvas redrew at once: LED1's dot is at ${spot} now`).toBeGreaterThan(1);
+
+  // The "2".
+  await page.keyboard.type('2');
+  expect(await volts.inputValue(), 'the volts field reads 12: LED1\'s line did not replace the input she was typing in (her "2" was lost, leaving a valid 1 V)').toBe('12');
+  expect(await mine(page), 'the volts input is the one she typed in, still in the list and focused').toEqual({ value: '12', inList: true, focused: true, open: false });
+  expect(await page.evaluate(() => window.PhotoConfirm.reading.power[0].volts), 'the Reading has the 12 V she typed').toBe(12);
+
+  // Build it, the crops still out: a 12 V battery.
+  await page.locator('#photo-build').click();
+  await expect(page.locator('#photo-modal'), 'Build it closes the overlay').toBeHidden();
+  const built = await page.evaluate(() => window.PhotoConfirm.built);
+  expect(built.actions.filter(a => a.tool === 'place_battery').map(a => a.voltage), 'Build it builds the 12 V battery she typed').toEqual([12]);
+  await expect.poll(() => page.evaluate(() => App.state.components.filter(p => p.type === 'battery').map(p => p.values.voltage)),
+    { message: 'the board\'s battery is 12 V' }).toEqual([12]);
+  expect(errors.filter(e => !/\/api\/photo\/leads|ERR_ABORTED|ERR_FAILED/.test(e))).toEqual([]);
+});
+
+test('#177 bug: with the crops still out, an open colour dropdown (W1) and an open value dropdown (R2) each stay open, focused and the same element while another item\'s line lands (R1, then LED1); that item\'s dots and row update at once; what she then picks reaches the Reading and the build', async ({ page }) => {
+  test.setTimeout(60_000);
+  const errors = watchErrors(page);
+  await openEditor(page);
+  const c = await sampleCentres(page, HOLES);
+  const reading = boxRound(c), ANSWERS = answers(c);
+  await page.route('**/api/photo', fromBoxRound({ reading }));
+  await streamLeads(page);
+  const line = id => `${JSON.stringify(ANSWERS[id])}\n`;
+  const row  = id => page.locator(`#photo-parts [data-id="${id}"]`);
+
+  await openSample(page);
+  await expect.poll(() => leadsCalls(page).then(x => x.length), { message: 'the crops are sent' }).toBe(1);
+  await expect(page.locator('#photo-confirm'), 'open while the crops are out').toBeVisible();
+
+  // [what, its item, the select, the item whose line lands, the count after, what she picks, the Reading's field]
+  const cases = [
+    ['W1\'s colour dropdown', 'W1', 'select.photo-color', 'R1', 'Placing legs 1/4', 'green', 'color'],
+    ['R2\'s value dropdown', 'R2', 'select.photo-value', 'LED1', 'Placing legs 2/4', '470', 'value'],   // W1 is hers now
+  ];
+  for (const [what, owner, sel, other, count, pick, field] of cases) {
+    await row(owner).locator(sel).click();   // opens its picker
+    expect(await holdFocused(page), `test check: ${what} has focus`).toBe('SELECT');
+    const held = await mine(page);
+    expect(held, `test check: ${what} is open and focused`).toEqual({ value: held.value, inList: true, focused: true, open: true });
+    expect(held.value, `test check: ${what} does not already read ${pick}`).not.toBe(pick);
+
+    await push(page, line(other));
+    await expect.poll(() => ptsOf(page, other), { message: `${other}'s dots move when its line lands` }).toEqual(ANSWERS[other].leads.map(l => l.pt));
+    await expect(row(other), `${other}'s row lists its new holes at once`).toContainText(LANDS[other].join(' → '));
+    await expect(row(other), `${other}'s row is no longer "placing…"`).not.toHaveClass(/photo-placing/);
+    expect((await placingState(page)).count, `the count: ${count}`).toMatch(new RegExp(`^${count}`));
+    expect(await mine(page), `${what} is still open, focused, the same element and unchanged after ${other}'s line landed`).toEqual(held);
+
+    // She picks from the dropdown that stayed open: it reaches the Reading
+    // and the build (not a copy the landing line left behind).
+    await page.evaluate(() => window.__mine.setAttribute('data-mine', ''));
+    await page.locator('#photo-parts select[data-mine]').selectOption(pick);
+    const r = await page.evaluate(() => window.PhotoConfirm.reading);
+    expect(String(itemOf(r, owner)[field]), `${what}: her pick, ${pick}, is in the Reading`).toBe(pick);
+    expect(await page.evaluate(() => window.PhotoConfirm.result), `${what}: the build is redone with her pick`).toEqual(await expectedBuild(page, r));
+  }
+  expect(errors).toEqual([]);
 });

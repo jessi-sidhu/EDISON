@@ -449,7 +449,7 @@ photo.js  pick / drop / sample, corner taps → PhotoGrid.homography → PhotoGr
 - **Logging:** one line per request, e.g. `[photo] sample=demo-board provider=gemini model=… 8.2s parts=3 wires=3 fallback=no retries=0 612KB`. `retries` counts Gemini's calls sent again after a failure, the fallback model's included (on an error line too). `fallback=yes` when the answer came from a provider after the first listed, or from the box round's fallback model (#176), whose name is then `model`. Never the image or an upstream body.
 - **Mock:** `{ reading: <the mock Reading below>, provider: 'fixture', model: 'deepseek-flash', ms: 12, key: 'demo-board' }`.
 
-### `POST /api/photo/leads` (#159, #160, #173)
+### `POST /api/photo/leads` (#159, #160, #173, #177)
 The crop round: where each leg enters the board, one zoomed, labelled crop per part and wire. The backend has no image packages, so **the page cuts and labels the crops** (`photo-crops.js`) and this route only asks Gemini and does arithmetic.
 - **Owner:** `backend/photo-leads.js` (`readLeads(body, opts)`, `opts.fetch` injectable like `readPhoto`'s), routed by `backend/server.js`. **Called by:** `photo-crops.js`.
   - The page crops only resistors, LEDs and wires: a part of type `other` is never built in Tier 1, so it isn't cropped or sent.
@@ -466,6 +466,7 @@ The crop round: where each leg enters the board, one zoomed, labelled crop per p
   - **A valid request is always 200:** a failed item never fails the request.
 - **Streamed (#173):** when the request's `Accept` includes `application/x-ndjson` (the page always sends it), the answer is `200` with `Content-Type: application/x-ndjson`: one line per item **as it settles, in finish order**, each exactly the entry above (`{ id, found, leads, conf }` or `{ id, error }`), then a last line `{ done: true, provider, model, ms }`. Every requested id gets exactly one line. Replays (a sample id with a file, `PHOTO_PROVIDERS=fixture`) and the no-key path stream the same way. Without that `Accept` the one JSON body above is unchanged (tests, recording, an older page). Errors before the stream starts (400, 413, 429) stay JSON.
   - `readLeads(body, opts)` takes `opts.onItem(entry)`: called once per item as it settles (an answer, an `AI_FAILED`, an `AI_TIMEOUT` at the cutoff), with the entry the resolved `items` will hold (so an image-hash item that failed live reports its saved answer). The route writes each as a line; the resolved `{ items, provider, model, ms }` is unchanged.
+  - **Nobody listening (#177):** `readLeads(body, opts)` takes `opts.signal` (an `AbortSignal`). Aborting it ends the round at once, as the cutoff does without waiting for it: every call in flight is aborted, none goes out after (no queued first call, no pending retry, no stall resend), the timers are cleared, and `readLeads` resolves straight away: an item already answered keeps its answer, every other one is `AI_TIMEOUT`, in request order, `onItem` still once per id. The route aborts it when the response closes before it finished (the page's Cancel, close or Build it aborting its fetch; streamed or not); the `[photo-leads]` line is still written once, and nothing more is sent.
 - **Errors:** body `{ reply, code }` (429 has no `code`). The page never shows them: it keeps its placeholder dots.
 
 | Status | `code` | When | `reply` |
@@ -673,6 +674,7 @@ A confirmed Reading → the legal actions that rebuild it. Pure: uses `Parts`, `
   - `placing`: a `Set` of the ids whose crop line hasn't arrived (empty when there is no round). Their rows in `#photo-parts` have the class `.photo-placing`, their dots are drawn faint, and `#photo-placing-note` above the list reads `"Placing legs N/M…"` (N lines in, M crops sent); all cleared by `stopPlacing()`.
   - `startPlacing(ids)`, `stopPlacing()`: set and clear that state (`open()` clears it too).
   - `place(id, entry)`: the id leaves `placing`. Unless she has touched that item since `open()` (moved one of its dots, ⇄, ×, changed its value, colour or volts; an item she added counts as touched), the entry is merged (`PhotoCrops.merge(reading, [entry])`: two points set its ends, `found: false` drops it, an error keeps its placeholders), its `'?'` ends snapped, then rebuilt, relisted and redrawn. A touched item ignores its line.
+  - **The control she is using is never replaced (#177):** `place` updates the rows and the canvas at once, but the row holding the focused input or select in `#photo-parts` stays the same element (only its name and holes text refreshed), so it keeps its focus, what she has typed and an open picker; every other row is rebuilt around it. Every row control (value, colour, volts, ⇄) writes to the item in `PhotoConfirm.reading` as it is when it fires, looked up by id (`'power:N'` for a battery), since a merge replaces the Reading.
   - Build it works at any time: `PhotoImport.build` of the Reading as it is.
 
 ## Testing contract (a part is done when all of these pass)

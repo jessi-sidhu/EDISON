@@ -32,6 +32,11 @@
 //    entry is merged (PhotoCrops.merge; found false drops the item), its '?'
 //    snapped, rebuilt and redrawn. stopPlacing() clears it all (done, a
 //    timeout, an error, a close).
+//    #177: a landing line never replaces the control she is using: the row
+//    holding the focused input or select stays the same element (its typed
+//    value and open picker kept), the others are rebuilt around it, and every
+//    row control writes to the item as it is when it fires (merge copies the
+//    Reading), looked up by id.
 //
 //  EXPORTS
 //  ───────
@@ -72,6 +77,10 @@
   const unknown = () => C.reading.parts.some(p => isLed(p) && !picked(p));   // her + not chosen: Build waits
   const where   = e => grid.holeCentre(e.hole) || e.pt;
   const powerAt = id => /^power:(\d+)$/.exec(id);
+  const current = id => {   // the item in C.reading now, by id ('power:N' a battery)
+    const m = powerAt(id);
+    return m ? C.reading.power[+m[1]] : C.reading.parts.find(p => p.id === id) || C.reading.wires.find(w => w.id === id);
+  };
 
   function open(reading, img, g, built) {
     C.reading  = JSON.parse(JSON.stringify(reading));
@@ -119,13 +128,14 @@
     C.reading = PhotoCrops.merge(C.reading, [Object.assign({}, entry, { id })]);
     snapUnknown();
     if (C.selected && !dots().some(q => q.id === C.selected.id)) C.selected = null;   // found false dropped it
-    edited();
+    edited(true);
   }
 
-  // Every edit lands here: rebuild, relist, redraw.
-  function edited() {
+  // Every edit lands here: rebuild, relist, redraw. keep: a crop line
+  // landing, so the control she is using stays (renderList).
+  function edited(keep) {
     rebuild();
-    renderList();
+    renderList(keep);
     draw();
   }
 
@@ -299,13 +309,17 @@
 
   // ── List ───────────────────────────────────────────────────
 
-  function renderList() {
-    list.textContent = '';
+  // Every row afresh. keep (a crop line landing, #177): the row holding the
+  // focused control stays the same element, only its name and holes
+  // refreshed, and the other rows are rebuilt around it, so she keeps her
+  // focus, what she typed and an open picker.
+  function renderList(keep) {
+    const rows = [];
     for (const f of C.result.flags.filter(x => x.id == null)) {   // the whole board: no battery seen, rails guessed
       const li = document.createElement('li');
       li.className = 'photo-flagged photo-board';
       li.textContent = f.why;
-      list.appendChild(li);
+      rows.push(li);
     }
     const holes = ends => ends.map(e => e.hole).join(' → ');
     for (const p of C.reading.parts) {
@@ -315,10 +329,24 @@
         note += picked(p) ? ` · + in ${a.hole}` : ' · which leg is +? Press ⇄';
       }
       const pick = p.type === 'resistor' ? valueSelect(p) : isLed(p) ? colorSelect(p, Object.keys(Parts.get('led').values.color.choices)) : null;
-      list.appendChild(row(p.id, note, isLed(p) && (() => swapLegs(p)), pick));
+      rows.push(row(p.id, note, isLed(p) && (() => swapLegs(p.id)), pick));
     }
-    for (const w of C.reading.wires) list.appendChild(row(w.id, holes(w.ends), null, colorSelect(w, WIRE_COLORS)));
-    C.reading.power.forEach((s, i) => list.appendChild(row('power:' + i, s.kind === 'bench_supply' ? 'bench supply' : 'battery', null, voltsInput(s, 'power:' + i))));
+    for (const w of C.reading.wires) rows.push(row(w.id, holes(w.ends), null, colorSelect(w, WIRE_COLORS)));
+    C.reading.power.forEach((s, i) => rows.push(row('power:' + i, s.kind === 'bench_supply' ? 'bench supply' : 'battery', null, voltsInput(s, 'power:' + i))));
+
+    const active = document.activeElement;
+    const held   = keep && active && list.contains(active) ? active.closest('li[data-id]') : null;
+    const twin   = held && rows.find(li => li.dataset.id === held.dataset.id);
+    if (twin) {
+      for (const tag of ['b', 'span']) held.querySelector(`:scope > ${tag}`).textContent = twin.querySelector(`:scope > ${tag}`).textContent;
+      for (const li of [...list.children]) if (li !== held) li.remove();
+      const at = rows.indexOf(twin);
+      held.before(...rows.slice(0, at));
+      held.after(...rows.slice(at + 1));
+    } else {
+      list.textContent = '';
+      list.append(...rows);
+    }
     mark();
   }
 
@@ -375,7 +403,15 @@
     for (let k = -6; k <= 6; k++) vals.push(Parts.nearestKit(mid * Math.pow(10, k / 12), 'E12'));
     const opts = [...new Set(vals.filter(v => v != null && ok(v)))].sort((a, b) => a - b).map(v => [String(v), Parts.withUnit(v, 'Ω')]);
     if (read == null) opts.unshift(['', '? Ω']);
-    return select('photo-value', 'Resistance', opts, read == null ? '' : String(read), v => { touched.add(p.id); p.value = Number(v); edited(); });
+    return select('photo-value', 'Resistance', opts, read == null ? '' : String(read), v => { set(p.id, 'value', Number(v)); edited(); });
+  }
+
+  // A row control's edit, to the item as it is when it fires (a landing
+  // crop line may have replaced C.reading under a control she kept, #177).
+  function set(id, key, v) {
+    touched.add(id);
+    const item = current(id);
+    if (item) item[key] = v;
   }
 
   // ['yellow', 'violet', 'brown', 'gold'] → 470: two digits (three on a
@@ -392,7 +428,7 @@
   function colorSelect(item, colors) {
     const opts = colors.map(c => [c, c]);
     if (!colors.includes(item.color)) opts.unshift(['', item.color || '?']);
-    return select('photo-color', 'Colour', opts, colors.includes(item.color) ? item.color : '', v => { touched.add(item.id); item.color = v; edited(); });
+    return select('photo-color', 'Colour', opts, colors.includes(item.color) ? item.color : '', v => { set(item.id, 'color', v); edited(); });
   }
 
   // The volts built (9 when unread or out of range). Typing re-runs the
@@ -402,8 +438,8 @@
     Object.assign(input, { type: 'number', className: 'photo-volts', min: '1', max: '24', step: 'any', title: 'Volts' });
     input.setAttribute('aria-label', 'Volts');
     input.value = String(Parts.checkValue('battery', 'voltage', s.volts).ok ? s.volts : 9);
-    input.addEventListener('input', () => { touched.add(id); s.volts = Number(input.value); rebuild(); mark(); draw(); });
-    input.addEventListener('change', () => { touched.add(id); s.volts = Number(input.value); edited(); });
+    input.addEventListener('input', () => { set(id, 'volts', Number(input.value)); rebuild(); mark(); draw(); });
+    input.addEventListener('change', () => { set(id, 'volts', Number(input.value)); edited(); });
     const unit = document.createElement('i');
     unit.textContent = 'V';
     return [input, unit];
@@ -422,7 +458,9 @@
   // ⇄: swap the anode and cathode; unless exactly one of each, pick them
   // (an anode kept, else a cathode, else the first dot is the +): it
   // always ends with one anode and one cathode.
-  function swapLegs(p) {
+  function swapLegs(id) {
+    const p = current(id);
+    if (!p) return;
     const a = p.leads.findIndex(l => l.role === 'anode'), c = p.leads.findIndex(l => l.role === 'cathode');
     const known = a >= 0 && c >= 0;
     const plus = known ? c : a >= 0 ? a : c >= 0 ? 1 - c : 0;

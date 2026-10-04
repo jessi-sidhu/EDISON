@@ -23,6 +23,9 @@
 //  never taking a slot (resends queued behind waiting items left 9 of 13
 //  crops unanswered live). At PHOTO_LEADS_TIMEOUT_MS (default 40 s since
 //  #173; the page no longer waits on it) every call is aborted and the items unanswered or still waiting are AI_TIMEOUT.
+//  opts.signal (#177; the route's, aborted when the page goes away) ends
+//  the round the same way at once: every call aborted, none sent after,
+//  the timers cleared, the unanswered items AI_TIMEOUT.
 //  Gemini only: deepseek can't point. Timers are the global setTimeout, so
 //  fake timers drive them.
 //
@@ -118,12 +121,16 @@ function limiter(cap) {
 
 // Every item live, at most concurrency() first calls and retries at once.
 // settle(entry) takes each item's live entry as it settles and returns the
-// one to keep. Resolves { entries, resent, retries, ok }, ok counting live answers.
-async function askGemini(items, model, fetch, settle) {
+// one to keep. signal (optional) ends the round as the cutoff does, at once.
+// Resolves { entries, resent, retries, ok }, ok counting live answers.
+async function askGemini(items, model, fetch, settle, signal) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.warn('photo-leads: GEMINI_API_KEY is not set');
     return { entries: items.map(it => settle({ id: it.id, error: 'AI_FAILED' })), resent: 0, retries: 0, ok: 0 };
+  }
+  if (signal && signal.aborted) {   // nobody is listening: send nothing
+    return { entries: items.map(it => settle({ id: it.id, error: 'AI_TIMEOUT' })), resent: 0, retries: 0, ok: 0 };
   }
   const who = `gemini ${model}`, url = `${GEMINI_BASE}${model}:generateContent`;
   const slot = limiter(concurrency()), hedgeMs = photoHedgeMs(), deadlineAt = Date.now() + cutoffMs();
@@ -139,12 +146,16 @@ async function askGemini(items, model, fetch, settle) {
     return raceGemini(call, { maxCalls: CROP_MAX_CALLS, hedgeMs, deadlineAt, slot });
   });
   const late    = Object.assign(new Error('past the crop round\'s cutoff'), { code: 'AI_TIMEOUT' });
+  const gone    = Object.assign(new Error('the page stopped listening'), { code: 'AI_TIMEOUT' });
   const cutoff  = setTimeout(() => runs.forEach(r => r.stop(late)), cutoffMs());
+  const onAbort = () => { clearTimeout(cutoff); runs.forEach(r => r.stop(gone)); };
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
   const lost    = new Set();   // the items with no live answer
   const entries = await Promise.all(runs.map((r, i) => r.result
     .catch(e => ({ id: items[i].id, error: e && e.code === 'AI_TIMEOUT' ? 'AI_TIMEOUT' : 'AI_FAILED' }))
     .then(e => { if (e.error) lost.add(i); return settle(e); })));
   clearTimeout(cutoff);
+  if (signal) signal.removeEventListener('abort', onAbort);
 
   const whys = [...new Set(runs.filter((r, i) => lost.has(i) && r.stats.why).map(r => r.stats.why))];
   if (whys.length) console.warn(`photo-leads: ${lost.size} item(s) unanswered: ${whys.join('; ')}`);
@@ -162,7 +173,7 @@ function record(dir, key, model, items) {
 }
 
 // body: { key, items: [{ id, kind, type, value, image, window }] }, already
-// checked by the route. opts: { fetch, fixturesDir, onItem }.
+// checked by the route. opts: { fetch, fixturesDir, onItem, signal }.
 async function readLeads(body, opts = {}) {
   const started     = Date.now();
   const { key }     = obj(body);
@@ -190,7 +201,7 @@ async function readLeads(body, opts = {}) {
     return report(saved || e);
   };
   const model = photoGeminiModel();
-  const live  = await askGemini(items, model, opts.fetch || globalThis.fetch, settle);
+  const live  = await askGemini(items, model, opts.fetch || globalThis.fetch, settle, opts.signal);
   const out   = live.entries;
   if (recording && live.ok && isSafeId(key)) record(fixturesDir, key, model, out.filter(e => !e.error));
   return live.ok === 0 && fromFile ? done(out, 'fixture', file.model, live.resent, live.retries)

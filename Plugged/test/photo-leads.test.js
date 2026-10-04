@@ -69,6 +69,19 @@
 //   waits on the cutoff. The tests that time the 25 s cutoff set
 //   PHOTO_LEADS_TIMEOUT_MS=25000 themselves (cutoffAt25()).
 //
+// - #177 (section 10), the round stops when nobody is listening:
+//   readLeads(body, opts) takes opts.signal (an AbortSignal). Aborting it ends
+//   the round at once, as the cutoff does but without waiting for it: every
+//   call in flight is aborted; no call goes out after (no queued first call,
+//   no pending retry, no stall resend); readLeads resolves without the clock
+//   moving, with its timers cleared; an item already answered keeps its
+//   answer and every other item (in flight, waiting on a retry, or still
+//   queued) is { id, error: 'AI_TIMEOUT' }; onItem is still called exactly
+//   once per id. The route aborts that signal when the client closes the
+//   request before the response has finished (the page's Cancel, close or
+//   Build it aborting its fetch); the [photo-leads] line is still written,
+//   and the server keeps answering.
+//
 // The golden, test/fixtures/prompts/photo-crop.txt, was written by hand from
 // the issue's Step 4. It holds what is sent for a resistor (value 470) and a
 // wire, laid out as:
@@ -1402,4 +1415,86 @@ test('#173 pin: route: without Accept application/x-ndjson (none, application/js
   assert.equal(seventh.status, 429, `the 7th request in a minute got ${seventh.status}`);
   assert.match(String(seventh.headers['content-type']), /^application\/json/, `the 429 stays JSON: ${seventh.headers['content-type']}`);
   assert.equal(typeof (seventh.body && seventh.body.reply), 'string', `the 429 body: ${seventh.raw.slice(0, 200)}`);
+});
+
+// ── 10. Stopping the round when nobody is listening (#177) ──────────────────
+// The page aborts its NDJSON request on Cancel, close or Build it, but the
+// route kept up to 24 Gemini calls running to the 40 s cutoff (with resends
+// and retries), their lines going nowhere: quota spent on a free-tier key.
+
+test('#177: readLeads(body, { signal }): aborting the signal mid-round ends it at once: the calls in flight are aborted, readLeads resolves without the clock moving, R1 keeps its answer and every other item (in flight, waiting on a retry, or still queued) is AI_TIMEOUT, onItem once per id, no timer left, and no call goes out after (no queued first call, no retry, no 12 s resend)', async () => {
+  process.env.PHOTO_LEADS_CONCURRENCY = '2';
+  const items = [item('R1', { window: WIN_R1 }), item('LED1'), item('W1', { window: WIN_W1 }), item('X1'), item('R2')];
+  // R1 answers at once; LED1's first call is a 503 (its retry is due 1–2 s
+  // later); their slots go to W1 and X1, which hang; R2 waits for a slot.
+  const fake = fakeGemini(items, c => (c.id === 'R1' ? answer(P1) : c.id === 'LED1' && c.n === 1 ? status(503) : HANG));
+  const ac = new AbortController();
+  const seen = [];
+  const s = start({ key: 'no-saved-leads', items }, fake, { signal: ac.signal, onItem: e => seen.push(e.id) });
+  const sent = () => fake.calls.map(c => c.id);
+  await until(() => fake.calls.length === 4, () => `the first 4 calls; sent: ${sent().join(' ')}`);
+  await advance(500);
+  assert.deepStrictEqual(sent(), ['R1', 'LED1', 'W1', 'X1'], 'test check: R1 answered and LED1 failed at once, so W1 and X1 took their slots; R2 waits; LED1\'s retry is not due before 1 s');
+  assert.deepStrictEqual(seen, ['R1'], 'test check: only R1 has settled');
+  assert.equal(s.done, false, 'test check: the round is still open at 0.5 s');
+
+  ac.abort();
+  await until(() => s.done, () => `readLeads had not resolved after its signal was aborted (the clock did not move): it keeps going toward its ${DEFAULT_CUTOFF_MS / 1000} s cutoff. `
+    + `Calls still running: ${fake.calls.filter(c => !c.signal.aborted && c.id !== 'R1').map(c => `${c.id}#${c.n}`).join(' ') || 'none'}`);
+  const out = result(s);
+  for (const c of fake.calls.filter(c => c.id !== 'R1')) assert.ok(c.signal && c.signal.aborted, `${c.id}'s call ${c.n} was still running after the abort`);
+  assert.deepStrictEqual(out.items, [
+    { id: 'R1', found: true, leads: R1_P1, conf: 0.8 },
+    { id: 'LED1', error: 'AI_TIMEOUT' },
+    { id: 'W1', error: 'AI_TIMEOUT' },
+    { id: 'X1', error: 'AI_TIMEOUT' },
+    { id: 'R2', error: 'AI_TIMEOUT' },
+  ], 'R1 answered before the abort; LED1 (waiting on its retry), W1 and X1 (in flight) and R2 (queued) are AI_TIMEOUT, in request order');
+  assert.equal(vi.getTimerCount(), 0, `${vi.getTimerCount()} timer(s) left after the abort: the cutoff, a resend or LED1's retry would still fire`);
+  assert.deepStrictEqual([...seen].sort(), items.map(it => it.id).sort(), `onItem once per id; it got ${JSON.stringify(seen)}`);
+
+  await advance(DEFAULT_CUTOFF_MS + HEDGE_MS);
+  assert.deepStrictEqual(sent(), ['R1', 'LED1', 'W1', 'X1'], 'no call went out after the abort: not R2 (queued), not LED1\'s retry, no 12 s resend');
+  assert.equal(seen.length, items.length, `onItem exactly once per id; it got ${JSON.stringify(seen)}`);
+});
+
+test('#177 bug: route: the page closes the NDJSON request mid-stream (Cancel, close, Build it) → every Gemini call in flight is aborted at once and none goes out after (no 12 s resend); the [photo-leads] line is still written; the server answers the next request', async () => {
+  const items = [item('R1', { window: WIN_R1 }), item('LED1'), item('W1', { window: WIN_W1 })];
+  const fake = fakeGemini(items, c => (c.id === 'R1' ? after(1000, answer(P1)) : HANG));
+  vi.stubGlobal('fetch', fake.fetch);
+  vi.useFakeTimers(FAKE);
+  const s = openPost('/api/photo/leads', { key: 'leads-close-177', items }, { accept: NDJSON });
+  const running = () => fake.calls.filter(c => c.id !== 'R1' && !c.signal.aborted).map(c => `${c.id}'s call ${c.n}`);
+  try {
+    await until(() => fake.calls.length === 3, 'the 3 first calls');
+    await advance(1000);
+    await until(() => lines(s).length >= 1, () => `no R1 line after it answered at 1 s: ${JSON.stringify(s.raw.slice(0, 300))}`);
+    assert.deepStrictEqual(lines(s), [{ id: 'R1', found: true, leads: R1_P1, conf: 0.8 }],
+      'test check: R1\'s line is on the wire (the round was not stopped when the request body was read)');
+    assert.deepStrictEqual(running(), ['LED1\'s call 1', 'W1\'s call 1'], 'test check: LED1 and W1 are still out');
+
+    logs.length = 0;
+    s.destroy();   // the page aborted its fetch
+    await until(() => running().length === 0,
+      () => `the client closed the stream, but ${running().join(' and ')} kept running (the route must abort readLeads' signal when the request closes before the response finished)`);
+    await until(() => logs.some(l => l.startsWith('[photo-leads]')), () => `no [photo-leads] line after the close: ${JSON.stringify(logs)}`);
+    const line = logs.find(l => l.startsWith('[photo-leads]'));
+    for (const want of [/\bkey=leads-close-177\b/, /\bitems=3\b/, /\bok=1\b/, /\btimeout=2\b/]) assert.match(line, want, `the [photo-leads] line: ${line}`);
+
+    await advance(DEFAULT_CUTOFF_MS);
+    assert.deepStrictEqual(fake.calls.map(c => c.id), ['R1', 'LED1', 'W1'], 'no call went out after the close (no 12 s resend)');
+    assert.equal(logs.filter(l => l.startsWith('[photo-leads]')).length, 1, `one [photo-leads] line per request: ${JSON.stringify(logs)}`);
+    assert.deepStrictEqual(logs.filter(l => /uncaught|unhandled/i.test(l)), [], 'the close threw nothing');
+  } finally {
+    s.destroy();
+    vi.useRealTimers();
+  }
+
+  // The server is still up: the next streamed request is answered in full.
+  offline();
+  const next = await postLeads(validBody(), { accept: NDJSON });
+  assert.equal(next.status, 200, `the next request got ${next.status}: ${next.raw.slice(0, 200)}`);
+  const all = lines({ raw: next.raw, ended: true });
+  assert.deepStrictEqual(all.filter(l => !l.done), [{ id: 'R1', error: 'AI_FAILED' }, { id: 'W1', error: 'AI_FAILED' }], 'one line per id (no key: AI_FAILED)');
+  assert.equal(all[all.length - 1].done, true, `then done: ${JSON.stringify(all)}`);
 });
