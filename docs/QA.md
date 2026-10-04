@@ -40,7 +40,7 @@ Build these by hand, then click Run Simulation.
 ## Core flows
 | ID | Do | Pass when |
 |---|---|---|
-| CF-01 | Landing page → Sign in → Google | The dashboard opens with your name at the top |
+| CF-01 | Landing page → Sign in → Google | The dashboard opens with your name in the sidebar (bottom left, above Log Out) |
 | CF-02 | Build any circuit, wait 2 s, go back to the dashboard, open it again | It's the same circuit, with the same parts and wires |
 | CF-03 | Dashboard → a circuit's ··· menu → Publish | It appears in the Sparks tab |
 | CF-04 | Sign out, then sign back in | Your circuits are still there |

@@ -35,6 +35,15 @@
     try { localStorage.setItem(LS_KEY, JSON.stringify(projects)); } catch {}
   }
 
+  // This tab's open circuit, so a reload of the editor reopens it.
+  function rememberOpenCircuit() {
+    if (!state.circuitId) return;
+    try { sessionStorage.setItem(SparkyStorage.OPEN_CIRCUIT_KEY, state.circuitId); } catch {}
+  }
+  function forgetOpenCircuit() {
+    try { sessionStorage.removeItem(SparkyStorage.OPEN_CIRCUIT_KEY); } catch {}
+  }
+
   // Find the next available "Untitled (N)" name
   function nextUntitledName() {
     const names = new Set(lsProjects().map(p => p.name));
@@ -676,7 +685,7 @@
       const nf = document.getElementById('circuit-name-field');
       if (nf) nf.textContent = data.name;
     }
-    if (data.id) state.circuitId = data.id;
+    if (data.id) { state.circuitId = data.id; rememberOpenCircuit(); }
 
     const kept   = state.components.filter(c => c.unknown).length;
     const loaded = `Loaded "${data.name || 'circuit'}" — ${state.components.length - kept} components`;
@@ -990,6 +999,7 @@
     clearBoard();
     if (keepCircuit) { refreshCounts(); return; }
     state.circuitId   = null;
+    forgetOpenCircuit();
     const newName = nextUntitledName();
     state.circuitName = newName;
     const nf = document.getElementById('circuit-name-field');
@@ -1063,7 +1073,7 @@
     // Mint the id now if the autosave has not yet. A snapshot carrying a null
     // id would, once undone, make the next autosave file a second project row
     // for the same circuit.
-    if (!state.circuitId) state.circuitId = newCircuitId();
+    if (!state.circuitId) { state.circuitId = newCircuitId(); rememberOpenCircuit(); }
     const snap = serializeBoard();
     snap.id   = state.circuitId;
     snap.name = state.circuitName;
@@ -1088,6 +1098,7 @@
     if (again) App.selectItem(again, 'component');
     state.circuitId   = snap.id;
     state.circuitName = snap.name;
+    rememberOpenCircuit();
     const nf = document.getElementById('circuit-name-field');
     if (nf) nf.textContent = snap.name;
     refreshCounts();
@@ -1123,6 +1134,7 @@
     if (!state.circuitId) {
       state.circuitId = newCircuitId();
     }
+    rememberOpenCircuit();
 
     // Lightweight thumbnail for auto-save (smaller than download)
     let thumb = null;
@@ -1180,15 +1192,22 @@
   setMode('select');
   animate();
 
-  // Auto-load circuit passed from dashboard via sessionStorage
-  const _pending = sessionStorage.getItem('sparky_load_circuit');
-  if (_pending) {
+  // Open the circuit the dashboard handed over (sparky_load_circuit), or on a
+  // reload the one this tab had open; otherwise start a new circuit.
+  let boot = null;
+  try {
+    boot = SparkyStorage.pickBootCircuit({
+      pending:  sessionStorage.getItem('sparky_load_circuit'),
+      openId:   sessionStorage.getItem(SparkyStorage.OPEN_CIRCUIT_KEY),
+      projects: lsProjects(),
+    });
     sessionStorage.removeItem('sparky_load_circuit');
+  } catch (e) { console.warn('Could not read the circuit to open', e); }
+  if (boot) {
     try {
-      const loaded = JSON.parse(_pending);
       // Restore project ID so auto-save updates the same entry
-      if (loaded.id) state.circuitId = loaded.id;
-      App.loadCircuitData(loaded);
+      if (boot.id) state.circuitId = boot.id;
+      App.loadCircuitData(boot);
       clearHistory();   // the opened circuit is the starting point, not an edit
     } catch (e) { console.warn('Auto-load failed', e); }
   } else {

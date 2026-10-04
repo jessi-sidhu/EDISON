@@ -180,3 +180,26 @@ test('broken JSON arguments are still answered as not valid JSON', async () => {
   assert.match(resultFor(fetch.calls[1], 'x'), /not valid JSON/);
   assert.deepEqual(out.actions, []);
 });
+
+// Issue #66 (QA AI-11): the prompt DeepSeek gets for a night-light or
+// temperature-alarm request says how the user controls the sensor: the
+// generated "<key> (<unit>)" line for the part's tool (slider, scroll), and
+// the BUILDING BEHAVIOR rule to tell the user.
+for (const [message, tool, control] of [
+  ['Build a night light that turns on an LED when it gets dark', 'place_ldr', 'light (lux)'],
+  ['Build a temperature alarm with a buzzer that sounds when it gets hot', 'place_thermistor', 'temperature (°C)'],
+]) {
+  test(`the prompt sent for "${message}" says how to control ${tool}: ${control}, slider, scroll`, async () => {
+    const fetch = scriptedDeepSeek([{ content: 'Sure.', tool_calls: null }]);
+    vi.stubGlobal('fetch', fetch);
+    await ask(message);
+
+    assert.ok(toolNames(fetch.calls[0]).includes(tool), `round 1 sends ${tool}: ${JSON.stringify(toolNames(fetch.calls[0]))}`);
+    const system = fetch.calls[0].messages.find(m => m.role === 'system').content;
+    const lines = system.split('\n');
+    const line = lines.find(l => new RegExp(`\\b${tool}\\b`).test(l) && l.includes(control) && /\bslider\b/i.test(l) && /\bscroll/i.test(l));
+    assert.ok(line, `expected a line naming ${tool}, "${control}", slider and scroll, got: ${JSON.stringify(lines.filter(l => l.includes(tool)))}`);
+    assert.ok(lines.some(l => /\bslider\b/i.test(l) && /\bscroll/i.test(l) && /\bsimulat/i.test(l) && !l.includes(tool)),
+      'expected the BUILDING BEHAVIOR rule (slider, scroll, simulation) in the prompt sent');
+  });
+}

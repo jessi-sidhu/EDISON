@@ -58,6 +58,11 @@ const MODEL_NAME = AI_PROVIDER === 'deepseek' ? (process.env.DEEPSEEK_MODEL || '
 const guideLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(def => def && def.ai.guide)
   .map(def => `- ${toolName(def)}: ${def.ai.guide}`);
 
+// How the user adjusts each slider control of the tools sent, from def.controls.
+const controlLines = tools => tools.map(t => PART_BY_TOOL.get(t.name)).filter(Boolean)
+  .flatMap(def => Object.entries(def.controls || {}).filter(([, c]) => c.type === 'slider')
+    .map(([key, c]) => `- ${toolName(def)}: the user adjusts ${key} (${c.unit}) with a slider or by scrolling over it`));
+
 // The prompt for a request that sends `tools`: only their guides go in.
 const buildPrompt = tools => [
   `You are Sparky, a friendly AI electronics tutor. You help beginners build circuits on a virtual ${TOTAL_HOLES}-point breadboard.`,
@@ -94,6 +99,7 @@ const buildPrompt = tools => [
   'COMPONENT RULES:',
   ...GENERATED.pinRoles,
   ...guideLines(tools),
+  ...controlLines(tools),
   '- When the user names a value, pass it: "a 1 kΩ resistor" → place_resistor with resistance: 1000 (ohms), "a green LED" → place_led with color: "green", "a 5 V battery" → place_battery with voltage: 5. Leave it out otherwise.',
   '',
   'PART VALUES (a plain number in the unit shown, or one of the names):',
@@ -117,6 +123,7 @@ const buildPrompt = tools => [
   '- After building, write 2-3 sentences explaining what you built and how it works.',
   '- When you explain a build with more than one LED, say which topology you built: series, parallel, or separate branches.',
   '- When you build LEDs in series, say in your reply that they are dimmer than one LED alone, or need a lower resistor.',
+  '- When a build uses a part you can adjust (a slider or switch), tell the user how: click the part and use its slider in the panel on the right, or scroll over it (or click it, for buttons and switches) while the simulation runs.',
   '',
   'CRITICAL WIRING RULES:',
   '- Placing a component on the board does NOT connect it to power or ground.',

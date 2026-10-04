@@ -7,6 +7,11 @@
 //
 //  EXPORTS
 //  ───────
+//  projectsKey(uid), starredKey(uid), currentUid(storage),
+//  signIn(storage, uid), signOut(storage)
+//  OPEN_CIRCUIT_KEY  sessionStorage key: id of the circuit open in this tab
+//  pickBootCircuit({ pending, openId, projects }) → circuit to open, or null
+//
 //  Browser: window.SparkyStorage (the dashboard and the editor both load it)
 //  Node:    module.exports, so a test runner can call it.
 // ─────────────────────────────────────────────────────────────
@@ -81,5 +86,30 @@
 
   function starredKey(uid) { return LEGACY_STARRED + ':' + (uid || 'guest'); }
 
-  return { projectsKey, starredKey, currentUid, signIn, signOut };
+  // sessionStorage: the id of the circuit open in this tab, so a reload of
+  // the editor reopens it instead of starting another "Untitled (N)".
+  const OPEN_CIRCUIT_KEY = 'sparky_open_circuit';
+
+  // Which circuit the editor opens when it boots. A circuit handed over by
+  // the dashboard (pending, as JSON) wins; failing that, the saved circuit
+  // this tab had open (openId); failing that, null (a new circuit). Pure.
+  function pickBootCircuit({ pending, openId, projects }) {
+    if (pending) {
+      try {
+        const loaded = JSON.parse(pending);
+        if (loaded && typeof loaded === 'object') return loaded;
+      } catch {}
+    }
+    if (!openId || !Array.isArray(projects)) return null;
+    const p = projects.find(q => q && q.id === openId);
+    if (!p) return null;
+    return {
+      id:         p.id,
+      name:       p.name,
+      components: p.components ?? p.circuit?.components ?? [],
+      wires:      p.wires      ?? p.circuit?.wires      ?? [],
+    };
+  }
+
+  return { projectsKey, starredKey, currentUid, signIn, signOut, OPEN_CIRCUIT_KEY, pickBootCircuit };
 });

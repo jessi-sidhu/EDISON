@@ -735,6 +735,7 @@
     function clearAppStorage() {
       SparkyStorage.signOut(localStorage);
       sessionStorage.removeItem('sparky_load_circuit');
+      sessionStorage.removeItem(SparkyStorage.OPEN_CIRCUIT_KEY);
       _circuitsCache = [];
       _sparksCache   = [];
     }
@@ -1054,6 +1055,7 @@
 
     function newCircuit() {
       sessionStorage.removeItem('sparky_load_circuit');
+      sessionStorage.removeItem(SparkyStorage.OPEN_CIRCUIT_KEY);
       window.location.href = 'circuit3d/index.html';
     }
 
@@ -1264,9 +1266,6 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     }
-
-    // ── Init ───────────────────────────────────────────────────
-    renderMyCircuits();
   </script>
 </body>
 </html>
