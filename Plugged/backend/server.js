@@ -796,6 +796,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
 
   const wireEdges = wires.map(w => [nodeKey(w.from), nodeKey(w.to)]);
   const edges = wireEdges.slice();
+  const steady = wireEdges.slice();   // wires and resistors: no voltage across them when no current flows
   // One-way parts: { part, def, el, anode, cathode } with anode/cathode as nodes.
   const diodes = [];
   // Every placed part, and a graph where every part element conducts both
@@ -820,6 +821,7 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
       const [x, y] = el.pins;
       joins.push({ x: node(x), y: node(y), part: i });
       if (el.kind === 'R' || el.kind === 'SW') edges.push([node(x), node(y)]);
+      if (el.kind === 'R') steady.push([node(x), node(y)]);
       if (el.kind === 'I') isrcPairs.push([node(y), node(x)]);
       if (el.kind === 'D') diodes.push({ i, el, anode: node(x), cathode: node(y), outer: x in holeOf && y in holeOf, holeOf });
     }
@@ -957,13 +959,77 @@ function findCircuitProblems(actions, { labelForm = true } = {}) {
   // A diode with a breakdown voltage (vz, a Zener) is used reversed: its
   // cathode on + and anode on − is how it regulates, not a mistake.
   const reversedZener = d => d.el.vz !== undefined && pos.has(d.cathode) && neg.has(d.anode);
+
+  // #77: the graph's "backwards" is only a candidate. A source with more
+  // than one V element (the bench supply's com is the − of one pair and the
+  // + of the other) can put a whole rail on both sides. So a candidate is
+  // backwards only if the simulated build reverse-biases it: V(cathode) −
+  // V(anode) above REVERSE_VOLTS. A floating pin is bounded instead: an
+  // anode by the simulator's cap (pinMax), a cathode from below by the off
+  // diodes feeding its node (V(their anode) − vf). Unbounded is not
+  // reverse-biased. The simulation runs once, only when some part is a
+  // candidate; if it fails, the graph's verdict stands.
+  const REVERSE_VOLTS = 0.5;
+  let simmed;   // undefined until needed; then { at: part index → PartResult }, or null
+  function simulated() {
+    if (simmed !== undefined) return simmed;
+    simmed = null;
+    try {
+      const build = fromLastDeleteAll(actions);
+      if (!build) return simmed;
+      const { board, errors } = Board.apply(Board.empty(), build);
+      if (errors.length) return simmed;   // the sim would see a different build (e.g. old battery pin form)
+      const { components, wires: simWires } = Board.toSim(board);
+      const r = Sim.analyze(components, simWires);
+      const same = (p, holes) => p.holes && p.holes.length === holes.length
+        && p.holes.every((h, k) => h === String(holes[k]).toLowerCase());
+      const at = i => {
+        const pp = placedParts.find(p => p.i === i);
+        if (!pp || pp.def.place.kind !== 'span' || i < actions.length - build.length) return null;
+        const part = board.parts.find(p => p.type === pp.def.type && same(p, [pp.a.holeA, pp.a.holeB]));
+        const res = part && r.parts && r.parts[part.label];
+        return res ? res.r : null;
+      };
+      simmed = { at };
+    } catch { simmed = null; }
+    return simmed;
+  }
+  const known = v => typeof v === 'number' && Number.isFinite(v);
+  // The lowest a floating cathode node can sit: each off diode into it holds
+  // it above V(its anode) − vf.
+  function cathodeFloor(sim, node) {
+    const group = reach(node, steady);
+    let floor = null;
+    for (const e of diodes) {
+      if (!e.outer || !group.has(e.cathode)) continue;
+      const er = sim.at(e.i);
+      const va = er && er.pins[e.el.pins[0]];
+      const vf = er && er.values && known(er.values.vf) ? er.values.vf : e.el.vf;   // the placed part's own vf
+      if (known(va) && known(vf)) floor = Math.max(floor === null ? -Infinity : floor, va - vf);
+    }
+    return floor;
+  }
+  // true / false from the simulation; null when it can't say (keep the graph's
+  // verdict): no simulation, or a part dead in it with neither pin bounded.
+  function reverseBiased(d) {
+    const sim = simulated();
+    const res = sim && sim.at(d.i);
+    if (!res) return null;
+    const [ap, cp] = d.el.pins;
+    const vc = known(res.pins[cp]) ? res.pins[cp] : cathodeFloor(sim, d.cathode);
+    const va = known(res.pins[ap]) ? res.pins[ap] : (res.pinMax && res.pinMax[ap]);
+    if (!known(vc) && !known(va)) return null;
+    return known(vc) && known(va) && vc - va > REVERSE_VOLTS;
+  }
+
   for (const { i, a, def, holeOf, pinNodes } of fullRebuild ? placedParts : []) {
     if (def.place.kind === 'footprint') {
       problems.push(...footprintProblems(i, a, def, holeOf, pinNodes));
       continue;
     }
     const backwards = diodes.find(d => d.i === i && d.outer && !reversedZener(d)
-      && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode));
+      && !(pos.has(d.anode) && neg.has(d.cathode)) && pos.has(d.cathode) && neg.has(d.anode)
+      && reverseBiased(d) !== false);
     if (backwards) {
       const { el, holeOf } = backwards;
       const [ap, cp] = el.pins;

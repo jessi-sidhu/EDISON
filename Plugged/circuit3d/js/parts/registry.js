@@ -40,8 +40,9 @@
     D:  { pins: ['pins'],        nums: ['vf', 'ron'] },
     E:  { pins: ['out', 'ctrl'], nums: ['gain'] },
     G:  { pins: ['out', 'ctrl'], nums: ['gain'] },
+    C:  { pins: ['pins'],        nums: ['farads'] },
   };
-  const RESERVED = ['C', 'L'];
+  const RESERVED = ['L'];
 
   const SERIES = {
     E12: [1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2],

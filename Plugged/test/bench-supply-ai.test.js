@@ -309,3 +309,250 @@ test('guard: two batteries on the same rails', () => {
     ...PLUS_LED,
   ]), ['BAT1 and BAT2 are wired to the same rails (tp and tn), so they fight each other. Give the second battery the bottom rails (bp_N and bn_N), with its circuit in rows f–j.']);
 });
+
+// ── #77: "backwards" only for a part that really is reverse-biased ────────
+// The supply's second V element is (com, neg), so COM, wired to tn, is the
+// "+" of one pair and the "−" of the other. Pooling every pair's + and −
+// sides puts the whole ground rail on "the power side", and a broken build
+// gets told to flip a part that is the right way round. The battery, with
+// one pair, gives the right advice for the same builds.
+//
+// A part is "backwards" only when the build really reverse-biases it
+// (cathode clearly above anode). A correct LED behind a blocking reversed
+// diode has "no forward path"; one with its anode wired to nothing is "not
+// connected between power and ground", as on the battery.
+//
+// The repros are judged where the advice surfaces: the Heads up the student
+// reads (finishAIReply) and the repair loop's check (checkBuild on the
+// rebuild). Both must agree.
+
+const supply12 = () => [
+  { tool: 'delete_all' },
+  { tool: 'place_bench_supply', voltage: 12 },
+  wire('PS1.0', `tp_${N}`, 'red'),
+  wire('PS1.1', `tn_${N}`, 'black'),
+];
+const battery9 = () => [
+  { tool: 'delete_all' },
+  { tool: 'place_battery' },
+  wire('BAT1.0', `tp_${N}`, 'red'),
+  wire('BAT1.1', `tn_${N}`, 'black'),
+];
+const NO_FORWARD = at => `The LED at ${at} has no forward path from + to −, so it cannot light. Check each diode on its path: cathode (holeA) toward −, anode (holeB) toward +.`;
+const BACKWARDS  = (part, cathode, anode) => `The ${part} at ${cathode}/${anode} is backwards: its cathode ${cathode} is on the power side and its anode ${anode} is on the ground side. Swap holeA and holeB.`;
+
+// The problem lines each surface gives a build.
+function surfaces(actions) {
+  const check = Server.checkBuild(actions.map(a => ({ ...a })), null);
+  const reply = Server.finishAIReply({ reply: 'Built it.', actions: actions.map(a => ({ ...a })) }).reply;
+  const heads = reply.includes('Heads up') ? reply.split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2)) : [];
+  return { checkBuild: check, 'Heads up': heads };
+}
+// What `lines` say about the part at `at` ("d12/d10"), as one meaning.
+function verdict(lines, at) {
+  const about = lines.filter(p => p.includes(` at ${at} `));
+  if (about.length === 0) return 'none';
+  if (about.some(p => /backwards/.test(p))) return 'backwards';
+  if (about.some(p => /no forward path/.test(p))) return 'no forward path';
+  if (about.some(p => /not connected between power and ground/.test(p))) return 'not connected';
+  return `other: ${about.join(' | ')}`;
+}
+// Asserts each part's meaning on both surfaces: { 'd12/d10': 'no forward path', … }.
+function expectVerdicts(actions, want) {
+  for (const [where, lines] of Object.entries(surfaces(actions))) {
+    const got = Object.fromEntries(Object.keys(want).map(at => [at, verdict(lines, at)]));
+    assert.deepStrictEqual(got, want, `${where}: ${JSON.stringify(lines)}`);
+  }
+}
+
+// Repro 1, from column c (2 by default): tp_c → a<c>; 470 Ω b<c>–b<c+4>;
+// 1N4148 reversed (cathode c<c+4> toward +, anode c<c+8>); red LED the right
+// way round (anode d<c+8>, cathode d<c+10>); a<c+10> → tn. The reversed
+// diode blocks the LED. Swapping the LED, as "backwards" advises, would make
+// it truly backwards.
+const repro1 = (c = 2) => [
+  wire(`tp_${c}`, `a${c}`, 'red'),
+  { tool: 'place_resistor', holeA: `b${c}`, holeB: `b${c + 4}`, resistance: 470 },
+  { tool: 'place_diode', holeA: `c${c + 4}`, holeB: `c${c + 8}` },
+  { tool: 'place_led', holeA: `d${c + 10}`, holeB: `d${c + 8}` },
+  wire(`a${c + 10}`, `tn_${c + 10}`, 'black'),
+];
+const REPRO_1 = repro1();
+
+// Repro 2: an LED whose anode column (c10) is wired to nothing and whose
+// cathode (c12) is on tn. It is on no path at all.
+const REPRO_2 = [
+  { tool: 'place_led', holeA: 'c12', holeB: 'c10' },
+  wire('a12', 'tn_12', 'black'),
+];
+
+// SPLIT's two working halves: the + rail resistor + LED and the − rail ones.
+const SPLIT_PARTS = ['b2/b6', 'c8/c6', 'b20/b24', 'c26/c24'];
+const quiet = Object.fromEntries(SPLIT_PARTS.map(at => [at, 'none']));
+
+test('#77 repro 1: bench supply → 470 Ω → reversed 1N4148 → correct LED → tn: the diode is backwards, the LED has "no forward path"', () => {
+  needSupply();
+  expectVerdicts([...supply12(), ...REPRO_1], { 'c6/c10': 'backwards', 'd12/d10': 'no forward path' });
+});
+
+for (const [name, before] of [
+  ['alone on the supply', supply12()],
+  ['beside a working resistor + LED', [...supply12(), ...PLUS_LED]],
+  ["beside SPLIT's two working halves", SPLIT],
+]) {
+  test(`#77 repro 2 (${name}): an LED with its anode column unwired and its cathode on tn is "not connected", not "backwards"`, () => {
+    needSupply();
+    const extra = before === SPLIT ? quiet : {};
+    expectVerdicts([...before, ...REPRO_2], { 'c12/c10': 'not connected', ...extra });
+  });
+}
+
+test("#77 repro 1 beside SPLIT's two working halves: the diode is backwards, the LED has \"no forward path\", the halves get nothing", () => {
+  needSupply();
+  // Moved to column 30: resistor b30–b34, diode c34/c38, LED d40/d38.
+  expectVerdicts([...SPLIT, ...repro1(30)], { 'c34/c38': 'backwards', 'd40/d38': 'no forward path', ...quiet });
+});
+
+for (const [name, build, parts] of [
+  ['repro 1', REPRO_1, ['c6/c10', 'd12/d10']],
+  ['repro 2', REPRO_2, ['c12/c10']],
+]) {
+  test(`#77 ${name} on the 12 V bench supply means the same, part for part, as on the 9 V battery`, () => {
+    needSupply();
+    for (const [where, onBattery] of Object.entries(surfaces([...battery9(), ...build]))) {
+      const onSupply = surfaces([...supply12(), ...build])[where];
+      const said = lines => Object.fromEntries(parts.map(at => [at, verdict(lines, at)]));
+      assert.deepStrictEqual(said(onSupply), said(onBattery),
+        `${where}: supply ${JSON.stringify(onSupply)} vs battery ${JSON.stringify(onBattery)}`);
+    }
+  });
+}
+
+// The − rail mirror: COM (tn_21 → a20) → 470 Ω b20–b24 → 1N4148 the right
+// way (anode c24, cathode c28) → LED backwards (cathode d28 toward COM,
+// anode d30) → a30 → bn_30. Only the LED is wrong; the diode is forward.
+test('#77 − rail: a forward 1N4148 ahead of a backwards LED: the forward diode is not called backwards (no forward path); the LED is', () => {
+  needSupply();
+  expectVerdicts([
+    ...supply12(),
+    wire('PS1.2', `bn_${N}`, 'blue'),
+    wire('tn_21', 'a20', 'black'),
+    { tool: 'place_resistor', holeA: 'b20', holeB: 'b24', resistance: 470 },
+    { tool: 'place_diode', holeA: 'c28', holeB: 'c24' },
+    { tool: 'place_led', holeA: 'd28', holeB: 'd30' },
+    wire('a30', 'bn_30', 'blue'),
+  ], { 'd28/d30': 'backwards', 'c28/c24': 'no forward path' });
+});
+
+// Pins (pass today): the fix must not hide a truly backwards part, break
+// the − rail or the full ± span, change the battery's advice, or call a
+// reversed Zener backwards. The ± build with both LEDs correct ([]) and
+// with the − rail LED backwards, the plain + rail backwards LED, and the
+// correct single-rail LED are pinned above.
+const placeZener = (cathode, anode) => ({ tool: 'place_zener', holeA: cathode, holeB: anode });
+for (const [name, source, build, expected] of [
+  ['battery: repro 1 gives "diode backwards" + "LED no forward path"', battery9, REPRO_1,
+    [BACKWARDS('diode', 'c6', 'c10'), NO_FORWARD('d12/d10')]],
+  ['battery: repro 2 gives "not connected"', battery9, REPRO_2,
+    ['The LED at c12/c10 is not connected between power and ground, so no current flows through it.']],
+  ['supply, + rail: 470 Ω → forward 1N4148 → backwards LED → COM still names the LED backwards', supply12, [
+    wire('tp_2', 'a2', 'red'),
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6', resistance: 470 },
+    { tool: 'place_diode', holeA: 'c10', holeB: 'c6' },
+    { tool: 'place_led', holeA: 'd10', holeB: 'd12' },
+    wire('a12', 'tn_12', 'black'),
+  ], [
+    'The diode at c10/c6 has no forward path from + to −, so it cannot light. Check each diode on its path: cathode (holeA) toward −, anode (holeB) toward +.',
+    BACKWARDS('LED', 'd10', 'd12'),
+  ]],
+  ['supply, + rail: a 1N4148 alone, reversed (cathode toward +), is backwards', supply12, [
+    wire('tp_2', 'a2', 'red'),
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6', resistance: 470 },
+    { tool: 'place_diode', holeA: 'c6', holeB: 'c10' },
+    wire('a10', 'tn_10', 'black'),
+  ], [BACKWARDS('diode', 'c6', 'c10')]],
+  ['supply, − rail: COM → 470 Ω → reversed 1N4148 → correct LED → − gives "diode backwards" + "LED no forward path"', supply12, [
+    wire('PS1.2', `bn_${N}`, 'blue'),
+    wire('tn_21', 'a20', 'black'),
+    { tool: 'place_resistor', holeA: 'b20', holeB: 'b24', resistance: 470 },
+    { tool: 'place_diode', holeA: 'c24', holeB: 'c28' },
+    { tool: 'place_led', holeA: 'd30', holeB: 'd28' },
+    wire('a30', 'bn_30', 'blue'),
+  ], [BACKWARDS('diode', 'c24', 'c28'), NO_FORWARD('d30/d28')]],
+  ['supply, − rail: COM → 470 Ω → forward 1N4148 → correct LED → − has no problems', supply12, [
+    wire('PS1.2', `bn_${N}`, 'blue'),
+    wire('tn_21', 'a20', 'black'),
+    { tool: 'place_resistor', holeA: 'b20', holeB: 'b24', resistance: 470 },
+    { tool: 'place_diode', holeA: 'c28', holeB: 'c24' },
+    { tool: 'place_led', holeA: 'd30', holeB: 'd28' },
+    wire('a30', 'bn_30', 'blue'),
+  ], []],
+  ['supply, − rail: an LED with its cathode on bn and its anode unwired is "not connected"', supply12, [
+    wire('PS1.2', `bn_${N}`, 'blue'),
+    { tool: 'place_led', holeA: 'c42', holeB: 'c40' },
+    wire('a42', 'bn_42', 'blue'),
+  ], ['The LED at c42/c40 is not connected between power and ground, so no current flows through it.']],
+  // Across the full ± span (tp → bn): pos → com and com → neg are in
+  // series, so a load from + to − is forward only through both together.
+  // SPLIT plus tp_40 → a40, resistor b40–b44, LED anode c44 / cathode c46,
+  // a46 → bn_46.
+  ['supply, full ± span: a correct resistor + LED from tp to bn (beside SPLIT) has no problems', () => SPLIT, [
+    wire('tp_40', 'a40', 'red'),
+    { tool: 'place_resistor', holeA: 'b40', holeB: 'b44' },
+    { tool: 'place_led', holeA: 'c46', holeB: 'c44' },
+    wire('a46', 'bn_46', 'blue'),
+  ], []],
+  ['supply, full ± span: that LED flipped (cathode c44 toward +) is named backwards', () => SPLIT, [
+    wire('tp_40', 'a40', 'red'),
+    { tool: 'place_resistor', holeA: 'b40', holeB: 'b44' },
+    { tool: 'place_led', holeA: 'c44', holeB: 'c46' },
+    wire('a46', 'bn_46', 'blue'),
+  ], [BACKWARDS('LED', 'c44', 'c46')]],
+  // A Zener reversed is a regulator, never "backwards": in breakdown on
+  // 12 V, and below its 5.1 V breakdown on a 3 V supply (reverse-biased in
+  // the simulator, still not a mistake to flip).
+  ['supply, 12 V: 1 kΩ → reversed 5.1 V Zener (cathode c6, anode c10) → tn has no problems', supply12, [
+    wire('tp_2', 'a2', 'red'),
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6', resistance: 1000 },
+    placeZener('c6', 'c10'),
+    wire('a10', 'tn_10', 'black'),
+  ], []],
+  ['supply, 3 V: the same reversed Zener below breakdown has no problems', () => [
+    { tool: 'delete_all' },
+    { tool: 'place_bench_supply', voltage: 3 },
+    wire('PS1.0', `tp_${N}`, 'red'),
+    wire('PS1.1', `tn_${N}`, 'black'),
+  ], [
+    wire('tp_2', 'a2', 'red'),
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6', resistance: 1000 },
+    placeZener('c6', 'c10'),
+    wire('a10', 'tn_10', 'black'),
+  ], []],
+]) {
+  test(`#77 pin: ${name}`, () => {
+    needSupply();
+    assert.deepStrictEqual(problems([...source(), ...build]), expected);
+  });
+}
+
+// Pin: the old battery pin form (battery_0_pin0). Board.apply rejects it, so
+// the simulator cannot place this build and cannot overrule the checker: a
+// truly backwards LED must still be named backwards, both by
+// findCircuitProblems in old-form wording and in the Heads up finishAIReply
+// writes when the AI used the old form.
+test('#77 pin: old-form battery pins (battery_0_pin0/pin1): a backwards LED at c6/c8 is still named backwards', () => {
+  const build = [
+    { tool: 'delete_all' },
+    { tool: 'place_battery' },
+    wire('battery_0_pin0', `tp_${N}`, 'red'),
+    wire('battery_0_pin1', `tn_${N}`, 'black'),
+    wire('tp_2', 'a2', 'red'),
+    { tool: 'place_resistor', holeA: 'b2', holeB: 'b6' },
+    { tool: 'place_led', holeA: 'c6', holeB: 'c8' },   // cathode c6 toward +, anode c8 toward −
+    wire('a8', 'tn_8', 'black'),
+  ];
+  assert.deepStrictEqual(Server.findCircuitProblems(build.map(a => ({ ...a })), { labelForm: false }),
+    [BACKWARDS('LED', 'c6', 'c8')]);
+  const reply = Server.finishAIReply({ reply: 'Built it.', actions: build.map(a => ({ ...a })) }).reply;
+  assert.ok(reply.includes(BACKWARDS('LED', 'c6', 'c8')), `the Heads up names the LED backwards: ${reply}`);
+});

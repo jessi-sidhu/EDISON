@@ -254,6 +254,13 @@
       if (el.kind === 'SW' && el.closed) conductance(n1, n2, 1 / SW_OHMS);
       // I: a set current out of the source's `to` pin, back into its `from`.
       if (el.kind === 'I') { inject(n2, el.amps); inject(n1, -el.amps); }
+      // C in a time step (e.cap, set by analyzeCircuit): backward Euler,
+      // G = C/dt from a to b plus G·v_prev pushed into a. Open otherwise.
+      if (el.kind === 'C' && e.cap) {
+        conductance(n1, n2, e.cap.G);
+        inject(n1, e.cap.G * e.cap.vPrev);
+        inject(n2, -e.cap.G * e.cap.vPrev);
+      }
       if (el.kind !== 'D') return;
       // I(anode → cathode) = (Va − Vc ∓ V) / ron: Vf when on, −Vz in breakdown.
       const mode = modeOf.get(e), G = 1 / el.ron;
@@ -286,6 +293,7 @@
     if (el.kind === 'SW') return el.closed ? (sol.v(a) - sol.v(b)) / SW_OHMS : 0;
     if (el.kind === 'V') return sol.vCurrent.get(e) || 0;
     if (el.kind === 'I') return el.amps;
+    if (el.kind === 'C') return e.cap ? e.cap.G * (sol.v(a) - sol.v(b) - e.cap.vPrev) : 0;
     if (el.kind === 'D') {
       const vd = sol.v(a) - sol.v(b);
       if (mode === 'on')        return (vd - el.vf) / el.ron;
@@ -360,7 +368,7 @@
   const isSource = g => !!(g.part && g.part.def.ref !== undefined);
   const refNode  = g => g.nodes[g.part.def.pins.indexOf(g.part.def.ref)];
   const conducts = (e, modeOf) => !(e.el.kind === 'SW' && !e.el.closed) &&
-    !(modeOf && modeOf.get(e) === 'off');
+    !(e.el.kind === 'C' && !e.cap) && !(modeOf && modeOf.get(e) === 'off');
 
   function groundCircuits(graph, modeOf) {
     const uf = new UnionFind();
@@ -521,14 +529,19 @@
   //  A part loaded from an old file that breaks a placement rule carries
   //  comp.flag ("R1: <reason>", board-io.js flagPlacements). Each flag adds
   //  one warning line, and goes into that part's warnings.
-  function analyze(components, wires) {
-    return run(components, wires).r;
+  //
+  //  step = { dt, state } (optional) runs one time step of dt seconds: each
+  //  C starts at state[`${label}.${id}`] volts (0 when missing), and a
+  //  solved result also has state, each C's volts after the step. Without
+  //  dt a C is open.
+  function analyze(components, wires, step) {
+    return run(components, wires, step).r;
   }
 
   // analyze(), plus what simulationSummary reads: the graph, each part's
   // result by index, and the live nodes.
-  function run(components, wires) {
-    const out = analyzeCircuit(components, wires);
+  function run(components, wires, step) {
+    const out = analyzeCircuit(components, wires, step);
     for (const c of components) {
       if (!c || !c.flag) continue;
       out.r.lines.push({ text: '  ⚠ ' + c.flag, cls: 'sim-warn' });
@@ -540,7 +553,7 @@
   // Headline lines, marked so the summary can leave them out.
   const HEADLINES = new WeakSet();
 
-  function analyzeCircuit(components, wires) {
+  function analyzeCircuit(components, wires, step) {
     const blank = { lines: [], nodeVoltages: {}, currents: [], shorted: false, voltageAt: () => null, parts: {} };
     const done  = (r, extra) => Object.assign({ r: Object.assign({}, blank, r) }, extra || {});
 
@@ -572,6 +585,22 @@
     if (els.some(e => e.el.kind === 'V' && e.nodes[0] === e.nodes[1])) {
       lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
       return done({ status: 'ok', lines: withHeads(null), shorted: true });
+    }
+
+    // A time step: each C gets its companion (e.cap) and a state key.
+    const timed = !!(step && step.dt > 0);
+    const caps  = [];
+    if (timed) {
+      graph.forEach((g, i) => {
+        if (!g.part) return;
+        g.part.els.forEach((e, k) => {
+          if (e.el.kind !== 'C') return;
+          const key  = bareResult(graph, i).label + '.' + (e.el.id !== undefined ? e.el.id : k);
+          const prev = step.state && Number.isFinite(step.state[key]) ? step.state[key] : 0;
+          e.cap = { G: e.el.farads / step.dt, vPrev: prev };
+          caps.push({ e, key });
+        });
+      });
     }
 
     // Sources straight across each other: one stamped, or a fight.
@@ -639,6 +668,9 @@
     const parts = {};
     graph.forEach((g, i) => { if (results[i] && g.comp.label != null) parts[g.comp.label] = results[i]; });
     const extra = { graph, results, live };
+    const after = {};
+    caps.forEach(({ e, key }) => { after[key] = sol.v(e.nodes[0]) - sol.v(e.nodes[1]); });
+    const timedState = timed ? { state: after } : {};
 
     // A source shorted through a part's mode block: that part's warnings
     // say why, the first as the error and the rest as advice.
@@ -648,7 +680,7 @@
       const said = k >= 0 ? results[k].warnings : [];
       if (said.length) said.forEach((t, j) => lines.push({ text: '  ' + t, cls: j === 0 ? 'sim-err' : 'sim-info' }));
       else lines.push({ text: '  ⚠ Short circuit — no resistance in path!', cls: 'sim-err' });
-      return done({ status: 'ok', lines: withHeads(results), nodeVoltages, currents, shorted: true, voltageAt, parts }, extra);
+      return done(Object.assign({ status: 'ok', lines: withHeads(results), nodeVoltages, currents, shorted: true, voltageAt, parts }, timedState), extra);
     }
 
     parallel.info.forEach(text => lines.push({ text, cls: 'sim-info' }));
@@ -683,7 +715,7 @@
       lines.push({ text: '  No output components in circuit path.', cls: 'sim-info' });
     }
 
-    return done({ status: 'ok', lines: withHeads(results), nodeVoltages, currents, shorted: false, voltageAt, parts }, extra);
+    return done(Object.assign({ status: 'ok', lines: withHeads(results), nodeVoltages, currents, shorted: false, voltageAt, parts }, timedState), extra);
   }
 
   // ── Pure: simulationSummary ──────────────────────────────────

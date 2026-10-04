@@ -13,7 +13,8 @@
 //  ai: false: the AI is never sent a tool or a prompt line for it.
 //
 //  The definition half is pure: no THREE, no page. The view half
-//  (view.build) runs only in the browser; #97 draws the real meter.
+//  (view.build) runs only in the browser; tools/meter-display.js (#97)
+//  is its screen.
 //
 //  LOADING
 //  ───────
@@ -106,23 +107,41 @@
     return { reading: m.voltage / TEST_AMPS, unit: 'Ω' };
   }
 
-  // ── The model: a placeholder body with a red and a black probe socket ──
-  //  #97 builds the real meter (dial and display).
-  function build(ctx) {
+  // ── The model: a yellow meter lying flat beside the board ──
+  //  A dark LCD at the back, a dial whose pointer shows the mode, and the
+  //  red and black probe sockets at the front. The probes are the wires
+  //  drawn from those sockets (MM1.red / MM1.black).
+  const DIAL = { V: -0.6, A: 0, 'Ω': 0.6 };   // pointer angle per mode, radians
+
+  function build(ctx, values) {
     const THREE = ctx.THREE;
     const group = new THREE.Group();
-    const W = 1.6, H = 0.5, D = 2.4;
-    const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), ctx.mat.label(0xf2b400));
-    body.position.y = H / 2;
+    const W = 2.2, H = 0.45, D = 3.2;
+    const add = (geo, hex, x, y, z) => {
+      const m = new THREE.Mesh(geo, ctx.mat.label(hex));
+      m.position.set(x, y, z);
+      group.add(m);
+      return m;
+    };
+
+    const body = add(new THREE.BoxGeometry(W, H, D), 0xf2b400, 0, H / 2, 0);
     body.castShadow = true;
-    group.add(body);
-    const sockets = [[-0.35, 0xdd2222], [0.35, 0x111111]];   // red, black
-    for (const [x, hex] of sockets) {
-      const s = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.2, 14), ctx.mat.label(hex));
-      s.position.set(x, H + 0.1, D * 0.3);
-      group.add(s);
-    }
-    return { group, pinPositions: sockets.map(([x]) => new THREE.Vector3(x, H + 0.2, D * 0.3)) };
+    add(new THREE.BoxGeometry(W - 0.2, 0.04, D - 0.2), 0x2b2b2b, 0, H + 0.02, 0);      // face plate
+    add(new THREE.BoxGeometry(1.6, 0.05, 0.8), 0x3d4a3c, 0, H + 0.05, -0.95);           // LCD
+
+    const dial = new THREE.Group();
+    dial.position.set(0, H + 0.04, 0.15);
+    const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.18, 24), ctx.mat.label(0x111111));
+    knob.position.y = 0.09;
+    const pointer = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.42), ctx.mat.label(0xffffff));
+    pointer.position.set(0, 0.2, -0.22);
+    dial.add(knob, pointer);
+    dial.rotation.y = -(DIAL[values && values.mode] || 0);
+    group.add(dial);
+
+    const sockets = [[-0.45, 0xdd2222], [0.45, 0x111111]];   // red, black
+    for (const [x, hex] of sockets) add(new THREE.CylinderGeometry(0.13, 0.13, 0.16, 14), hex, x, H + 0.08, 1.1);
+    return { group, pinPositions: sockets.map(([x]) => new THREE.Vector3(x, H + 0.18, 1.1)) };
   }
 
   const def = {

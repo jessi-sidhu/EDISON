@@ -100,3 +100,40 @@
 #thevenin-card[hidden] { display: none; }
 #thevenin-card .th-title { font-weight: 600; }
 #thevenin-card .th-why   { color: #b45309; white-space: normal; max-width: 280px; }
+
+/* meter display (#97): the multimeter's screen, built by js/tools/meter-display.js */
+#meter-display {
+  position: absolute;
+  bottom: 44px;            /* above #hole-label, bottom left */
+  left: 14px;
+  min-width: 150px;
+  max-width: 240px;
+  padding: 8px 12px;
+  background: #f2b400;
+  border: 1px solid #c99500;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.13);
+  font-size: 11px;
+  pointer-events: none;
+}
+#meter-display[hidden] { display: none; }
+#meter-mode {
+  font-weight: 700;
+  color: #1a1a1a;
+}
+#meter-reading {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: #9fb59a;
+  border-radius: 4px;
+  font: 700 22px/1.2 'Courier New', monospace;
+  color: #1a1a1a;
+  text-align: right;
+}
+#meter-reading.meter-fuse { color: #dc2626; }
+#meter-note:empty { display: none; }
+#meter-note {
+  margin-top: 4px;
+  color: #1a1a1a;
+  line-height: 1.4;
+}

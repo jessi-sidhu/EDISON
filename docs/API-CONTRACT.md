@@ -256,7 +256,7 @@ The example is `Plugged/circuit3d/js/parts/seven_segment.js` (#43), the first pa
   - an unknown field
   - a default outside its range
   - a duplicate prefix
-  - `C`/`L` elements
+  - `L` elements
   - a guide over 400 chars
   - a pin count that doesn't match the footprint
 - **Mock:** none. The registry is the first thing built (issue A).
